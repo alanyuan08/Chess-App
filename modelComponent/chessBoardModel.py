@@ -5,6 +5,9 @@ from modelComponent.moveCommand import MoveCommand
 # Enum 
 from appEnums import PieceType, Player, MoveCommandType
 
+# Used to check King Safety s
+import copy
+
 # Controller 
 class ChessBoardModel():
 	def __init__(self):
@@ -26,24 +29,39 @@ class ChessBoardModel():
 		self.whiteKingSideRookMoved = False
 		self.whiteQueenSideRookMoved = False 
 
-	# Moves the piece to the target Location
-	# Returns cmd if Movable
-	def movePiece(self, initRow: int, initCol: int, targetRow: int, targetCol: int, player: Player):
-
+	# Validate the command and check if it satisfys king safety 
+	def validateAndReturnCommand(self, initRow: int, initCol: int, targetRow: int, targetCol: int, player: Player):
 		# It's not your turn to move
 		if player != self.playerTurn:
 			return None
 
-		print(initRow, initCol)
+		# Validate the Move Command is a Possible Move
 		moveCommand = None
 		possibleMoves = self._possibleMoves(initRow, initCol, player)
 		for cmd in possibleMoves:
-			print(cmd)
 			if cmd.endRow == targetRow and cmd.endCol == targetCol:
 				moveCommand = cmd
 
 		if moveCommand == None:
 			return None
+
+		# Validate King Safety
+		testBoard = copy.deepcopy(self)
+		testBoard.movePiece(moveCommand)
+
+		opponent = ChessBoardModel.returnOpponent(player)
+		opponentAttackTargets = testBoard._totalAttackTargets(opponent)
+
+		for row in range(0, 8):
+			for col in range(0, 8):
+				if testBoard.board[row][col] != None and testBoard.board[row][col].type == PieceType.KING:
+					if (row, col) in opponentAttackTargets:
+						return None
+
+		return moveCommand
+
+	# Moves the Piece if its valid
+	def movePiece(self, moveCommand: MoveCommand):
 
 		# Set enPassant to Null - Reset this if the opponent does a double pawn move
 		self.enPassantColumn = None
@@ -134,7 +152,7 @@ class ChessBoardModel():
 		# Swap the Player Turn
 		self.playerTurn = ChessBoardModel.returnOpponent(self.playerTurn)
 
-		return cmd
+		return
 
 	# Return a list of move commands for a player
 	def listPossibleMovesForPlayer(self, player: Player):
@@ -386,7 +404,7 @@ class ChessBoardModel():
 					return returnMoves
 
 	# This returns all attack targets for a player
-	def totalAttackTargets(self, player: Player):
+	def _totalAttackTargets(self, player: Player):
 		attackSquare = {}
 		for row in range(0, 8):
 			for col in range(0, 8):
