@@ -3,7 +3,7 @@ from modelComponent.chessPieceModel import ChessPieceModel
 from modelComponent.moveCommand import MoveCommand
 
 # Enum 
-from appEnums import PieceType, Player
+from appEnums import PieceType, Player, MoveCommandType
 
 # Controller 
 class ChessBoardModel():
@@ -24,7 +24,7 @@ class ChessBoardModel():
 
 		self.whiteKingMoved = False
 		self.whiteKingSideRookMoved = False
-		self.whiteQueenSideRookMoved = False
+		self.whiteQueenSideRookMoved = False 
 
 	# Moves the piece based on chess anotation command - This assumes the move is valid
 	def movePiece(self, moveCommand: MoveCommand):

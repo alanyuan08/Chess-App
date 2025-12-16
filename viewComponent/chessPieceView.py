@@ -31,8 +31,11 @@ class ChessPieceView(QGraphicsPixmapItem):
 		self.setPos(xCoordinate, yCoordinate)
 
 		# Signal proxy
+		self.communicatorProxy = None
+
+	def updateCommunicateProxy(self, controller: ChessBoardController):
 		self.communicatorProxy = CommunicatorProxy()
-		# self.communicatorProxy.move_request.connect(controller.on_move_executed)
+		self.communicatorProxy.move_request.connect(controller.on_move_executed)
 
 	@staticmethod
 	def returnImageURL(player, type):

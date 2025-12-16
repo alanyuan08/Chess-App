@@ -24,5 +24,12 @@ if __name__ == '__main__':
 	# Create View Components
 	chessBoardView = ChessBoardView(scene, chessBoardModel)
 
+	# Create ChessBoard Controller
+	chessBoardController = ChessBoardController();
+
+	# Add Chess Board to Controller
+	chessBoardController.addChessBoard(chessBoardView, chessBoardModel)
+	chessBoardView.updateController(chessBoardController)
+
 	view.show()
 	app.exec()

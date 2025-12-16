@@ -34,17 +34,21 @@ class ChessBoardView(QGraphicsPixmapItem):
 				if pieceModel != None:
 					ChessPieceView(row, col, pieceModel, self)
 
-	def deletePieceAtLocation(self, row, col):
+	def updateController(self, controller: ChessBoardController):
+		for item in self.childItems():
+			item.updateCommunicateProxy(controller)
+
+	def deletePieceAtLocation(self, row: int, col: int):
 		for item in self.childItems():
 			if item.row == row and item.col == col:
 				self.scene.removeItem(item)
 
-	def promotePiece(self, row, col):
+	def promotePiece(self, row: int, col: int):
 		for item in self.childItems():
 			if item.row == row and item.col == col:
 				item.setPixmap(QPixmap(ChessPieceView.returnImageURL(item.player, PieceType.QUEEN)))
 
-	def movePieceToLocation(self, startRow, startCol, endRow, endCol):
+	def movePieceToLocation(self, startRow: int, startCol: int, endRow: int, endCol: int):
 		for item in self.childItems():
 			if item.row == startRow and item.col == startCol:
 				item.row = endRow
