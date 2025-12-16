@@ -39,6 +39,7 @@ class ChessBoardModel():
 		moveCommand = None
 		possibleMoves = self._possibleMoves(initRow, initCol, player)
 		for cmd in possibleMoves:
+			print(cmd)
 			if cmd.endRow == targetRow and cmd.endCol == targetCol:
 				moveCommand = cmd
 
