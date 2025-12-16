@@ -13,15 +13,17 @@ from modelComponent.chessPieceModel import ChessPieceModel
 # Import Controller
 from controllerComponent.chessController import ChessBoardController
 
-class ChessPieceView(QGraphicsPixmapItem):
-	def __init__(self, player, type, row, col, parentChessBoard, controller):
-		pixmap = QPixmap(ChessPieceView.returnImageURL(player, type))
-		super().__init__(pixmap, parentChessBoard)
-		self.setFlag(QGraphicsItem.ItemIsMovable)
 
+class ChessPieceView(QGraphicsPixmapItem):
+	def __init__(self, row, col, chessPieceModel: ChessPieceModel, parent):
 		self.row = row
 		self.col = col
-		self.player = player
+		self.player = chessPieceModel.player
+
+		pixmap = QPixmap(ChessPieceView.returnImageURL(self.player, chessPieceModel.type))
+		super().__init__(pixmap, parent)
+		self.setFlag(QGraphicsItem.ItemIsMovable)
+
 
 		# Set the row / col positions 
 		xCoordinate = self.col * 90
@@ -30,7 +32,7 @@ class ChessPieceView(QGraphicsPixmapItem):
 
 		# Signal proxy
 		self.communicatorProxy = CommunicatorProxy()
-		self.communicatorProxy.move_request.connect(controller.on_move_executed)
+		# self.communicatorProxy.move_request.connect(controller.on_move_executed)
 
 	@staticmethod
 	def returnImageURL(player, type):

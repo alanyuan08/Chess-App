@@ -9,19 +9,30 @@ from communicatorProxy import MoveCommand, CommunicatorProxy
 
 # Import Model
 from modelComponent.chessPieceModel import ChessPieceModel
+from modelComponent.chessBoardModel import ChessBoardModel
+
+# Import View
+from viewComponent.chessPieceView import ChessPieceView
 
 # Import Controller
 from controllerComponent.chessController import ChessBoardController
 
 # QGraphics for ChessBoard
 class ChessBoardView(QGraphicsPixmapItem):
-	def __init__(self, scene):
+	def __init__(self, scene: QGraphicsScene, chessBoard: ChessBoardModel):
 		pixmap = QPixmap("img/chessBackground.jpg")
 		super().__init__(pixmap.scaled(720, 720), None)
 
 		pixmapItem = scene.addItem(self)
 		self.setPos(0, 0)
 		self.scene = scene
+
+		# Create Chess Piece Views
+		for row in range(0, 8):
+			for col in range(0, 8):
+				pieceModel = chessBoard.board[row][col]
+				if pieceModel != None:
+					ChessPieceView(row, col, pieceModel, self)
 
 	def deletePieceAtLocation(self, row, col):
 		for item in self.childItems():

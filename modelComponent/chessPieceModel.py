@@ -6,25 +6,29 @@ class ChessPieceModel:
 		self.type = type
 
 	@staticmethod
-	def returnChessPieceProperties():
-		returnPlacements = []
-
-		for player in [[7, Player.BLACK], [0, Player.WHITE]]:
-			placement = [PieceType.ROOK, PieceType.KNIGHT, PieceType.BISHOP, PieceType.QUEEN, \
+	def createInitChessBoard():
+		heavyMaterialLine = [PieceType.ROOK, PieceType.KNIGHT, PieceType.BISHOP, PieceType.QUEEN, \
 				PieceType.KING, PieceType.BISHOP, PieceType.KNIGHT, PieceType.ROOK]
 
-			for i in range(0, 8):
-				item = [player[0], i, player[1], placement[i]]
-				returnPlacements.append(item)
+		board = [[None for _ in range(8)] for _ in range(8)]
+		
+		# Poplute Black Pieces
+		for col in range(0, 8):
+			board[7][col] = ChessPieceModel(Player.BLACK, heavyMaterialLine[col])
 
-		for player in [[6, Player.BLACK], [1, Player.WHITE]]:
+		# Poplute Black Pawns
+		for col in range(0, 8):
+			board[6][col] = ChessPieceModel(Player.BLACK, PieceType.PAWN)
 
-			for i in range(0, 8):
-				item = [player[0], i, player[1], PieceType.PAWN]
-				returnPlacements.append(item)
+		# Poplute White Pawns
+		for col in range(0, 8):
+			board[1][col] = ChessPieceModel(Player.WHITE, PieceType.PAWN)
 
-		return returnPlacements
+		# Poplute White Pieces
+		for col in range(0, 8):
+			board[0][col] = ChessPieceModel(Player.WHITE, heavyMaterialLine[col])
 
+		return board
 
 	def pieceValue(self):
 		match self.type:

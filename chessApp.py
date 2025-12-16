@@ -5,10 +5,9 @@ import sys
 from controllerComponent.chessController import ChessBoardController
 
 # Import Model
-from modelComponent.chessPieceModel import ChessPieceModel
+from modelComponent.chessBoardModel import ChessBoardModel
 
 # Import View
-from viewComponent.chessPieceView import ChessPieceView
 from viewComponent.chessBoardView import ChessBoardView
 
 if __name__ == '__main__':
@@ -19,18 +18,11 @@ if __name__ == '__main__':
 	view = QGraphicsView(scene)
 	view.setFixedSize(720, 720)
 
-	# Create Model Componens
+	# Create ChessBoard/ Chess Piece Model Components
+	chessBoardModel = ChessBoardModel()
 
 	# Create View Components
-	chessBoard = ChessBoardView(scene)
-
-	for property in ChessPieceModel.returnChessPieceProperties():
-		row = property[0]
-		col = property[1]
-		player = property[2]
-		type = property[3]
-
-		ChessPieceView(player, type, row, col, chessBoard, controller)
+	chessBoardView = ChessBoardView(scene, chessBoardModel)
 
 	view.show()
 	app.exec()

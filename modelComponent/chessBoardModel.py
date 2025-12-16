@@ -9,17 +9,9 @@ from appEnums import PieceType, Player
 class ChessBoardModel():
 	def __init__(self):
 		# Create the Chess Board
-		self.board = [[None for _ in range(8)] for _ in range(8)]
+		self.board = ChessPieceModel.createInitChessBoard()
 
-		# Create Chess Pieces
-		for property in ChessPieceModel.returnChessPieceProperties():
-			row = property[0]
-			col = property[1]
-			player = property[2]
-			type = property[3]
-
-			self.board[row][col] = ChessPieceModel(player, type)
-
+		# Init Player as White
 		self.playerTurn = Player.WHITE
 
 		# Used to check En passant
@@ -127,10 +119,7 @@ class ChessBoardModel():
 				self.board[moveCommand.startRow][moveCommand.endCol] = None
 
 		# Swap the Player Turn
-		if self.playerTurn == Player.WHITE:
-			self.playerTurn = Player.BLACK
-		else:
-			self.playerTurn = Player.WHITE
+		self.playerTurn = ChessBoardModel.returnOpponent(self.playerTurn)
 
 		return
 
@@ -145,7 +134,8 @@ class ChessBoardModel():
 
 		return
 
-	def returnOpponent(self, player: Player):
+	@staticmethod
+	def returnOpponent(player: Player):
 		if player == Player.WHITE:
 			return Player.BLACK
 		else:
@@ -159,7 +149,7 @@ class ChessBoardModel():
 			match self.board[row][col].type:
 				case PieceType.KING:
 					returnMoves = []
-					opponent = self.returnOpponent(self.board[row][col].player)
+					opponent = ChessBoardModel.returnOpponent(self.board[row][col].player)
 					opponentAttackTargets = self.totalAttackTargets(opponent)
 					
 					for possibleMoves in [(-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1)]:

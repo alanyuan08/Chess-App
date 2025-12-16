@@ -1,6 +1,8 @@
 from PySide6.QtCore import Signal, QObject
 from appEnums import Player
-from modelComponent import MoveCommand
+
+# Models
+from modelComponent.moveCommand import MoveCommand
 		
 class CommunicatorProxy(QObject):
 	# Item -> Controller
