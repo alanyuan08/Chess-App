@@ -10,8 +10,8 @@ from communicatorProxy import MoveCommand, CommunicatorProxy
 # Import Model
 from modelComponent.chessPieceModel import ChessPieceModel
 
-# Import Controller
-from controllerComponent.chessController import ChessBoardController
+# Import ViewModel
+from viewModelComponent.chessBoardViewModel import ChessBoardViewModel
 
 
 class ChessPieceView(QGraphicsPixmapItem):
@@ -33,9 +33,9 @@ class ChessPieceView(QGraphicsPixmapItem):
 		# Signal proxy
 		self.communicatorProxy = None
 
-	def updateCommunicateProxy(self, controller: ChessBoardController):
+	def connectViewModel(self, viewModel: ChessBoardViewModel):
 		self.communicatorProxy = CommunicatorProxy()
-		self.communicatorProxy.move_request.connect(controller.on_move_executed)
+		self.communicatorProxy.move_request.connect(viewModel.on_move_executed)
 
 	@staticmethod
 	def returnImageURL(player, type):

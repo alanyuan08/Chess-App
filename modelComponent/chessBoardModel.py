@@ -27,7 +27,7 @@ class ChessBoardModel():
 		self.whiteQueenSideRookMoved = False 
 
 	# Moves the piece to the target Location
-	# Returns True if Movable
+	# Returns cmd if Movable
 	def movePiece(self, initRow: int, initCol: int, targetRow: int, targetCol: int, player: Player):
 
 		# It's not your turn to move

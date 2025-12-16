@@ -14,8 +14,8 @@ from modelComponent.chessBoardModel import ChessBoardModel
 # Import View
 from viewComponent.chessPieceView import ChessPieceView
 
-# Import Controller
-from controllerComponent.chessController import ChessBoardController
+# Import ViewModel
+from viewModelComponent.chessBoardViewModel import ChessBoardViewModel
 
 # QGraphics for ChessBoard
 class ChessBoardView(QGraphicsPixmapItem):
@@ -34,9 +34,9 @@ class ChessBoardView(QGraphicsPixmapItem):
 				if pieceModel != None:
 					ChessPieceView(row, col, pieceModel, self)
 
-	def updateController(self, controller: ChessBoardController):
+	def connectViewModel(self, chessBoardViewModel: ChessBoardViewModel):
 		for item in self.childItems():
-			item.updateCommunicateProxy(controller)
+			item.connectViewModel(chessBoardViewModel)
 
 	def deletePieceAtLocation(self, row: int, col: int):
 		for item in self.childItems():

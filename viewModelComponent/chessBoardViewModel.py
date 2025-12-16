@@ -5,17 +5,14 @@ from communicatorProxy import CommunicatorProxy
 from modelComponent.moveCommand import MoveCommand
 
 # Controller 
-class ChessBoardController():
-	def __init__(self):
+class ChessBoardViewModel():
+	def __init__(self, chessBoardView, chessBoardModel):
 		self.communicatorProxy = CommunicatorProxy()
 
 		# Backend ChessBoard Model
-		self.chessBoardModel = None
-
-	def addChessBoard(self, chessBoardView, chessBoardModel):
 		self.chessBoardModel = chessBoardModel
-
 		self.communicatorProxy.update_request.connect(chessBoardView.updatePosition)
+		chessBoardView.connectViewModel(self)
 
 	def on_move_executed(self, initRow: int, initCol: int, targetRow: int, 
 			targetCol: int, player: Player):

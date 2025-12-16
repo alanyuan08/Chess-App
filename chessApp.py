@@ -1,14 +1,14 @@
 from PySide6.QtWidgets import QGraphicsScene, QGraphicsView, QApplication
 import sys
 
-# Import Enums
-from controllerComponent.chessController import ChessBoardController
-
 # Import Model
 from modelComponent.chessBoardModel import ChessBoardModel
 
 # Import View
 from viewComponent.chessBoardView import ChessBoardView
+
+# Import ViewModel
+from viewModelComponent.chessBoardViewModel import ChessBoardViewModel
 
 if __name__ == '__main__':
 	app = QApplication(sys.argv)
@@ -24,12 +24,8 @@ if __name__ == '__main__':
 	# Create View Components
 	chessBoardView = ChessBoardView(scene, chessBoardModel)
 
-	# Create ChessBoard Controller
-	chessBoardController = ChessBoardController();
-
-	# Add Chess Board to Controller
-	chessBoardController.addChessBoard(chessBoardView, chessBoardModel)
-	chessBoardView.updateController(chessBoardController)
+	# Create ChessBoard ViewMoidel
+	chessBoardController = ChessBoardViewModel(chessBoardView, chessBoardModel);
 
 	view.show()
 	app.exec()
