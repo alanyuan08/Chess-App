@@ -26,14 +26,25 @@ class ChessBoardModel():
 		self.whiteKingSideRookMoved = False
 		self.whiteQueenSideRookMoved = False 
 
-	# Moves the piece based on chess anotation command - This assumes the move is valid
-	def movePiece(self, moveCommand: MoveCommand):
-		# Set enPassant to Null - Reset this if the opponent does a double pawn move
-		self.enPassantColumn = None
+	# Moves the piece to the target Location
+	# Returns True if Movable
+	def movePiece(self, initRow: int, initCol: int, targetRow: int, targetCol: int, player: Player):
 
 		# It's not your turn to move
-		if moveCommand.player != self.playerTurn:
-			return
+		if player != self.playerTurn:
+			return None
+
+		moveCommand = None
+		possibleMoves = self._possibleMoves(initRow, initCol, player)
+		for cmd in possibleMoves:
+			if cmd.endRow == targetRow and cmd.endCol == targetCol:
+				moveCommand = cmd
+
+		if moveCommand == None:
+			return None
+
+		# Set enPassant to Null - Reset this if the opponent does a double pawn move
+		self.enPassantColumn = None
 
 		match moveCommand.moveType:
 			# Queen Side Castle
@@ -121,7 +132,7 @@ class ChessBoardModel():
 		# Swap the Player Turn
 		self.playerTurn = ChessBoardModel.returnOpponent(self.playerTurn)
 
-		return
+		return cmd
 
 	# Return a list of move commands for a player
 	def listPossibleMovesForPlayer(self, player: Player):
@@ -150,7 +161,7 @@ class ChessBoardModel():
 				case PieceType.KING:
 					returnMoves = []
 					opponent = ChessBoardModel.returnOpponent(self.board[row][col].player)
-					opponentAttackTargets = self.totalAttackTargets(opponent)
+					opponentAttackTargets = self._totalAttackTargets(opponent)
 					
 					for possibleMoves in [(-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1)]:
 						newRow = row + possibleMoves[0]
