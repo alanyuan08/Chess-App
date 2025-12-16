@@ -39,7 +39,6 @@ class ChessBoardModel():
 		moveCommand = None
 		possibleMoves = self._possibleMoves(initRow, initCol, player)
 		for cmd in possibleMoves:
-			print(cmd)
 			if cmd.endRow == targetRow and cmd.endCol == targetCol:
 				moveCommand = cmd
 
@@ -57,8 +56,10 @@ class ChessBoardModel():
 			for col in range(0, 8):
 				if testBoard.board[row][col] != None and testBoard.board[row][col].type == PieceType.KING:
 					if (row, col) in opponentAttackTargets:
+						del testBoard
 						return None
 
+		del testBoard
 		return moveCommand
 
 	# Moves the Piece if its valid
@@ -316,11 +317,11 @@ class ChessBoardModel():
 						if row == 1:
 							# Promote
 							if col > 0:
-								if self.board[0][col] != None and self.board[0][col].player != player:
+								if self.board[0][col-1] != None and self.board[0][col-1].player != player:
 									returnMoves.append(MoveCommand(1, col, 0, col-1, MoveCommandType.PROMOTE, player))
 
 							if col < 7:
-								if self.board[0][col] != None and self.board[0][col].player != player:
+								if self.board[0][col+1] != None and self.board[0][col+1].player != player:
 									returnMoves.append(MoveCommand(1, col, 0, col+1, MoveCommandType.PROMOTE, player))
 
 							if self.board[0][col] == None:
@@ -350,11 +351,11 @@ class ChessBoardModel():
 						if row == 6:
 							# Promote
 							if col > 0:
-								if self.board[7][col] != None and self.board[7][col].player != player:
+								if self.board[7][col-1] != None and self.board[7][col-1].player != player:
 									returnMoves.append(MoveCommand(6, col, 7, col-1, MoveCommandType.PROMOTE, player))
 
 							if col < 7:
-								if self.board[7][col] != None and self.board[7][col].player != player:
+								if self.board[7][col+1] != None and self.board[7][col+1].player != player:
 									returnMoves.append(MoveCommand(6, col, 7, col+1, MoveCommandType.PROMOTE, player))
 
 							if self.board[7][col] == None:
