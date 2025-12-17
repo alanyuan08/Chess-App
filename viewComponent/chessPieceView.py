@@ -15,7 +15,7 @@ from viewModelComponent.chessBoardViewModel import ChessBoardViewModel
 
 
 class ChessPieceView(QGraphicsPixmapItem):
-	def __init__(self, row, col, chessPieceModel: ChessPieceModel, parent):
+	def __init__(self, row, col, chessPieceModel: ChessPieceModel, humanPlayer: bool, parent):
 		self.row = row
 		self.col = col
 		self.player = chessPieceModel.player
@@ -23,7 +23,8 @@ class ChessPieceView(QGraphicsPixmapItem):
 		pixmap = QPixmap(ChessPieceView.returnImageURL(self.player, chessPieceModel.type))
 		super().__init__(pixmap, parent)
 
-		if self.player == Player.WHITE:
+		# Set to movable if human player
+		if humanPlayer:
 			self.setFlag(QGraphicsItem.ItemIsMovable)
 
 		# Set the row / col positions 

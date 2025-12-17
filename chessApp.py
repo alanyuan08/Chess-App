@@ -1,6 +1,9 @@
 from PySide6.QtWidgets import QGraphicsScene, QGraphicsView, QApplication
 import sys
 
+# Import Enums
+from appEnums import Player
+
 # Import Model
 from modelComponent.chessBoardModel import ChessBoardModel
 
@@ -19,7 +22,7 @@ if __name__ == '__main__':
 	view.setFixedSize(720, 720)
 
 	# Create ChessBoard/ Chess Piece Model Components
-	chessBoardModel = ChessBoardModel()
+	chessBoardModel = ChessBoardModel([Player.WHITE])
 
 	# Create View Components
 	chessBoardView = ChessBoardView(scene, chessBoardModel)

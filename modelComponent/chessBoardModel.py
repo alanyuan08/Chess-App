@@ -10,12 +10,15 @@ import copy
 
 # Controller 
 class ChessBoardModel():
-	def __init__(self):
+	def __init__(self, humanPlayers: list[Player]):
 		# Create the Chess Board
 		self.board = ChessPieceModel.createInitChessBoard()
 
 		# Init Player as White
 		self.playerTurn = Player.WHITE
+
+		# Set Human Player
+		self.humanPlayer = humanPlayers
 
 		# Used to check En passant
 		self.enPassantColumn = None

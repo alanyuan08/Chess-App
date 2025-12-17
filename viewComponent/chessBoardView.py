@@ -32,7 +32,10 @@ class ChessBoardView(QGraphicsPixmapItem):
 			for col in range(0, 8):
 				pieceModel = chessBoard.board[row][col]
 				if pieceModel != None:
-					ChessPieceView(row, col, pieceModel, self)
+					humanPlayer = False
+					if pieceModel.player in chessBoard.humanPlayer:
+						humanPlayer = True
+					ChessPieceView(row, col, pieceModel, humanPlayer, self)
 
 	def connectViewModel(self, chessBoardViewModel: ChessBoardViewModel):
 		for item in self.childItems():
