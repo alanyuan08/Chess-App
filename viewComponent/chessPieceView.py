@@ -22,7 +22,9 @@ class ChessPieceView(QGraphicsPixmapItem):
 
 		pixmap = QPixmap(ChessPieceView.returnImageURL(self.player, chessPieceModel.type))
 		super().__init__(pixmap, parent)
-		self.setFlag(QGraphicsItem.ItemIsMovable)
+
+		if self.player == Player.WHITE:
+			self.setFlag(QGraphicsItem.ItemIsMovable)
 
 		# Set the row / col positions 
 		xCoordinate = self.col * 90
