@@ -162,6 +162,30 @@ class ChessBoardModel():
 
 		return
 
+	# Opponent Takes Local Min Move
+	def takeBestMove(self, player: Player):
+		returnCommand = None
+		cmdBoardValue = (-1) * 10**10
+
+		for cmd in self._listPossibleMovesForPlayer(player):
+			testBoard = copy.deepcopy(self)
+			testBoard.movePiece(cmd)
+
+			computedPair = testBoard.computeBoardValue()
+
+			diffValue = 0
+			if Player == Player.WHITE:
+				diffValue = computedPair[1] - computedPair[0]
+			else:
+				diffValue = computedPair[0] - computedPair[1]
+
+			if diffValue > cmdBoardValue:
+				cmdBoardValue = diffValue
+				returnCommand = cmd
+
+		self.movePiece(returnCommand)
+		return
+
 	# Compute Best Move for Player
 	def computeBestValue(self, player: Player):
 		returnCommand = None
@@ -171,18 +195,19 @@ class ChessBoardModel():
 			testBoard = copy.deepcopy(self)
 			testBoard.movePiece(cmd)
 
-			if self.kingSafety(cmd, player):
-				computedPair = testBoard.computeBoardValue()
+			opponentPlayer = ChessBoardModel.returnOpponent(player)
+			testBoard.takeBestMove(opponentPlayer)
+			computedPair = testBoard.computeBoardValue()
 
-				diffValue = 0
-				if Player == Player.WHITE:
-					diffValue = computedPair[1] - computedPair[0]
-				else:
-					diffValue = computedPair[0] - computedPair[1]
+			diffValue = 0
+			if Player == Player.WHITE:
+				diffValue = computedPair[1] - computedPair[0]
+			else:
+				diffValue = computedPair[0] - computedPair[1]
 
-				if diffValue > cmdBoardValue:
-					cmdBoardValue = diffValue
-					returnCommand = cmd
+			if diffValue > cmdBoardValue:
+				cmdBoardValue = diffValue
+				returnCommand = cmd
 
 		return returnCommand
 
@@ -210,7 +235,7 @@ class ChessBoardModel():
 	def _computeAttackDefendValue(self, player: Player):
 		totalValue = 0
 
-		# Capture Value
+		# Move Value
 		for cmd in self._listPossibleMovesForPlayer(Player):
 			match cmd.moveType:
 				# Queen Side Castle
@@ -218,20 +243,30 @@ class ChessBoardModel():
 					totalValue += 10
 				case MoveCommandType.KINGSIDECASTLE:
 					totalValue += 10
+				case MoveCommandType.ENPASSANT:
+					totalValue += 50
+				case MoveCommandType.CAPTURE:
+					initPieceValue = self.board[cmd.startRow][cmd.startCol].pieceValue()
+					targetValue = self.board[cmd.endRow][cmd.endCol].pieceValue()
+					if targetValue <= initPieceValue:
+						totalvalue += targetValue * 0.2
+					else:
+						totalvalue += targetValue * 0.3
+				case MoveCommandType.PROMOTE:
+					totalValue += 100
+
+		# Capture Value
+		opponentPlayer = ChessBoardModel.returnOpponent(player)
+		for cmd in self._listPossibleMovesForPlayer(opponentPlayer):
+			match cmd.moveType:
 				case MoveCommandType.CAPTURE:
 					initPieceValue = self.board[cmd.startRow][cmd.startCol].pieceValue()
 					targetValue = self.board[cmd.endRow][cmd.endCol].pieceValue()
 
-					if initPieceValue >= targetValue:
-						totalValue += (targetValue - initPieceValue) * 0.5
+					if initPieceValue <= targetValue:
+						totalValue -= targetValue
 					else:
-						totalValue += targetValue * 0.1
-
-				case MoveCommandType.ENPASSANT:
-					totalValue += 50
-
-				case MoveCommandType.PROMOTE:
-					totalValue += 100
+						totalValue -= targetValue * 0.5
 
 		return totalValue
 
@@ -243,7 +278,8 @@ class ChessBoardModel():
 			for col in range(0, 8):
 				if self.board[row][col] != None and self.board[row][col].player == player:
 					for command in self._possibleMoves(row, col, player):
-						totalMove.append(command)
+						if self.kingSafety(command, player):
+							totalMove.append(command)
 
 		return totalMove
 

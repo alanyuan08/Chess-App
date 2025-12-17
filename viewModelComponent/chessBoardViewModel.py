@@ -35,5 +35,3 @@ class ChessBoardViewModel():
 				self.chessBoardModel.movePiece(opponentCmd)
 				# Communicate the command to FrontEnd
 				self.communicatorProxy.signal_update_request(opponentCmd)
-			else:
-				print("YOU WIN")
