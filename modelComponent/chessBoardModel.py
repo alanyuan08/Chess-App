@@ -42,9 +42,17 @@ class ChessBoardModel():
 			if cmd.endRow == targetRow and cmd.endCol == targetCol:
 				moveCommand = cmd
 
+		# No Valid Moves
 		if moveCommand == None:
 			return None
+		# Validate King Safety
+		elif self.kingSafety(moveCommand, player):
+			return moveCommand
+		else:
+			return None
 
+	# Validate King Safety
+	def kingSafety(self, moveCommand: MoveCommand, player: Player):
 		# Validate King Safety
 		testBoard = copy.deepcopy(self)
 		testBoard.movePiece(moveCommand)
@@ -54,13 +62,11 @@ class ChessBoardModel():
 
 		for row in range(0, 8):
 			for col in range(0, 8):
-				if testBoard.board[row][col] != None and testBoard.board[row][col].type == PieceType.KING:
-					if (row, col) in opponentAttackTargets:
-						del testBoard
-						return None
+				if testBoard.board[row][col] != None and testBoard.board[row][col].player == player:
+					if testBoard.board[row][col].type == PieceType.KING and (row, col) in opponentAttackTargets:
+						return False
 
-		del testBoard
-		return moveCommand
+		return True
 
 	# Moves the Piece if its valid
 	def movePiece(self, moveCommand: MoveCommand):
@@ -156,16 +162,90 @@ class ChessBoardModel():
 
 		return
 
+	# Compute Best Move for Player
+	def computeBestValue(self, player: Player):
+		returnCommand = None
+		cmdBoardValue = (-1) * 10**10
+
+		for cmd in self._listPossibleMovesForPlayer(player):
+			testBoard = copy.deepcopy(self)
+			testBoard.movePiece(cmd)
+
+			if self.kingSafety(cmd, player):
+				computedPair = testBoard.computeBoardValue()
+
+				diffValue = 0
+				if Player == Player.WHITE:
+					diffValue = computedPair[1] - computedPair[0]
+				else:
+					diffValue = computedPair[0] - computedPair[1]
+
+				if diffValue > cmdBoardValue:
+					cmdBoardValue = diffValue
+					returnCommand = cmd
+
+		return returnCommand
+
+
+	# Compute Board Value -> [White, Black]
+	def computeBoardValue(self):
+		whiteValue = 0
+		blackValue = 0
+
+		# Compute Base Value
+		for row in range(0, 8):
+			for col in range(0, 8):
+				if self.board[row][col] != None:
+					if self.board[row][col].player == Player.WHITE:
+						whiteValue += self.board[row][col].pieceValue()
+					else:
+						blackValue += self.board[row][col].pieceValue()
+					
+		# Compute Based on Possible Value
+		blackValue += self._computeAttackDefendValue(Player.BLACK)
+		whiteValue += self._computeAttackDefendValue(Player.WHITE)
+
+		return [blackValue, whiteValue]
+
+	def _computeAttackDefendValue(self, player: Player):
+		totalValue = 0
+
+		# Capture Value
+		for cmd in self._listPossibleMovesForPlayer(Player):
+			match cmd.moveType:
+				# Queen Side Castle
+				case MoveCommandType.QUEENSIDECASTLE:
+					totalValue += 10
+				case MoveCommandType.KINGSIDECASTLE:
+					totalValue += 10
+				case MoveCommandType.CAPTURE:
+					initPieceValue = self.board[cmd.startRow][cmd.startCol].pieceValue()
+					targetValue = self.board[cmd.endRow][cmd.endCol].pieceValue()
+
+					if initPieceValue >= targetValue:
+						totalValue += (targetValue - initPieceValue) * 0.5
+					else:
+						totalValue += targetValue * 0.1
+
+				case MoveCommandType.ENPASSANT:
+					totalValue += 50
+
+				case MoveCommandType.PROMOTE:
+					totalValue += 100
+
+		return totalValue
+
 	# Return a list of move commands for a player
-	def listPossibleMovesForPlayer(self, player: Player):
+	def _listPossibleMovesForPlayer(self, player: Player):
+		totalMove = []
+
 		for row in range(0, 8):
 			for col in range(0, 8):
 				if self.board[row][col] != None and self.board[row][col].player == player:
-					possibleMoves = self._possibleMoves(row, col, player)
-					for moves in possibleMoves:
-						print(player, self.board[row][col].type, moves)
+					for command in self._possibleMoves(row, col, player):
+						totalMove.append(command)
 
-		return
+		return totalMove
 
 	@staticmethod
 	def returnOpponent(player: Player):

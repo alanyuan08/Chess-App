@@ -3,6 +3,7 @@ from communicatorProxy import CommunicatorProxy
 
 # Models
 from modelComponent.moveCommand import MoveCommand
+from modelComponent.chessBoardModel import ChessBoardModel
 
 # Controller 
 class ChessBoardViewModel():
@@ -25,3 +26,14 @@ class ChessBoardViewModel():
 			self.chessBoardModel.movePiece(moveCommand)
 			# Communicate the command to FrontEnd
 			self.communicatorProxy.signal_update_request(moveCommand)
+
+			# Opponent Takes Turn
+			opponentPlayer = ChessBoardModel.returnOpponent(player)
+			opponentCmd = self.chessBoardModel.computeBestValue(opponentPlayer)
+
+			if opponentCmd != None:
+				self.chessBoardModel.movePiece(opponentCmd)
+				# Communicate the command to FrontEnd
+				self.communicatorProxy.signal_update_request(opponentCmd)
+			else:
+				print("YOU WIN")
