@@ -24,7 +24,6 @@ class ChessPieceView(QGraphicsPixmapItem):
 		super().__init__(pixmap, parent)
 		self.setFlag(QGraphicsItem.ItemIsMovable)
 
-
 		# Set the row / col positions 
 		xCoordinate = self.col * 90
 		yCoordinate = (7 - self.row) * 90
