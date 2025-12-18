@@ -5,7 +5,7 @@ from modelComponent.moveCommand import MoveCommand
 # Enum 
 from appEnums import PieceType, Player, MoveCommandType
 
-# Used to check King Safety s
+# Used to test next move
 import copy
 
 # Controller 
@@ -32,27 +32,22 @@ class ChessBoardModel():
 		self.whiteKingSideRookMoved = False
 		self.whiteQueenSideRookMoved = False 
 
-	# Validate the command and check if it satisfys king safety 
-	def validateAndReturnCommand(self, initRow: int, initCol: int, targetRow: int, targetCol: int, player: Player):
+		self.whiteKingSquare = (0, 4)
+		self.blackKingSquare = (7, 4)
+
+	# Validate the Move
+	def validateMove(self, initRow: int, initCol: int, targetRow: int, targetCol: int, player: Player):
 		# It's not your turn to move
 		if player != self.playerTurn:
 			return None
 
 		# Validate the Move Command is a Possible Move
-		moveCommand = None
-		possibleMoves = self._possibleMoves(initRow, initCol, player)
+		possibleMoves = self.listPossibleMovesForPlayer(player)
 		for cmd in possibleMoves:
 			if cmd.endRow == targetRow and cmd.endCol == targetCol:
-				moveCommand = cmd
+				return cmd
 
-		# No Valid Moves
-		if moveCommand == None:
-			return None
-		# Validate King Safety
-		elif self.kingSafety(moveCommand, player):
-			return moveCommand
-		else:
-			return None
+		return None
 
 	# Validate King Safety
 	def kingSafety(self, moveCommand: MoveCommand, player: Player):
@@ -60,18 +55,19 @@ class ChessBoardModel():
 		testBoard = copy.deepcopy(self)
 		testBoard.movePiece(moveCommand)
 
-		opponent = ChessBoardModel.returnOpponent(player)
-		opponentAttackTargets = testBoard._totalAttackTargets(opponent)
+		opponent = ChessBoardModel.opponent(player)
+		if player == Player.WHITE:
+			if self.whiteKingSquare in testBoard.allOpponentCaptureTargets(opponent):
+				return False
+			else:
+				return True
+		else:
+			if self.blackKingSquare in testBoard.allOpponentCaptureTargets(opponent):
+				return False
+			else:
+				return True
 
-		for row in range(0, 8):
-			for col in range(0, 8):
-				if testBoard.board[row][col] != None and testBoard.board[row][col].player == player:
-					if testBoard.board[row][col].type == PieceType.KING and (row, col) in opponentAttackTargets:
-						return False
-
-		return True
-
-	# Moves the Piece if its valid
+	# Moves the Piece
 	def movePiece(self, moveCommand: MoveCommand):
 
 		# Set enPassant to Null - Reset this if the opponent does a double pawn move
@@ -91,6 +87,9 @@ class ChessBoardModel():
 					self.board[7][3] = self.board[7][0]
 					self.board[7][0] = None
 
+					# Set the Black King Square
+					self.blackKingSquare = (7, 2)
+
 				else:
 					self.whiteKingMoved = True
 					self.whiteQueenSideRookMoved = True
@@ -101,6 +100,9 @@ class ChessBoardModel():
 					# Move the Rook to the right of the king
 					self.board[0][3] = self.board[0][0]
 					self.board[0][0] = None
+
+					# Set the White King Square
+					self.whiteKingSquare = (0, 2)
 
 			# King Side Castle
 			case MoveCommandType.KINGSIDECASTLE:
@@ -115,6 +117,9 @@ class ChessBoardModel():
 					self.board[7][5] = self.board[7][7]
 					self.board[7][7] = None
 
+					# Set the Black King Square
+					self.blackKingSquare = (7, 6)
+
 				else:
 					self.whiteKingMoved = True
 					self.whiteQueenSideRookMoved = True
@@ -126,12 +131,22 @@ class ChessBoardModel():
 					self.board[0][5] = self.board[0][7]
 					self.board[0][7] = None
 
+					# Set the White King Square
+					self.whiteKingSquare = (0, 6)
+
 			# Move Piece
 			case MoveCommandType.MOVE | MoveCommandType.CAPTURE:
 				# Move the piece from start to end
 				startingPiece = self.board[moveCommand.startRow][moveCommand.startCol]
 				self.board[moveCommand.endRow][moveCommand.endCol] = startingPiece
 				self.board[moveCommand.startRow][moveCommand.startCol] = None
+
+				# Update the King Square
+				if startingPiece.type == PieceType.KING:
+					if moveCommand.player == Player.BLACK:
+						self.blackKingSquare = (moveCommand.endRow, moveCommand.endCol)
+					else:
+						self.whiteKingSquare = (moveCommand.endRow, moveCommand.endCol)
 
 			# Double Pawn Move
 			case MoveCommandType.PAWNOPENMOVE:
@@ -161,50 +176,8 @@ class ChessBoardModel():
 				self.board[moveCommand.startRow][moveCommand.endCol] = None
 
 		# Swap the Player Turn
-		self.playerTurn = ChessBoardModel.returnOpponent(self.playerTurn)
+		self.playerTurn = ChessBoardModel.opponent(self.playerTurn)
 		return
-
-	# Compute Best Move for Player
-	def computeBestValue(self, player: Player):
-		returnCommand = None
-		cmdBoardValue = (-1) * 10**10
-
-		for cmd in self._listPossibleMovesForPlayer(player):
-			testBoard = copy.deepcopy(self)
-			testBoard.movePiece(cmd)
-
-			if testBoard.boardStability(player):
-				computedPair = testBoard.computeBoardValue()
-
-				diffValue = 0
-				if Player == Player.WHITE:
-					diffValue = computedPair[1] - computedPair[0]
-				else:
-					diffValue = computedPair[0] - computedPair[1]
-
-				if diffValue > cmdBoardValue:
-					cmdBoardValue = diffValue
-					returnCommand = cmd
-
-		return returnCommand
-
-	# Evaluate Board Stability
-	def boardStability(self, player: Player):
-		boardStability = 0
-
-		# Move Value
-		opponentPlayer = ChessBoardModel.returnOpponent(player)
-		for cmd in self._listPossibleMovesForPlayer(opponentPlayer):
-			match cmd.moveType:
-				case MoveCommandType.CAPTURE:
-					if self.kingSafety(cmd, opponentPlayer):
-						opponentPiece = self.board[cmd.startRow][cmd.startCol].pieceValue()
-						playerPiece = self.board[cmd.endRow][cmd.endCol].pieceValue()
-
-						if opponentPiece <= playerPiece:
-							return False
-
-		return True
 
 	# Compute Board Value -> [White, Black]
 	def computeBoardValue(self):
@@ -220,33 +193,17 @@ class ChessBoardModel():
 					else:
 						blackValue += self.board[row][col].pieceValue()
 					
-		# Compute Piece
-		blackValue += self._computeAttackDefendValue(Player.BLACK)
-		whiteValue += self._computeAttackDefendValue(Player.WHITE)
+		return [whiteValue, valueValue]
 
-		return [blackValue, whiteValue]
-
-	def _computeAttackDefendValue(self, player: Player):
-		totalValue = 0
-
-		# Move Value
-		for cmd in self._listPossibleMovesForPlayer(Player):
-			match cmd.moveType:
-				# Queen Side Castle
-				case MoveCommandType.QUEENSIDECASTLE:
-					totalValue += 10
-				case MoveCommandType.KINGSIDECASTLE:
-					totalValue += 10
-				case MoveCommandType.ENPASSANT:
-					totalValue += 50
-				case MoveCommandType.PROMOTE:
-					totalValue += 100
-
-
-		return totalValue
+	@staticmethod
+	def opponent(player: Player):
+		if player == Player.WHITE:
+			return Player.BLACK
+		else:
+			return Player.WHITE
 
 	# Return a list of move commands for a player
-	def _listPossibleMovesForPlayer(self, player: Player):
+	def listPossibleMovesForPlayer(self, player: Player):
 		totalMove = []
 
 		for row in range(0, 8):
@@ -257,13 +214,6 @@ class ChessBoardModel():
 							totalMove.append(command)
 
 		return totalMove
-
-	@staticmethod
-	def returnOpponent(player: Player):
-		if player == Player.WHITE:
-			return Player.BLACK
-		else:
-			return Player.WHITE
 
 	# This returns all possibleMoves as a move object
 	def _possibleMoves(self, row: int, col: int, player: Player):
@@ -284,8 +234,8 @@ class ChessBoardModel():
 								returnMoves.append(MoveCommand(row, col, newRow, newCol, MoveCommandType.CAPTURE, player))
 
 					# King + Move to Castle are not in check
-					opponent = ChessBoardModel.returnOpponent(self.board[row][col].player)
-					opponentAttackTargets = self._totalAttackTargets(opponent)
+					opponent = ChessBoardModel.opponent(self.board[row][col].player)
+					opponentAttackTargets = self.allOpponentCaptureTargets(opponent)
 
 					# Black Queen Side Castle
 					if not self.blackKingMoved and not self.blackQueenSideRookMoved:
@@ -498,19 +448,19 @@ class ChessBoardModel():
 					return returnMoves
 
 	# This returns all attack targets for a player
-	def _totalAttackTargets(self, player: Player):
+	def allOpponentCaptureTargets(self, player: Player):
 		attackSquare = {}
 		for row in range(0, 8):
 			for col in range(0, 8):
 				if self.board[row][col] != None and self.board[row][col].player == player:
-					possibleMoves = self._attackTargets(row, col)
+					possibleMoves = self._opponentCaptureTargetsFromLocation(row, col)
 					for move in possibleMoves:
 						attackSquare[move] = True
 		
 		return attackSquare
 
 	# Return the list of targets the opponent could attack as [row, col]
-	def _attackTargets(self, row: int, col: int):
+	def _opponentCaptureTargetsFromLocation(self, row: int, col: int):
 		if self.board[row][col] == None:
 			return []
 		else:
