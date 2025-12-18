@@ -18,7 +18,7 @@ class ChessBoardViewModel():
         self.communicatorProxy.update_request.connect(chessBoardView.updatePosition)
         chessBoardView.connectViewModel(self)
 
-        # Backend ThreadPool 
+        # Compute Opponent Turn ThreadPool 
         self.threadpool = QThreadPool()
 
     def on_move_executed(self, initRow: int, initCol: int, targetRow: int, 
@@ -34,15 +34,15 @@ class ChessBoardViewModel():
             self.communicatorProxy.signal_update_request(moveCommand)
 
             # Run the compute for the Opponent's Move
-            opponentPlayer = ChessBoardModel.returnOpponent(player)
-            worker = Worker(
-                self.computerTurn, player=opponentPlayer
-            ) 
+            # opponentPlayer = ChessBoardModel.returnOpponent(player)
+            # worker = Worker(
+            #     self.takeOpponentTurn, player=opponentPlayer
+            # ) 
 
             # Execute
-            self.threadpool.start(worker)
+            # self.threadpool.start(worker)
 
-    def computerTurn(self, player):
+    def takeOpponentTurn(self, player):
         # Opponent Takes Turn
         opponentCmd = self.chessBoardModel.computeBestValue(player)
 
