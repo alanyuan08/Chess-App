@@ -20,7 +20,7 @@ class ChessBoardModel():
 		# Set Human Player
 		self.humanPlayer = humanPlayers
 
-		# Used to check En passant
+		# En Passant Column - Set after pawn move, then cleared 
 		self.enPassantColumn = None
 
 		# Used to check if player can Castle
@@ -32,6 +32,7 @@ class ChessBoardModel():
 		self.whiteKingSideRookMoved = False
 		self.whiteQueenSideRookMoved = False 
 
+		# Used to Check for King Safety
 		self.whiteKingSquare = (0, 4)
 		self.blackKingSquare = (7, 4)
 
@@ -72,7 +73,7 @@ class ChessBoardModel():
 					self.blackKingSquare = (7, 2)
 					self.blackKingMoved = True
 
-				else:
+				elif moveCommand.player == Player.WHITE:
 					self.whiteKingMoved = True
 					self.whiteQueenSideRookMoved = True
 
@@ -104,7 +105,7 @@ class ChessBoardModel():
 					self.blackKingSquare = (7, 6)
 					self.blackKingMoved = True
 
-				else:
+				elif moveCommand.player == Player.WHITE:
 					self.whiteKingMoved = True
 					self.whiteQueenSideRookMoved = True
 
@@ -131,7 +132,7 @@ class ChessBoardModel():
 					if moveCommand.player == Player.BLACK:
 						self.blackKingSquare = (moveCommand.endRow, moveCommand.endCol)
 						self.blackKingMoved = True
-					else:
+					elif moveCommand.player == Player.WHITE:
 						self.whiteKingSquare = (moveCommand.endRow, moveCommand.endCol)
 						self.whiteKingMoved = True
 
@@ -139,7 +140,6 @@ class ChessBoardModel():
 			case MoveCommandType.PAWNOPENMOVE:
 				# Move the piece from start to end
 				startingPiece = self.board[moveCommand.startRow][moveCommand.startCol]
-
 				self.board[moveCommand.endRow][moveCommand.endCol] = startingPiece
 				self.board[moveCommand.startRow][moveCommand.startCol] = None
 
