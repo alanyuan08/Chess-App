@@ -42,7 +42,7 @@ class ChessBoardModel():
 			return None
 
 		# Validate the Move Command is a Possible Move
-		possibleMoves = self.listPossibleMovesForPlayer(player)
+		possibleMoves = self._possibleMoveFromPosition(initRow, initCol, player)
 		for cmd in possibleMoves:
 			if cmd.endRow == targetRow and cmd.endCol == targetCol:
 				return cmd
@@ -89,6 +89,7 @@ class ChessBoardModel():
 
 					# Set the Black King Square
 					self.blackKingSquare = (7, 2)
+					self.blackKingMoved = True
 
 				else:
 					self.whiteKingMoved = True
@@ -103,6 +104,7 @@ class ChessBoardModel():
 
 					# Set the White King Square
 					self.whiteKingSquare = (0, 2)
+					self.whiteKingMoved = True
 
 			# King Side Castle
 			case MoveCommandType.KINGSIDECASTLE:
@@ -119,6 +121,7 @@ class ChessBoardModel():
 
 					# Set the Black King Square
 					self.blackKingSquare = (7, 6)
+					self.blackKingMoved = True
 
 				else:
 					self.whiteKingMoved = True
@@ -133,6 +136,7 @@ class ChessBoardModel():
 
 					# Set the White King Square
 					self.whiteKingSquare = (0, 6)
+					self.whiteKingMoved = True
 
 			# Move Piece
 			case MoveCommandType.MOVE | MoveCommandType.CAPTURE:
@@ -145,8 +149,10 @@ class ChessBoardModel():
 				if startingPiece.type == PieceType.KING:
 					if moveCommand.player == Player.BLACK:
 						self.blackKingSquare = (moveCommand.endRow, moveCommand.endCol)
+						self.blackKingMoved = True
 					else:
 						self.whiteKingSquare = (moveCommand.endRow, moveCommand.endCol)
+						self.whiteKingMoved = True
 
 			# Double Pawn Move
 			case MoveCommandType.PAWNOPENMOVE:
@@ -209,21 +215,19 @@ class ChessBoardModel():
 		for row in range(0, 8):
 			for col in range(0, 8):
 				if self.board[row][col] != None and self.board[row][col].player == player:
-					for command in self._possibleMoves(row, col, player):
-						if self.kingSafety(command, player):
-							totalMove.append(command)
+					totalMove += self._possibleMoveFromPosition(row, col, player)
 
 		return totalMove
 
 	# This returns all possibleMoves as a move object
-	def _possibleMoves(self, row: int, col: int, player: Player):
+	def _possibleMoveFromPosition(self, row: int, col: int, player: Player):
+		returnMoves = []
+
 		if self.board[row][col] == None:
-			return []
+			return returnMoves
 		else:
 			match self.board[row][col].type:
 				case PieceType.KING:
-					returnMoves = []
-					
 					for possibleMoves in [(-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1)]:
 						newRow = row + possibleMoves[0]
 						newCol = col + possibleMoves[1]
@@ -243,12 +247,8 @@ class ChessBoardModel():
 						for i in [1, 2, 3]:
 							if self.board[7][i] == None and (7, i) not in opponentAttackTargets:
 								nullBlock += 1
-
-						kingSafety = True
-						if (row, col) in opponentAttackTargets:
-							kingSafety = False
 							
-						if nullBlock == 3 and kingSafety:
+						if nullBlock == 3 and (row, col) not in opponentAttackTargets:
 							returnMoves.append(MoveCommand(row, col, row, col-2, MoveCommandType.QUEENSIDECASTLE, player))
 
 					# Black King Side Castle
@@ -258,11 +258,7 @@ class ChessBoardModel():
 							if self.board[7][i] == None and (7, i) not in opponentAttackTargets:
 								nullBlock += 1
 
-						kingSafety = True
-						if (row, col) in opponentAttackTargets:
-							kingSafety = False
-
-						if nullBlock == 2 and kingSafety:
+						if nullBlock == 2 and (row, col) not in opponentAttackTargets:
 							returnMoves.append(MoveCommand(row, col, row, col+2, MoveCommandType.KINGSIDECASTLE, player))
 
 					# White Queen Side Castle
@@ -272,11 +268,7 @@ class ChessBoardModel():
 							if self.board[0][i] == None and (0, i) not in opponentAttackTargets:
 								nullBlock += 1
 
-						kingSafety = True
-						if (row, col) in opponentAttackTargets:
-							kingSafety = False
-
-						if nullBlock == 3 and kingSafety:
+						if nullBlock == 3 and (row, col) not in opponentAttackTargets:
 							returnMoves.append(MoveCommand(row, col, row, col-2, MoveCommandType.QUEENSIDECASTLE, player))
 
 					# White King Side Castle
@@ -286,17 +278,10 @@ class ChessBoardModel():
 							if self.board[0][i] == None and (0, i) not in opponentAttackTargets:
 								nullBlock += 1
 
-						kingSafety = True
-						if (row, col) in opponentAttackTargets:
-							kingSafety = False
-
-						if nullBlock == 2 and kingSafety:
+						if nullBlock == 2 and (row, col) not in opponentAttackTargets:
 							returnMoves.append(MoveCommand(row, col, row, col+2, MoveCommandType.KINGSIDECASTLE, player))
 
-					return returnMoves
-
 				case PieceType.QUEEN:
-					returnMoves = []
 					for direction in [(-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1)]:
 						i = 1
 						while(True):
@@ -315,10 +300,7 @@ class ChessBoardModel():
 							else:
 								break
 
-					return returnMoves
-
 				case PieceType.KNIGHT:
-					returnMoves = []
 					for possibleMoves in [(2, 1), (1, 2), (-2, -1), (-1, -2), (-2, 1), (-1, 2), (2, -1), (1, -2)]:
 						newRow = row + possibleMoves[0]
 						newCol = col + possibleMoves[1]
@@ -328,10 +310,7 @@ class ChessBoardModel():
 							elif self.board[newRow][newCol].player != self.board[row][col].player:
 								returnMoves.append(MoveCommand(row, col, newRow, newCol, MoveCommandType.CAPTURE, player))
 
-					return returnMoves
-
 				case PieceType.ROOK:
-					returnMoves = []
 					for direction in [(-1, 0), (0, 1), (1, 0), (0, -1)]:
 						i = 1
 						while(True):
@@ -350,10 +329,7 @@ class ChessBoardModel():
 							else:
 								break
 
-					return returnMoves
-
 				case PieceType.PAWN:
-					returnMoves = []
 					# Black Player - Pawn Moves Down
 					if self.board[row][col].player == Player.BLACK:
 						if row == 1:
@@ -422,11 +398,7 @@ class ChessBoardModel():
 							if row == 4 and (self.enPassantColumn == col-1 or self.enPassantColumn == col+1):
 								returnMoves.append(MoveCommand(row, col, row+1, self.enPassantColumn , MoveCommandType.ENPASSANT, player))
 
-
-					return returnMoves
-
 				case PieceType.BISHOP:
-					returnMoves = []
 					for direction in [(-1, 1), (1, 1), (1, -1), (-1, -1)]:
 						i = 1
 						while(True):
@@ -445,7 +417,13 @@ class ChessBoardModel():
 							else:
 								break
 
-					return returnMoves
+			# Validate For King Safety
+			kingSafeArray = [] 
+			for command in returnMoves:
+				if self.kingSafety(command, player):
+					kingSafeArray.append(command)
+
+			return kingSafeArray
 
 	# This returns all attack targets for a player
 	def allOpponentCaptureTargets(self, player: Player):
