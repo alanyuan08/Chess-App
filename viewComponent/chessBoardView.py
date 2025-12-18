@@ -35,6 +35,7 @@ class ChessBoardView(QGraphicsPixmapItem):
 					humanPlayer = False
 					if pieceModel.player in chessBoard.humanPlayers:
 						humanPlayer = True
+					print(humanPlayer)
 					ChessPieceView(row, col, pieceModel, humanPlayer, self)
 
 	def connectViewModel(self, chessBoardViewModel: ChessBoardViewModel):

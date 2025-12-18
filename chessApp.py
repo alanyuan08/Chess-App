@@ -27,7 +27,7 @@ if __name__ == '__main__':
 	# Create View Components
 	chessBoardView = ChessBoardView(scene, chessBoardModel)
 
-	# Create ChessBoard ViewMoidel
+	# Create ChessBoard ViewModel
 	chessBoardController = ChessBoardViewModel(chessBoardView, chessBoardModel);
 
 	view.show()
