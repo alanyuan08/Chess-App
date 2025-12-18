@@ -33,7 +33,7 @@ class ChessBoardView(QGraphicsPixmapItem):
 				pieceModel = chessBoard.board[row][col]
 				if pieceModel != None:
 					humanPlayer = False
-					if pieceModel.player in chessBoard.humanPlayer:
+					if pieceModel.player in chessBoard.humanPlayers:
 						humanPlayer = True
 					ChessPieceView(row, col, pieceModel, humanPlayer, self)
 

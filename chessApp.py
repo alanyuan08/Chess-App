@@ -4,8 +4,8 @@ import sys
 # Import Enums
 from appEnums import Player
 
-# Import Model
-from modelComponent.chessBoardModel import ChessBoardModel
+# Import Factory
+from modelFactory.chessBoardFactory import ChessBoardFactory
 
 # Import View
 from viewComponent.chessBoardView import ChessBoardView
@@ -22,7 +22,7 @@ if __name__ == '__main__':
 	view.setFixedSize(720, 720)
 
 	# Create ChessBoard/ Chess Piece Model Components
-	chessBoardModel = ChessBoardModel([Player.WHITE, Player.BLACK])
+	chessBoardModel = ChessBoardFactory.createChessBoard([Player.WHITE, Player.BLACK])
 
 	# Create View Components
 	chessBoardView = ChessBoardView(scene, chessBoardModel)

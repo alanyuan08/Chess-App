@@ -1,4 +1,5 @@
-from appEnums import PieceType, Player
+# Enum
+from appEnums import PieceType, Player, MoveCommandType
 
 class MoveCommand:
 	def __init__(self, startRow: int, startCol: int, endRow: int, 
@@ -14,3 +15,4 @@ class MoveCommand:
 
 	def __str__(self):
 		return "(" + str(self.startRow) + ", " + str(self.startCol) + ") " + "(" + str(self.endRow) + ", " + str(self.endCol) + ") " + str(self.moveType)
+			

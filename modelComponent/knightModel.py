@@ -1,0 +1,50 @@
+# Import Model
+from modelComponent.moveCommand import MoveCommand
+from modelComponent.chessBoardModel import ChessBoardModel
+from modelComponent.chessPieceModel import ChessPieceModel
+
+# Enum
+from appEnums import Player, MoveCommandType
+
+class KnightModel(ChessPieceModel):
+	def __init__(self, player: Player, row: int, col: int):
+
+		self.player = player
+		self.row = row
+		self.col = col
+
+	def pieceValue(self):
+		return 300
+
+	def possibleMoves(self, chessBoardModel: ChessBoardModel):
+		returnMoves = []
+		
+		for possibleMoves in [(2, 1), (1, 2), (-2, -1), (-1, -2), (-2, 1), (-1, 2), (2, -1), (1, -2)]:
+			newRow = self.row + possibleMoves[0]
+			newCol = self.col + possibleMoves[1]
+			if newRow >= 0 and newRow < 8 and newCol >= 0 and newCol < 8:
+				if chessBoardModel.board[newRow][newCol] == None:
+					returnMoves.append(
+						MoveCommand(self.row, self.col, newRow, newCol, MoveCommandType.MOVE, self.player)
+					)
+				elif chessBoardModel.board[newRow][newCol].player != self.player:
+					returnMoves.append(
+						MoveCommand(self.row, self.col, newRow, newCol, MoveCommandType.CAPTURE, self.player)
+					)
+
+		# Validate For King Safety
+		return filter(chessBoardModel.kingSafety, returnMoves)
+
+	def captureTargets(self, chessBoardModel: ChessBoardModel):
+		returnMoves = []
+
+		for possibleMoves in [(2, 1), (1, 2), (-2, -1), (-1, -2), (-2, 1), (-1, 2), (2, -1), (1, -2)]:
+			newRow = self.row + possibleMoves[0]
+			newCol = self.col + possibleMoves[1]
+			if newRow >= 0 and newRow < 8 and newCol >= 0 and newCol < 8:
+				captureTarget = chessBoardModel.board[newRow][newCol]
+				if captureTarget == None or captureTarget.player != self.player:
+					returnMoves.append((newRow, newCol))
+
+		return returnMoves
+

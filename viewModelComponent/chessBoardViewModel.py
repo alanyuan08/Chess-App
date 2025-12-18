@@ -42,14 +42,14 @@ class ChessBoardViewModel():
             # Execute
             # self.threadpool.start(worker)
 
-    def takeOpponentTurn(self, player):
-        # Opponent Takes Turn
-        opponentCmd = self.chessBoardModel.computeBestValue(player)
+    # def takeOpponentTurn(self, player):
+    #    # Opponent Takes Turn
+    #    opponentCmd = self.chessBoardModel.computeBestValue(player)
 
-        if opponentCmd != None:
-            self.chessBoardModel.movePiece(opponentCmd)
-            # Communicate the command to FrontEnd
-            self.communicatorProxy.signal_update_request(opponentCmd)
+    #    if opponentCmd != None:
+    #        self.chessBoardModel.movePiece(opponentCmd)
+    #        # Communicate the command to FrontEnd
+    #        self.communicatorProxy.signal_update_request(opponentCmd)
 
 
 class Worker(QRunnable):

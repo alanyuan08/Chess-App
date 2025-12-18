@@ -10,6 +10,13 @@ from communicatorProxy import MoveCommand, CommunicatorProxy
 # Import Model
 from modelComponent.chessPieceModel import ChessPieceModel
 
+from modelComponent.kingModel import KingModel
+from modelComponent.queenModel import QueenModel
+from modelComponent.knightModel import KnightModel
+from modelComponent.rookModel import RookModel
+from modelComponent.pawnModel import PawnModel
+from modelComponent.bishopModel import BishopModel
+
 # Import ViewModel
 from viewModelComponent.chessBoardViewModel import ChessBoardViewModel
 
@@ -20,7 +27,7 @@ class ChessPieceView(QGraphicsPixmapItem):
 		self.col = col
 		self.player = chessPieceModel.player
 
-		pixmap = QPixmap(ChessPieceView.returnImageURL(self.player, chessPieceModel.type))
+		pixmap = QPixmap(ChessPieceView.returnImageURL(self.player, chessPieceModel))
 		super().__init__(pixmap, parent)
 
 		# Set to movable if human player
@@ -40,7 +47,7 @@ class ChessPieceView(QGraphicsPixmapItem):
 		self.communicatorProxy.move_request.connect(viewModel.on_move_executed)
 
 	@staticmethod
-	def returnImageURL(player, type):
+	def returnImageURL(player, chessModel: ChessPieceModel):
 
 		url = "img/"
 		match player:
@@ -49,18 +56,18 @@ class ChessPieceView(QGraphicsPixmapItem):
 			case Player.BLACK:
 				url += "black"
 
-		match type:
-			case PieceType.KING:
+		match chessModel:
+			case KingModel():
 				url += "King"
-			case PieceType.QUEEN:
+			case QueenModel():
 				url += "Queen"
-			case PieceType.KNIGHT:
+			case KnightModel():
 				url += "Knight"
-			case PieceType.ROOK:
+			case RookModel():
 				url += "Rook"
-			case PieceType.PAWN:
+			case PawnModel():
 				url += "Pawn"
-			case PieceType.BISHOP:
+			case BishopModel():
 				url += "Bishop"
 
 		return url + ".svg"

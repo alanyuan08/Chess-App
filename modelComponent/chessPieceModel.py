@@ -1,46 +1,41 @@
+# Enum
 from appEnums import PieceType, Player, MoveCommandType
 
-class ChessPieceModel:
-	def __init__(self, player: Player, type: PieceType):
+# Import Models
+from modelComponent.chessBoardModel import ChessBoardModel
+
+# Abstract Base Class
+from abc import ABC, abstractmethod
+
+class ChessPieceModel(ABC):
+	def __init__(self, player: Player, row: int, col: int):
+
 		self.player = player
-		self.type = type
+		self.row = row
+		self.col = col
 
-	@staticmethod
-	def createInitChessBoard():
-		heavyMaterialLine = [PieceType.ROOK, PieceType.KNIGHT, PieceType.BISHOP, PieceType.QUEEN, \
-				PieceType.KING, PieceType.BISHOP, PieceType.KNIGHT, PieceType.ROOK]
-
-		board = [[None for _ in range(8)] for _ in range(8)]
-		
-		# Poplute Black Pieces
-		for col in range(0, 8):
-			board[7][col] = ChessPieceModel(Player.BLACK, heavyMaterialLine[col])
-
-		# Poplute Black Pawns
-		for col in range(0, 8):
-			board[6][col] = ChessPieceModel(Player.BLACK, PieceType.PAWN)
-
-		# Poplute White Pawns
-		for col in range(0, 8):
-			board[1][col] = ChessPieceModel(Player.WHITE, PieceType.PAWN)
-
-		# Poplute White Pieces
-		for col in range(0, 8):
-			board[0][col] = ChessPieceModel(Player.WHITE, heavyMaterialLine[col])
-
-		return board
-
+	@abstractmethod
 	def pieceValue(self):
-		match self.type:
-			case PieceType.KING:
-				return 10**10
-			case PieceType.QUEEN:
-				return 900
-			case PieceType.KNIGHT:
-				return 300
-			case PieceType.ROOK:
-				return 500
-			case PieceType.PAWN:
-				return 100
-			case PieceType.BISHOP:
-				return 300
+		pass
+
+	@abstractmethod
+	def possibleMoves(self, chessBoardModel: ChessBoardModel):
+		pass
+
+	@abstractmethod
+	def captureTargets(self, chessBoardModel: ChessBoardModel):
+		pass
+
+	# Validate targetRow / targetCol is valid
+	def validateMoveTarget(self, targetRow: int, targetCol: int, 
+		chessBoardModel: ChessBoardModel):
+
+		# Validate the Move Command is a Possible Move
+		possibleMoves = self.possibleMoves(chessBoardModel)
+		for cmd in possibleMoves:
+			if cmd.endRow == targetRow and cmd.endCol == targetCol:
+				return cmd
+
+		return None
+
+
