@@ -10,13 +10,6 @@ from communicatorProxy import MoveCommand, CommunicatorProxy
 # Import Model
 from modelComponent.chessPieceModel import ChessPieceModel
 
-from modelComponent.kingModel import KingModel
-from modelComponent.queenModel import QueenModel
-from modelComponent.knightModel import KnightModel
-from modelComponent.rookModel import RookModel
-from modelComponent.pawnModel import PawnModel
-from modelComponent.bishopModel import BishopModel
-
 # Import ViewModel
 from viewModelComponent.chessBoardViewModel import ChessBoardViewModel
 
@@ -47,7 +40,7 @@ class ChessPieceView(QGraphicsPixmapItem):
 		self.communicatorProxy.move_request.connect(viewModel.on_move_executed)
 
 	@staticmethod
-	def returnImageURL(player, chessModel: ChessPieceModel):
+	def returnImageURL(player: Player, chessModel: ChessPieceModel):
 
 		url = "img/"
 		match player:
@@ -56,18 +49,18 @@ class ChessPieceView(QGraphicsPixmapItem):
 			case Player.BLACK:
 				url += "black"
 
-		match chessModel:
-			case KingModel():
+		match chessModel.type:
+			case PieceType.KING:
 				url += "King"
-			case QueenModel():
+			case PieceType.QUEEN:
 				url += "Queen"
-			case KnightModel():
+			case PieceType.KNIGHT:
 				url += "Knight"
-			case RookModel():
+			case PieceType.ROOK:
 				url += "Rook"
-			case PawnModel():
+			case PieceType.PAWN:
 				url += "Pawn"
-			case BishopModel():
+			case PieceType.BISHOP:
 				url += "Bishop"
 
 		return url + ".svg"

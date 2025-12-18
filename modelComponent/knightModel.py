@@ -4,7 +4,7 @@ from modelComponent.chessBoardModel import ChessBoardModel
 from modelComponent.chessPieceModel import ChessPieceModel
 
 # Enum
-from appEnums import Player, MoveCommandType
+from appEnums import Player, MoveCommandType, PieceType
 
 class KnightModel(ChessPieceModel):
 	def __init__(self, player: Player, row: int, col: int):
@@ -12,6 +12,7 @@ class KnightModel(ChessPieceModel):
 		self.player = player
 		self.row = row
 		self.col = col
+		self.type = PieceType.KNIGHT
 
 	def pieceValue(self):
 		return 300

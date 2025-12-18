@@ -9,10 +9,7 @@ from abc import ABC, abstractmethod
 
 class ChessPieceModel(ABC):
 	def __init__(self, player: Player, row: int, col: int):
-
-		self.player = player
-		self.row = row
-		self.col = col
+		pass
 
 	@abstractmethod
 	def pieceValue(self):

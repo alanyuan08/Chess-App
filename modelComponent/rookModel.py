@@ -4,7 +4,7 @@ from modelComponent.chessBoardModel import ChessBoardModel
 from modelComponent.chessPieceModel import ChessPieceModel
 
 # Enum
-from appEnums import Player, MoveCommandType
+from appEnums import Player, MoveCommandType, PieceType
 
 class RookModel(ChessPieceModel):
 	def __init__(self, player: Player, row: int, col: int):
@@ -12,6 +12,7 @@ class RookModel(ChessPieceModel):
 		self.player = player
 		self.row = row
 		self.col = col
+		self.type = PieceType.ROOK
 
 	def pieceValue(self):
 		return 500

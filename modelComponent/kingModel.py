@@ -4,7 +4,7 @@ from modelComponent.chessBoardModel import ChessBoardModel
 from modelComponent.chessPieceModel import ChessPieceModel
 
 # Enum
-from appEnums import Player, MoveCommandType
+from appEnums import Player, MoveCommandType, PieceType
 
 class KingModel(ChessPieceModel):
 	def __init__(self, player: Player, row: int, col: int):
@@ -12,6 +12,7 @@ class KingModel(ChessPieceModel):
 		self.player = player
 		self.row = row
 		self.col = col
+		self.type = PieceType.KING
 
 	def pieceValue(self):
 		return 20000
@@ -28,7 +29,7 @@ class KingModel(ChessPieceModel):
 					returnMoves.append(
 						MoveCommand(self.row, self.col, newRow, newCol, MoveCommandType.MOVE, self.player)
 					)
-				elif chessBoardModel.board[newRow][newCol].player != chessBoardModel.player:
+				elif chessBoardModel.board[newRow][newCol].player != self.player:
 					returnMoves.append(
 						MoveCommand(self.row, self.col, newRow, newCol, MoveCommandType.CAPTURE, self.player)
 					)

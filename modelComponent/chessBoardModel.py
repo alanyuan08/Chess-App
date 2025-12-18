@@ -171,7 +171,7 @@ class ChessBoardModel():
 
 				movePiece = self.board[cmd.endRow][cmd.endCol]
 				# Update the King Square
-				if movePiece.pieceValue() == 20000:
+				if movePiece.type == PieceType.KING:
 					if cmd.player == Player.BLACK:
 						self.blackKingSquare = (cmd.endRow, cmd.endCol)
 						self.blackKingMoved = True
