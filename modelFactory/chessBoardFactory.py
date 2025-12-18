@@ -17,7 +17,7 @@ class ChessBoardFactory:
 				PieceType.KING, PieceType.BISHOP, PieceType.KNIGHT, PieceType.ROOK]
 
 		newBoard.board = [[None for _ in range(8)] for _ in range(8)]
-		newBoard.humanPlayer = humanPlayers
+		newBoard.humanPlayers = humanPlayers
 		
 		# Poplute Black Pieces
 		for col in range(0, 8):
