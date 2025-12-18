@@ -414,12 +414,12 @@ class ChessBoardModel():
 
 		opponent = ChessBoardModel.opponent(player)
 		if player == Player.WHITE:
-			if self.whiteKingSquare in testBoard.allOpponentCaptureTargets(opponent):
+			if testBoard.whiteKingSquare in testBoard.allOpponentCaptureTargets(opponent):
 				return False
 			else:
 				return True
-		else:
-			if self.blackKingSquare in testBoard.allOpponentCaptureTargets(opponent):
+		elif player == Player.BLACK:
+			if testBoard.blackKingSquare in testBoard.allOpponentCaptureTargets(opponent):
 				return False
 			else:
 				return True
