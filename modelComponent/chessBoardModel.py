@@ -49,27 +49,8 @@ class ChessBoardModel():
 
 		return None
 
-	# Validate King Safety
-	def kingSafety(self, moveCommand: MoveCommand, player: Player):
-		# Validate King Safety
-		testBoard = copy.deepcopy(self)
-		testBoard.movePiece(moveCommand)
-
-		opponent = ChessBoardModel.opponent(player)
-		if player == Player.WHITE:
-			if self.whiteKingSquare in testBoard.allOpponentCaptureTargets(opponent):
-				return False
-			else:
-				return True
-		else:
-			if self.blackKingSquare in testBoard.allOpponentCaptureTargets(opponent):
-				return False
-			else:
-				return True
-
 	# Moves the Piece
 	def movePiece(self, moveCommand: MoveCommand):
-
 		# Set enPassant to Null - Reset this if the opponent does a double pawn move
 		self.enPassantColumn = None
 
@@ -425,7 +406,25 @@ class ChessBoardModel():
 
 			return kingSafeArray
 
-	# This returns all attack targets for a player
+	# Validate King Safety
+	def kingSafety(self, moveCommand: MoveCommand, player: Player):
+		# Validate King Safety
+		testBoard = copy.deepcopy(self)
+		testBoard.movePiece(moveCommand)
+
+		opponent = ChessBoardModel.opponent(player)
+		if player == Player.WHITE:
+			if self.whiteKingSquare in testBoard.allOpponentCaptureTargets(opponent):
+				return False
+			else:
+				return True
+		else:
+			if self.blackKingSquare in testBoard.allOpponentCaptureTargets(opponent):
+				return False
+			else:
+				return True
+
+	# This is used to determine king safety and castle
 	def allOpponentCaptureTargets(self, player: Player):
 		attackSquare = {}
 		for row in range(0, 8):
