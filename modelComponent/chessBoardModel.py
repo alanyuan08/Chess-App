@@ -14,7 +14,7 @@ class ChessBoardModel():
 		self.board = []
 
 		# Init Player as White
-		self.playerTurn = None
+		self.playerTurn = Player.WHITE
 
 		# Set Human Player
 		self.humanPlayers = []
@@ -82,7 +82,7 @@ class ChessBoardModel():
 				targetPiece = self.board[row][col]
 				if targetPiece != None and targetPiece.player == player:
 
-					possibleMoves = targetPiece.captureTargets(self.board)
+					possibleMoves = targetPiece.captureTargets(self)
 					for move in possibleMoves:
 						attackSquare[move] = True
 		
@@ -103,7 +103,7 @@ class ChessBoardModel():
 		# Set enPassant to Null - Reset this if the opponent does a double pawn move
 		self.enPassantColumn = None
 
-		match moveCommand.moveType:
+		match cmd.moveType:
 			# Queen Side Castle
 			case MoveCommandType.QUEENSIDECASTLE:
 				if cmd.player == Player.BLACK:
@@ -167,10 +167,11 @@ class ChessBoardModel():
 			# Move Piece
 			case MoveCommandType.MOVE | MoveCommandType.CAPTURE:
 				# Move Starting Piece to Capture Point
-				self._movePieceOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.startCol)
+				self._movePieceOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
 
+				movePiece = self.board[cmd.endRow][cmd.endCol]
 				# Update the King Square
-				if startingPiece.type == PieceType.KING:
+				if movePiece.pieceValue() == 20000:
 					if cmd.player == Player.BLACK:
 						self.blackKingSquare = (cmd.endRow, cmd.endCol)
 						self.blackKingMoved = True
@@ -181,7 +182,7 @@ class ChessBoardModel():
 			# Double Pawn Move
 			case MoveCommandType.PAWNOPENMOVE:
 				# Move the piece from start to end
-				self._movePieceOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.startCol)
+				self._movePieceOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
 
 				self.enPassantColumn = cmd.endCol
 
@@ -194,12 +195,12 @@ class ChessBoardModel():
 			# En Passant
 			case MoveCommandType.ENPASSANT:
 				# Move the Pawn to the target
-				self._movePieceOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.startCol)
+				self._movePieceOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
 
 				# Remove En Passant Pawn
 				self.board[cmd.startRow][cmd.endCol] = None
 
 		# Swap the Player Turn
-		self.playerTurn = ChessBoardModel.opponent(chessBoardModel.playerTurn)
-		return chessBoardModel
+		self.playerTurn = ChessBoardModel.opponent(self.playerTurn)
+		return 
 

@@ -97,7 +97,7 @@ class PawnModel(ChessPieceModel):
 
 			# Double Pawn Move
 			elif self.row == 1:
-				if chessBoardModel.board[self.row+1][self.col] == None and self.board[self.row+2][self.col] == None:
+				if chessBoardModel.board[self.row+1][self.col] == None and chessBoardModel.board[self.row+2][self.col] == None:
 					returnMoves.append(
 						MoveCommand(self.row, self.col, self.row+2, self.col, MoveCommandType.PAWNOPENMOVE, self.player)
 					)
@@ -113,13 +113,13 @@ class PawnModel(ChessPieceModel):
 			# Normal
 			else:
 				target = chessBoardModel.board[self.row+1][self.col-1]
-				if col > 0 and target != None and target!= self.player:
+				if self.col > 0 and target != None and target!= self.player:
 					returnMoves.append(
 						MoveCommand(self.row, self.col, self.row+1, self.col-1, MoveCommandType.CAPTURE, self.player)
 					)
 
 				target = chessBoardModel.board[self.row+1][self.col+1]
-				if col < 7 and target != None and target.player != self.player:
+				if self.col < 7 and target != None and target.player != self.player:
 					returnMoves.append(
 						MoveCommand(self.row, self.col, self.row+1, self.col+1, MoveCommandType.CAPTURE, self.player)
 					)
@@ -150,7 +150,7 @@ class PawnModel(ChessPieceModel):
 				if self.col > 0:
 					returnMoves.append((self.row+1, self.col-1))
 
-				if col < 7:
+				if self.col < 7:
 					returnMoves.append((self.row+1, self.col+1))
 
 		return returnMoves
