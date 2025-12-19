@@ -25,14 +25,14 @@ class PawnModel(ChessPieceModel):
 			if self.row == 1:
 				if self.col > 0:
 					target = chessBoardModel.board[self.row-1][self.col-1]
-					if (target != None and target.player != self.player) or target == None:
+					if target != None and target.player != self.player:
 						returnMoves.append(
 							MoveCommand(self.row, self.col, self.row-1, self.col-1, MoveCommandType.PROMOTE, self.player)
 						)
 
 				if self.col < 7:
 					target = chessBoardModel.board[self.row-1][self.col+1]
-					if (target != None and target.player != self.player) or target == None:
+					if target != None and target.player != self.player:
 						returnMoves.append(
 							MoveCommand(self.row, self.col, self.row-1, self.col+1, MoveCommandType.PROMOTE, self.player)
 						)
@@ -84,14 +84,14 @@ class PawnModel(ChessPieceModel):
 			if self.row == 6:
 				if self.col > 0:
 					target = chessBoardModel.board[self.row+1][self.col-1]
-					if (target != None and target.player != self.player) or target == None:
+					if target != None and target.player != self.player:
 						returnMoves.append(
 							MoveCommand(self.row, self.col, self.row+1, self.col-1, MoveCommandType.PROMOTE, self.player)
 						)
 
 				if self.col < 7:
 					target = chessBoardModel.board[self.row+1][self.col+1]
-					if (target != None and target.player != self.player) or target == None:
+					if target != None and target.player != self.player:
 						returnMoves.append(
 							MoveCommand(self.row, self.col, self.row+1, self.col+1, MoveCommandType.PROMOTE, self.player)
 						)

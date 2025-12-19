@@ -172,7 +172,7 @@ class ChessBoardModel():
 					if cmd.player == Player.BLACK:
 						self.blackKingSquare = (cmd.endRow, cmd.endCol)
 						self.blackKingMoved = True
-					elif moveCommand.player == Player.WHITE:
+					elif cmd.player == Player.WHITE:
 						self.whiteKingSquare = (cmd.endRow, cmd.endCol)
 						self.whiteKingMoved = True
 
