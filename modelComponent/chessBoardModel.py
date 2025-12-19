@@ -4,6 +4,9 @@ from appEnums import PieceType, Player, MoveCommandType
 # Factory
 from modelFactory.chessPieceFactory import ChessPieceFactory
 
+# Model
+from modelComponent.moveCommand import MoveCommand
+
 import copy
 
 # Controller 
@@ -34,6 +37,9 @@ class ChessBoardModel():
 		self.whiteKingSquare = (0, 4)
 		self.blackKingSquare = (7, 4)
 
+	# Danger Moves
+	quiescenceMoveCmd = [MoveCommandType.PROMOTE, MoveCommandType.CAPTURE, MoveCommandType.ENPASSANT]
+
 	@staticmethod
 	def opponent(player: Player):
 		if player == Player.WHITE:
@@ -59,7 +65,7 @@ class ChessBoardModel():
 		return None
 
 	# Validate King Safety for player after making move
-	def validateKingSafety(self, cmd):
+	def validateKingSafety(self, cmd: MoveCommand):
 		testBoard = copy.deepcopy(self)
 		testBoard.movePiece(cmd)
 
@@ -72,6 +78,43 @@ class ChessBoardModel():
 				return False
 
 		return True
+
+	# Return all Valid moves for a player
+	def allValidMoves(self, player: Player):
+		validMoves = []
+
+		for row in range(0, 8):
+			for col in range(0, 8):
+				if self.board[row][col] != None and self.board[row][col].player == player:
+					possibleMoves = self.board[row][col].possibleMoves(self)
+					validMoves += possibleMoves
+
+		return validMoves
+
+	# Return all Capture Moves
+	def allCaptureMoves(self, player: Player):
+		validMoves = []
+
+		for row in range(0, 8):
+			for col in range(0, 8):
+				if self.board[row][col] != None and self.board[row][col].player == player:
+					possibleMoves = self.board[row][col].possibleMoves(self)
+
+					for cmd in possibleMoves:
+						if cmd in self.quiescenceMoveCmd:
+							validMoves.append(cmd)
+
+		return validMoves
+
+	# Validate King Safety for player after making move
+	def quietState(self, player: Player):
+		opponent = self.opponent(player)
+		captureMoves = self.allCaptureMoves(opponent)
+
+		if len(captureMoves) > 0:
+			return False
+		else:
+			return True
 
 	# This is used to determine king safety and castle
 	def _allPlayerCaptureTargets(self, player: Player):
@@ -96,7 +139,7 @@ class ChessBoardModel():
 		movePiece.row = endRow
 		movePiece.col = endCol
 
-	def movePiece(self, cmd):
+	def movePiece(self, cmd: MoveCommand):
 		# Set enPassant to Null - Reset this if the opponent does a double pawn move
 		self.enPassantColumn = None
 
@@ -186,7 +229,8 @@ class ChessBoardModel():
 			# Promote Pawn
 			case MoveCommandType.PROMOTE:
 				# Promote the Pawn to a Queen
-				self.board[cmd.startRow][cmd.startCol] = None
+				self._movePieceOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
+
 				self.board[cmd.endRow][cmd.endCol] = ChessPieceFactory.createChessPiece(PieceType.QUEEN, cmd.player, cmd.endRow, cmd.endCol)
 
 			# En Passant

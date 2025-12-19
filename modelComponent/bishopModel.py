@@ -14,7 +14,7 @@ class BishopModel(ChessPieceModel):
 		self.type = PieceType.BISHOP
 
 	def pieceValue(self):
-		return 500
+		return 300
 
 	# List all Possible Moves from Location
 	def possibleMoves(self, chessBoardModel):

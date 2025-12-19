@@ -32,6 +32,8 @@ class ChessBoardViewModel():
             self.chessBoardModel.movePiece(moveCommand)
             # Communicate the command to FrontEnd
             self.communicatorProxy.signal_update_request(moveCommand)
+            # Report quiet State
+            self.chessBoardModel.quietState(player)
 
             # Run the compute for the Opponent's Move
             # opponentPlayer = ChessBoardModel.opponent(player)
