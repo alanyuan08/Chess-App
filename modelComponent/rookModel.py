@@ -1,6 +1,5 @@
 # Import Model
 from modelComponent.moveCommand import MoveCommand
-from modelComponent.chessBoardModel import ChessBoardModel
 from modelComponent.chessPieceModel import ChessPieceModel
 
 # Enum
@@ -12,13 +11,12 @@ class RookModel(ChessPieceModel):
 		self.player = player
 		self.row = row
 		self.col = col
-		self.type = PieceType.ROOK
 
 	def pieceValue(self):
 		return 500
 
 	# List all Possible Moves from Location
-	def possibleMoves(self, chessBoardModel: ChessBoardModel):
+	def possibleMoves(self, chessBoardModel):
 		returnMoves = []
 
 		for direction in [(-1, 0), (0, 1), (1, 0), (0, -1)]:
@@ -43,11 +41,10 @@ class RookModel(ChessPieceModel):
 				else:
 					break
 
-		# Validate For King Safety
-		return filter(chessBoardModel.kingSafety, returnMoves)
+		return returnMoves
 
 	# List of targets - Used to check for Castle / King Safety
-	def captureTargets(self, chessBoardModel: ChessBoardModel):
+	def captureTargets(self, chessBoardModel):
 		returnMoves = []
 
 		for direction in [(-1, 0), (0, 1), (1, 0), (0, -1)]:

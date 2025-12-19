@@ -9,6 +9,12 @@ from communicatorProxy import MoveCommand, CommunicatorProxy
 
 # Import Model
 from modelComponent.chessPieceModel import ChessPieceModel
+from modelComponent.kingModel import KingModel
+from modelComponent.queenModel import QueenModel
+from modelComponent.knightModel import KnightModel
+from modelComponent.rookModel import RookModel
+from modelComponent.pawnModel import PawnModel
+from modelComponent.bishopModel import BishopModel
 
 # Import ViewModel
 from viewModelComponent.chessBoardViewModel import ChessBoardViewModel
@@ -49,18 +55,18 @@ class ChessPieceView(QGraphicsPixmapItem):
 			case Player.BLACK:
 				url += "black"
 
-		match chessModel.type:
-			case PieceType.KING:
+		match chessModel:
+			case KingModel():
 				url += "King"
-			case PieceType.QUEEN:
+			case QueenModel():
 				url += "Queen"
-			case PieceType.KNIGHT:
+			case KnightModel():
 				url += "Knight"
-			case PieceType.ROOK:
+			case RookModel():
 				url += "Rook"
-			case PieceType.PAWN:
+			case PawnModel():
 				url += "Pawn"
-			case PieceType.BISHOP:
+			case BishopModel():
 				url += "Bishop"
 
 		return url + ".svg"

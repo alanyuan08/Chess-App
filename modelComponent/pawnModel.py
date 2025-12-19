@@ -1,6 +1,5 @@
 # Import Model
 from modelComponent.moveCommand import MoveCommand
-from modelComponent.chessBoardModel import ChessBoardModel
 from modelComponent.chessPieceModel import ChessPieceModel
 
 # Enum
@@ -12,12 +11,11 @@ class PawnModel(ChessPieceModel):
 		self.player = player
 		self.row = row
 		self.col = col
-		self.type = PieceType.PAWN
 
 	def pieceValue(self):
 		return 100
 
-	def possibleMoves(self, chessBoardModel: ChessBoardModel):
+	def possibleMoves(self, chessBoardModel):
 		returnMoves = []
 
 		# Black Player - Pawn Moves Down
@@ -86,7 +84,7 @@ class PawnModel(ChessPieceModel):
 					)
 
 				target = chessBoardModel.board[self.row+1][self.col+1]
-				if col < 7 and target != None and target.player != self.player:
+				if self.col < 7 and target != None and target.player != self.player:
 					returnMoves.append(
 						MoveCommand(self.row, self.col, self.row+1, self.col+1, MoveCommandType.PROMOTE, self.player)
 					)
@@ -132,9 +130,9 @@ class PawnModel(ChessPieceModel):
 					)
 
 		# Validate For King Safety
-		return filter(chessBoardModel.kingSafety, returnMoves)
+		return returnMoves
 
-	def captureTargets(self, chessBoardModel: ChessBoardModel):
+	def captureTargets(self, chessBoardModel):
 		returnMoves = []
 		if self.player == Player.BLACK:
 			if self.row > 0:
@@ -155,5 +153,3 @@ class PawnModel(ChessPieceModel):
 					returnMoves.append((self.row+1, self.col+1))
 
 		return returnMoves
-
-

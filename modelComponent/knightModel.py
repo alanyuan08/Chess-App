@@ -1,6 +1,5 @@
 # Import Model
 from modelComponent.moveCommand import MoveCommand
-from modelComponent.chessBoardModel import ChessBoardModel
 from modelComponent.chessPieceModel import ChessPieceModel
 
 # Enum
@@ -12,12 +11,11 @@ class KnightModel(ChessPieceModel):
 		self.player = player
 		self.row = row
 		self.col = col
-		self.type = PieceType.KNIGHT
 
 	def pieceValue(self):
 		return 300
 
-	def possibleMoves(self, chessBoardModel: ChessBoardModel):
+	def possibleMoves(self, chessBoardModel):
 		returnMoves = []
 		
 		for possibleMoves in [(2, 1), (1, 2), (-2, -1), (-1, -2), (-2, 1), (-1, 2), (2, -1), (1, -2)]:
@@ -34,9 +32,9 @@ class KnightModel(ChessPieceModel):
 					)
 
 		# Validate For King Safety
-		return filter(chessBoardModel.kingSafety, returnMoves)
+		return returnMoves
 
-	def captureTargets(self, chessBoardModel: ChessBoardModel):
+	def captureTargets(self, chessBoardModel):
 		returnMoves = []
 
 		for possibleMoves in [(2, 1), (1, 2), (-2, -1), (-1, -2), (-2, 1), (-1, 2), (2, -1), (1, -2)]:

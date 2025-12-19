@@ -1,6 +1,5 @@
 # Import Model
 from modelComponent.moveCommand import MoveCommand
-from modelComponent.chessBoardModel import ChessBoardModel
 from modelComponent.chessPieceModel import ChessPieceModel
 
 # Enum
@@ -12,13 +11,12 @@ class KingModel(ChessPieceModel):
 		self.player = player
 		self.row = row
 		self.col = col
-		self.type = PieceType.KING
 
 	def pieceValue(self):
 		return 20000
 
 	# List all Possible Moves from Location
-	def possibleMoves(self, chessBoardModel: ChessBoardModel):
+	def possibleMoves(self, chessBoardModel):
 		returnMoves = []
 
 		for possibleMoves in [(-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1)]:
@@ -36,7 +34,7 @@ class KingModel(ChessPieceModel):
 
 		# King + Move to Castle are not in check
 		opponent = ChessBoardModel.opponent(self.player)
-		opponentAttackTargets = chessBoardModel.allOpponentCaptureTargets(opponent)
+		opponentAttackTargets = chessBoardModel.allPlayerCaptureTargets(opponent)
 
 		# Black Queen Side Castle
 		if not chessBoardModel.blackKingMoved and not chessBoardModel.blackQueenSideRookMoved:
@@ -87,10 +85,10 @@ class KingModel(ChessPieceModel):
 				)
 
 		# Validate For King Safety
-		return filter(chessBoardModel.kingSafety, returnMoves)
+		return returnMoves
 
 	# List of targets - Used to check for Castle / King Safety
-	def captureTargets(self, chessBoardModel: ChessBoardModel):
+	def captureTargets(self, chessBoardModel):
 		returnMoves = []
 
 		returnMoves = []
@@ -103,5 +101,3 @@ class KingModel(ChessPieceModel):
 					returnMoves.append((newRow, newCol))
 
 		return returnMoves
-
-
