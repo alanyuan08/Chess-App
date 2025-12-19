@@ -24,13 +24,15 @@ class PawnModel(ChessPieceModel):
 			# Promote
 			if self.row == 1:
 				target = chessBoardModel.board[self.row-1][self.col-1]
-				if self.col > 0 and target != None and target.player != self.player:
-					returnMoves.append(
-						MoveCommand(self.row, self.col, self.row-1, self.col-1, MoveCommandType.PROMOTE, self.player)
-					)
+				if self.col > 0:
+					if (target != None and target.player != self.player) or target == None:
+						returnMoves.append(
+							MoveCommand(self.row, self.col, self.row-1, self.col-1, MoveCommandType.PROMOTE, self.player)
+						)
 
 				target = chessBoardModel.board[self.row-1][self.col+1]
-				if self.col < 7 and target != None and target.player != self.player:
+				if self.col < 7:
+					if (target != None and target.player != self.player) or target == None:
 						returnMoves.append(
 							MoveCommand(self.row, self.col, self.row-1, self.col+1, MoveCommandType.PROMOTE, self.player)
 						)
@@ -79,16 +81,18 @@ class PawnModel(ChessPieceModel):
 			# Promote
 			if self.row == 6:
 				target = chessBoardModel.board[self.row+1][self.col-1]
-				if self.col > 0 and target != None and target.player != self.player:
-					returnMoves.append(
-						MoveCommand(self.row, self.col, self.row+1, self.col-1, MoveCommandType.PROMOTE, self.player)
-					)
+				if self.col > 0:
+					if (target != None and target.player != self.player) or target == None:
+						returnMoves.append(
+							MoveCommand(self.row, self.col, self.row+1, self.col-1, MoveCommandType.PROMOTE, self.player)
+						)
 
 				target = chessBoardModel.board[self.row+1][self.col+1]
-				if self.col < 7 and target != None and target.player != self.player:
-					returnMoves.append(
-						MoveCommand(self.row, self.col, self.row+1, self.col+1, MoveCommandType.PROMOTE, self.player)
-					)
+				if self.col < 7:
+					if (target != None and target.player != self.player) or target == None:
+						returnMoves.append(
+							MoveCommand(self.row, self.col, self.row+1, self.col+1, MoveCommandType.PROMOTE, self.player)
+						)
 
 				if chessBoardModel.board[self.row+1][self.col] == None:
 					returnMoves.append(

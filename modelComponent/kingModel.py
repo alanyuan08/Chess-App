@@ -16,6 +16,13 @@ class KingModel(ChessPieceModel):
 	def pieceValue(self):
 		return 20000
 
+	@staticmethod
+	def opponent(player: Player):
+		if player == Player.WHITE:
+			return Player.BLACK
+		else:
+			return Player.WHITE
+
 	# List all Possible Moves from Location
 	def possibleMoves(self, chessBoardModel):
 		returnMoves = []
@@ -34,8 +41,8 @@ class KingModel(ChessPieceModel):
 					)
 
 		# King + Move to Castle are not in check
-		opponent = ChessBoardModel.opponent(self.player)
-		opponentAttackTargets = chessBoardModel.allPlayerCaptureTargets(opponent)
+		opponent = KingModel.opponent(self.player)
+		opponentAttackTargets = chessBoardModel._allPlayerCaptureTargets(opponent)
 
 		# Black Queen Side Castle
 		if not chessBoardModel.blackKingMoved and not chessBoardModel.blackQueenSideRookMoved:

@@ -49,7 +49,7 @@ class ChessBoardView(QGraphicsPixmapItem):
 	def promotePiece(self, row: int, col: int):
 		for item in self.childItems():
 			if item.row == row and item.col == col:
-				item.setPixmap(QPixmap(ChessPieceView.returnImageURL(item.player, PieceType.QUEEN)))
+				item.setPixmap(QPixmap(ChessPieceView.returnQueenURL(item.player)))
 
 	def movePieceToLocation(self, startRow: int, startCol: int, endRow: int, endCol: int):
 		for item in self.childItems():

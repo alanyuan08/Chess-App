@@ -1,9 +1,6 @@
 # Enum
 from appEnums import PieceType, Player, MoveCommandType
 
-# Model
-from modelComponent.chessBoardModel import ChessBoardModel
-
 class MoveCommand:
 	def __init__(self, startRow: int, startCol: int, endRow: int, 
 		endCol, type: PieceType, player: Player):

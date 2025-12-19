@@ -1,6 +1,9 @@
 # Enum 
 from appEnums import PieceType, Player, MoveCommandType
 
+# Factory
+from modelFactory.chessPieceFactory import ChessPieceFactory
+
 import copy
 
 # Controller 
@@ -31,6 +34,13 @@ class ChessBoardModel():
 		self.whiteKingSquare = (0, 4)
 		self.blackKingSquare = (7, 4)
 
+	@staticmethod
+	def opponent(player: Player):
+		if player == Player.WHITE:
+			return Player.BLACK
+		else:
+			return Player.WHITE
+
 	# Validate the Move
 	def validateMove(self, initRow: int, initCol: int, targetRow: int, targetCol: int, player: Player):
 		# It's not your turn to move
@@ -47,13 +57,6 @@ class ChessBoardModel():
 					return cmd
 
 		return None
-
-	@staticmethod
-	def opponent(player: Player):
-		if player == Player.WHITE:
-			return Player.BLACK
-		else:
-			return Player.WHITE
 
 	# Validate King Safety for player after making move
 	def validateKingSafety(self, cmd):
@@ -184,7 +187,7 @@ class ChessBoardModel():
 			case MoveCommandType.PROMOTE:
 				# Promote the Pawn to a Queen
 				self.board[cmd.startRow][cmd.startCol] = None
-				self.board[cmd.endRow][cmd.endCol] = ChessPieceModel(PieceType.QUEEN, cmd.player, cmd.endRow, cmd.endCol)
+				self.board[cmd.endRow][cmd.endCol] = ChessPieceFactory.createChessPiece(PieceType.QUEEN, cmd.player, cmd.endRow, cmd.endCol)
 
 			# En Passant
 			case MoveCommandType.ENPASSANT:
