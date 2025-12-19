@@ -13,8 +13,23 @@ class RookModel(ChessPieceModel):
 		self.col = col
 		self.type = PieceType.ROOK
 
+	# Rook Value Table White
+	rookValueTable = [
+	    [ 0,  0,  0,  5,  5,  0,  0,  0],
+	    [ 5, 10, 10, 10, 10, 10, 10,  5],
+	    [-5,  0,  0,  0,  0,  0,  0, -5],
+	    [-5,  0,  0,  0,  0,  0,  0, -5],
+	    [-5,  0,  0,  0,  0,  0,  0, -5],
+	    [-5,  0,  0,  0,  0,  0,  0, -5],
+	    [-5,  0,  0,  0,  0,  0,  0, -5],
+	    [ 0,  0,  0,  5,  5,  0,  0,  0] 
+	]
+
 	def pieceValue(self):
-		return 500
+		if self.player == Player.WHITE:
+			return 500 + self.rookValueTable[self.row][self.col]
+		else:
+			return 500 + self.rookValueTable[7 - self.row][self.col]
 
 	# List all Possible Moves from Location
 	def possibleMoves(self, chessBoardModel):

@@ -13,8 +13,23 @@ class BishopModel(ChessPieceModel):
 		self.col = col
 		self.type = PieceType.BISHOP
 
+	# Bishop Value Table White 
+	bishopValueTable = [
+	    [-20, -10, -10, -10, -10, -10, -10, -20],
+	    [-10,   5,   0,   0,   0,   0,   5, -10],
+	    [-10,  10,  10,  10,  10,  10,  10, -10],
+	    [-10,   0,  10,  10,  10,  10,   0, -10],
+	    [-10,   5,   5,  10,  10,   5,   5, -10],
+	    [-10,   0,   5,  10,  10,   5,   0, -10],
+	    [-10,   0,   0,   0,   0,   0,   0, -10],
+	    [-20, -10, -10, -10, -10, -10, -10, -20]
+	]
+
 	def pieceValue(self):
-		return 300
+		if self.player == Player.WHITE:
+			return 300 + self.bishopValueTable[self.row][self.col]
+		else:
+			return 300 + self.bishopValueTable[7 - self.row][self.col]
 
 	# List all Possible Moves from Location
 	def possibleMoves(self, chessBoardModel):

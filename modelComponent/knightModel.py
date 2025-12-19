@@ -13,8 +13,24 @@ class KnightModel(ChessPieceModel):
 		self.col = col
 		self.type = PieceType.KNIGHT
 
+	# Knight Value Table White
+	knightValueTable = [
+	    [-50, -40, -30, -30, -30, -30, -40, -50],
+	    [-40, -20,   0,   5,   5,   0, -20, -40],
+	    [-30,   5,  10,  15,  15,  10,   5, -30],
+	    [-30,   0,  15,  20,  20,  15,   0, -30],
+	    [-30,   5,  15,  20,  20,  15,   5, -30],
+	    [-30,   0,  10,  15,  15,  10,   0, -30], 
+	    [-40, -20,   0,   0,   0,   0, -20, -40],
+	    [-50, -40, -30, -30, -30, -30, -40, -50]
+	]
+
 	def pieceValue(self):
-		return 300
+		if self.player == Player.WHITE:
+			return 300 + self.knightValueTable[self.row][self.col]
+		else:
+			return 300 + self.knightValueTable[7 - self.row][self.col]
+
 
 	def possibleMoves(self, chessBoardModel):
 		returnMoves = []

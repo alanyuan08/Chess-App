@@ -79,43 +79,133 @@ class ChessBoardModel():
 
 		return True
 
-	# Return all Valid moves for a player
-	def allValidMoves(self, player: Player):
+	# Return all Valid moves for currentPlayer
+	def allValidMoves(self):
 		validMoves = []
 
 		for row in range(0, 8):
 			for col in range(0, 8):
-				if self.board[row][col] != None and self.board[row][col].player == player:
-					possibleMoves = self.board[row][col].possibleMoves(self)
-					validMoves += possibleMoves
+				if self.board[row][col] != None:
+					if self.board[row][col].player == self.playerTurn:
+						possibleMoves = self.board[row][col].possibleMoves(self)
+						validMoves += possibleMoves
 
 		return validMoves
 
-	# Return all Capture Moves
-	def allCaptureMoves(self, player: Player):
-		validMoves = []
+	# Compute Board Value - Assume White is the Protagonist
+	def computeBoardValue(self):
+		returnValue = 0
 
 		for row in range(0, 8):
 			for col in range(0, 8):
-				if self.board[row][col] != None and self.board[row][col].player == player:
-					possibleMoves = self.board[row][col].possibleMoves(self)
+				if self.board[row][col] != None:
+					if self.board[row][col].player == Player.WHITE:
+						returnValue += self.board[row][col].pieceValue()
+					else:
+						returnValue -= self.board[row][col].pieceValue()
 
-					for cmd in possibleMoves:
-						if cmd in self.quiescenceMoveCmd:
-							validMoves.append(cmd)
+		return returnValue
+
+	# Return all Capture Moves
+	def allQuiesceneMoves(self):
+		validMoves = []
+
+		for cmd in self.allValidMoves():
+			target = self.board[cmd.endRow][cmd.endCol]
+			if target != None and target.type == PieceType.KING and cmd.moveType in self.quiescenceMoveCmd:
+				validMoves.append(cmd)
 
 		return validMoves
 
 	# Validate King Safety for player after making move
-	def quietState(self, player: Player):
-		opponent = self.opponent(player)
-		captureMoves = self.allCaptureMoves(opponent)
+	def quietState(self):
+		captureMoves = self.allQuiesceneMoves()
 
-		if len(captureMoves) > 0:
-			print(False)
-			return False
-		else:
+		if len(captureMoves) == 0:
 			return True
+		else:
+			return False
+
+	# MinMaxSearch -> Quiesce for Horizon Problem
+	def minMaxQuiesceSearch(self, maximizingPlayer):
+		# Termination Condition
+		if self.quietState():
+			return self.computeBoardValue()
+
+		if maximizingPlayer:
+			bestValue = float('-inf')
+			for cmd in self.allQuiesceneMoves():
+				testBoard = copy.deepcopy(self)
+				testBoard.movePiece(cmd)
+
+				computeValue = testBoard.minMaxQuiesceSearch(False)
+				bestValue = max(bestValue, computeValue)
+				del testBoard
+
+			return bestValue
+
+		else:
+			bestValue = float('inf')
+			for cmd in self.allQuiesceneMoves():
+				testBoard = copy.deepcopy(self)
+				testBoard.movePiece(cmd)
+
+				computeValue = testBoard.minMaxQuiesceSearch(True)
+				bestValue = min(bestValue, computeValue)
+				del testBoard
+
+			return bestValue
+
+	# MinMaxSearch -> General
+	def minMaxSearch(self, maximizingPlayer, depth):
+		# Termination Condition
+		if depth <= 1:
+			if self.quietState():
+				return self.computeBoardValue()
+			else:
+				return self.minMaxQuiesceSearch(maximizingPlayer)
+
+		else:
+			if maximizingPlayer:
+				bestValue = float('-inf')
+				for cmd in self.allValidMoves():
+					testBoard = copy.deepcopy(self)
+					testBoard.movePiece(cmd)
+
+					computeValue = testBoard.minMaxSearch(False, depth - 1)
+					bestValue = max(bestValue, computeValue)
+					del testBoard
+
+				return bestValue
+
+			else:
+				worstValue = float('inf')
+				for cmd in self.allValidMoves():
+					testBoard = copy.deepcopy(self)
+					testBoard.movePiece(cmd)
+
+					computeValue = testBoard.minMaxSearch(True, depth - 1)
+					worstValue = min(worstValue, computeValue)
+					del testBoard
+
+				return worstValue
+
+	# Compute Best Move Using Min-Max
+	def computeBestMove(self):
+		returnCmd = None
+		worstValue = float('inf')
+
+		for cmd in self.allValidMoves():
+			testBoard = copy.deepcopy(self)
+			testBoard.movePiece(cmd)
+			returnValue = testBoard.minMaxSearch(False, 2)
+			del testBoard	
+
+			if returnValue < worstValue:
+				worstValue = min(worstValue, returnValue)
+				returnCmd = cmd
+
+		return returnCmd
 
 	# This is used to determine king safety and castle
 	def _allPlayerCaptureTargets(self, player: Player):
@@ -140,6 +230,30 @@ class ChessBoardModel():
 		movePiece.row = endRow
 		movePiece.col = endCol
 
+		# Update the King Square
+		if movePiece.type == PieceType.KING:
+			if movePiece.player == Player.BLACK:
+				self.blackKingSquare = (endRow, endCol)
+				self.blackKingMoved = True
+
+			elif movePiece.player == Player.WHITE:
+				self.whiteKingSquare = (endRow, endCol)
+				self.whiteKingMoved = True
+
+		# Update Rook 
+		if movePiece.type == PieceType.ROOK:
+			if movePiece.player == Player.BLACK:
+				if startCol == 0:
+					self.blackQueenSideRookMoved = True
+				elif startCol == 7:
+					self.blackKingSideRookMoved = True
+
+			elif movePiece.player == Player.WHITE:
+				if startCol == 0:
+					self.whiteQueenSideRookMoved = True
+				elif startCol == 7:
+					self.whiteKingSideRookMoved = True	
+
 	def movePiece(self, cmd: MoveCommand):
 		# Set enPassant to Null - Reset this if the opponent does a double pawn move
 		self.enPassantColumn = None
@@ -148,62 +262,34 @@ class ChessBoardModel():
 			# Queen Side Castle
 			case MoveCommandType.QUEENSIDECASTLE:
 				if cmd.player == Player.BLACK:
-					self.blackKingMoved = True
-					self.board.blackQueenSideRookMoved = True
-
 					# Move the King 2 steps to the left
 					self._movePieceOnBoard(7, 4, 7, 2)
 
 					# Move the Rook to the right of the king
 					self._movePieceOnBoard(7, 0, 7, 3)
 
-					# Set the Black King Square
-					self.blackKingSquare = (7, 2)
-					self.blackKingMoved = True
-
 				elif cmd.player == Player.WHITE:
-					self.whiteKingMoved = True
-					self.whiteQueenSideRookMoved = True
-
 					# Move the King 2 steps to the left
 					self._movePieceOnBoard(0, 4, 0, 2)
 
 					# Move the Rook to the right of the king
 					self._movePieceOnBoard(0, 0, 0, 3)
 
-					# Set the White King Square
-					self.whiteKingSquare = (0, 2)
-					self.whiteKingMoved = True
-
 			# King Side Castle
 			case MoveCommandType.KINGSIDECASTLE:
 				if cmd.player == Player.BLACK:
-					self.blackKingMoved = True
-					self.blackQueenSideRookMoved = True
-
 					# Move the King 2 steps to the right
 					self._movePieceOnBoard(7, 4, 7, 6)
 
 					# Move the Rook to the right of the king
 					self._movePieceOnBoard(7, 7, 7, 5)
 
-					# Set the Black King Square
-					self.blackKingSquare = (7, 6)
-					self.blackKingMoved = True
-
 				elif cmd.player == Player.WHITE:
-					self.whiteKingMoved = True
-					self.whiteQueenSideRookMoved = True
-
 					# Move the King 2 steps to the right
 					self._movePieceOnBoard(0, 4, 0, 6)
 
 					# Move the Rook to the right of the king
 					self._movePieceOnBoard(0, 7, 0, 5)
-
-					# Set the White King Square
-					self.whiteKingSquare = (0, 6)
-					self.whiteKingMoved = True
 
 			# Move Piece
 			case MoveCommandType.MOVE | MoveCommandType.CAPTURE:
@@ -211,14 +297,6 @@ class ChessBoardModel():
 				self._movePieceOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
 
 				movePiece = self.board[cmd.endRow][cmd.endCol]
-				# Update the King Square
-				if movePiece.type == PieceType.KING:
-					if cmd.player == Player.BLACK:
-						self.blackKingSquare = (cmd.endRow, cmd.endCol)
-						self.blackKingMoved = True
-					elif cmd.player == Player.WHITE:
-						self.whiteKingSquare = (cmd.endRow, cmd.endCol)
-						self.whiteKingMoved = True
 
 			# Double Pawn Move
 			case MoveCommandType.PAWNOPENMOVE:

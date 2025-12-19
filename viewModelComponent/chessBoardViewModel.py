@@ -32,26 +32,24 @@ class ChessBoardViewModel():
             self.chessBoardModel.movePiece(moveCommand)
             # Communicate the command to FrontEnd
             self.communicatorProxy.signal_update_request(moveCommand)
-            # Report quiet State
-            self.chessBoardModel.quietState(player)
 
             # Run the compute for the Opponent's Move
-            # opponentPlayer = ChessBoardModel.opponent(player)
-            # worker = Worker(
-            #     self.takeOpponentTurn, player=opponentPlayer
-            # ) 
+            opponentPlayer = ChessBoardModel.opponent(player)
+            worker = Worker(
+                self.takeOpponentTurn
+            ) 
 
             # Execute
-            # self.threadpool.start(worker)
+            self.threadpool.start(worker)
 
-    # def takeOpponentTurn(self, player):
-    #    # Opponent Takes Turn
-    #    opponentCmd = self.chessBoardModel.computeBestValue(player)
+    def takeOpponentTurn(self):
+       # Opponent Takes Turn
+        opponentCmd = self.chessBoardModel.computeBestMove()
 
-    #    if opponentCmd != None:
-    #        self.chessBoardModel.movePiece(opponentCmd)
-    #        # Communicate the command to FrontEnd
-    #        self.communicatorProxy.signal_update_request(opponentCmd)
+        if opponentCmd != None:
+            self.chessBoardModel.movePiece(opponentCmd)
+            # Communicate the command to FrontEnd
+            self.communicatorProxy.signal_update_request(opponentCmd)
 
 
 class Worker(QRunnable):
