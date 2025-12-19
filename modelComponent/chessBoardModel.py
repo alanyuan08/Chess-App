@@ -112,6 +112,7 @@ class ChessBoardModel():
 		captureMoves = self.allCaptureMoves(opponent)
 
 		if len(captureMoves) > 0:
+			print(False)
 			return False
 		else:
 			return True
