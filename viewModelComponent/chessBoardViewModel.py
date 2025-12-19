@@ -29,7 +29,7 @@ class ChessBoardViewModel():
 
         if moveCommand != None:
             # Move for the Chess Model
-            moveCommand.movePiece(self.chessBoardModel)
+            self.chessBoardModel.movePiece(moveCommand)
             # Communicate the command to FrontEnd
             self.communicatorProxy.signal_update_request(moveCommand)
 

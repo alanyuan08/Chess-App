@@ -11,6 +11,7 @@ class KnightModel(ChessPieceModel):
 		self.player = player
 		self.row = row
 		self.col = col
+		self.type = PieceType.KNIGHT
 
 	def pieceValue(self):
 		return 300
@@ -32,7 +33,7 @@ class KnightModel(ChessPieceModel):
 					)
 
 		# Validate For King Safety
-		return returnMoves
+		return [move for move in returnMoves if chessBoardModel.validateKingSafety(move)]
 
 	def captureTargets(self, chessBoardModel):
 		returnMoves = []

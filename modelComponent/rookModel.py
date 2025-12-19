@@ -11,6 +11,7 @@ class RookModel(ChessPieceModel):
 		self.player = player
 		self.row = row
 		self.col = col
+		self.type = PieceType.ROOK
 
 	def pieceValue(self):
 		return 500
@@ -41,7 +42,8 @@ class RookModel(ChessPieceModel):
 				else:
 					break
 
-		return returnMoves
+		# Validate For King Safety
+		return [move for move in returnMoves if chessBoardModel.validateKingSafety(move)]
 
 	# List of targets - Used to check for Castle / King Safety
 	def captureTargets(self, chessBoardModel):

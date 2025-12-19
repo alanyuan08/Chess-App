@@ -11,6 +11,7 @@ class KingModel(ChessPieceModel):
 		self.player = player
 		self.row = row
 		self.col = col
+		self.type = PieceType.KING
 
 	def pieceValue(self):
 		return 20000
@@ -85,8 +86,8 @@ class KingModel(ChessPieceModel):
 				)
 
 		# Validate For King Safety
-		return returnMoves
-
+		return [move for move in returnMoves if chessBoardModel.validateKingSafety(move)]
+		
 	# List of targets - Used to check for Castle / King Safety
 	def captureTargets(self, chessBoardModel):
 		returnMoves = []
