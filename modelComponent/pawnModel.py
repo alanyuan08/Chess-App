@@ -23,15 +23,15 @@ class PawnModel(ChessPieceModel):
 		if self.player == Player.BLACK:
 			# Promote
 			if self.row == 1:
-				target = chessBoardModel.board[self.row-1][self.col-1]
 				if self.col > 0:
+					target = chessBoardModel.board[self.row-1][self.col-1]
 					if (target != None and target.player != self.player) or target == None:
 						returnMoves.append(
 							MoveCommand(self.row, self.col, self.row-1, self.col-1, MoveCommandType.PROMOTE, self.player)
 						)
 
-				target = chessBoardModel.board[self.row-1][self.col+1]
 				if self.col < 7:
+					target = chessBoardModel.board[self.row-1][self.col+1]
 					if (target != None and target.player != self.player) or target == None:
 						returnMoves.append(
 							MoveCommand(self.row, self.col, self.row-1, self.col+1, MoveCommandType.PROMOTE, self.player)
@@ -58,17 +58,19 @@ class PawnModel(ChessPieceModel):
 						)
 
 				# Normal
-				target = chessBoardModel.board[self.row-1][self.col-1]
-				if self.col > 0 and target != None and target.player != self.player:
-					returnMoves.append(
-						MoveCommand(self.row, self.col, self.row-1, self.col-1, MoveCommandType.CAPTURE, self.player)
-					)
+				if self.col > 0:
+					target = chessBoardModel.board[self.row-1][self.col-1]
+					if target != None and target.player != self.player:
+						returnMoves.append(
+							MoveCommand(self.row, self.col, self.row-1, self.col-1, MoveCommandType.CAPTURE, self.player)
+						)
 
-				target = chessBoardModel.board[self.row-1][self.col+1]
-				if self.col < 7 and target != None and target.player != self.player:
-					returnMoves.append(
-						MoveCommand(self.row, self.col, self.row-1, self.col+1, MoveCommandType.CAPTURE, self.player)
-					)
+				if self.col < 7:
+					target = chessBoardModel.board[self.row-1][self.col+1]
+					if target != None and target.player != self.player:
+						returnMoves.append(
+							MoveCommand(self.row, self.col, self.row-1, self.col+1, MoveCommandType.CAPTURE, self.player)
+						)
 
 				# Pawn Forward
 				if chessBoardModel.board[self.row-1][self.col] == None:
@@ -80,15 +82,15 @@ class PawnModel(ChessPieceModel):
 		elif self.player == Player.WHITE:
 			# Promote
 			if self.row == 6:
-				target = chessBoardModel.board[self.row+1][self.col-1]
 				if self.col > 0:
+					target = chessBoardModel.board[self.row+1][self.col-1]
 					if (target != None and target.player != self.player) or target == None:
 						returnMoves.append(
 							MoveCommand(self.row, self.col, self.row+1, self.col-1, MoveCommandType.PROMOTE, self.player)
 						)
 
-				target = chessBoardModel.board[self.row+1][self.col+1]
 				if self.col < 7:
+					target = chessBoardModel.board[self.row+1][self.col+1]
 					if (target != None and target.player != self.player) or target == None:
 						returnMoves.append(
 							MoveCommand(self.row, self.col, self.row+1, self.col+1, MoveCommandType.PROMOTE, self.player)
@@ -116,17 +118,19 @@ class PawnModel(ChessPieceModel):
 						)
 
 				# Normal
-				target = chessBoardModel.board[self.row+1][self.col-1]
-				if self.col > 0 and target != None and target!= self.player:
-					returnMoves.append(
-						MoveCommand(self.row, self.col, self.row+1, self.col-1, MoveCommandType.CAPTURE, self.player)
-					)
+				if self.col > 0:
+					target = chessBoardModel.board[self.row+1][self.col-1]
+					if target != None and target!= self.player:
+						returnMoves.append(
+							MoveCommand(self.row, self.col, self.row+1, self.col-1, MoveCommandType.CAPTURE, self.player)
+						)
 
-				target = chessBoardModel.board[self.row+1][self.col+1]
-				if self.col < 7 and target != None and target.player != self.player:
-					returnMoves.append(
-						MoveCommand(self.row, self.col, self.row+1, self.col+1, MoveCommandType.CAPTURE, self.player)
-					)
+				if self.col < 7:
+					target = chessBoardModel.board[self.row+1][self.col+1]
+					if target != None and target.player != self.player:
+						returnMoves.append(
+							MoveCommand(self.row, self.col, self.row+1, self.col+1, MoveCommandType.CAPTURE, self.player)
+						)
 
 				# Pawn Forward
 				if chessBoardModel.board[self.row+1][self.col] == None:
