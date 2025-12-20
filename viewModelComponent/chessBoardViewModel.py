@@ -24,8 +24,6 @@ class ChessBoardViewModel():
     def on_move_executed(self, initRow: int, initCol: int, targetRow: int, 
             targetCol: int, player: Player):
 
-        self.chessBoardModel.allQuiesceneMoves()
-
         moveCommand = self.chessBoardModel.validateMove(initRow, 
             initCol, targetRow, targetCol, player)
 
@@ -36,12 +34,12 @@ class ChessBoardViewModel():
             self.communicatorProxy.signal_update_request(moveCommand)
 
             # Run the compute for the Opponent's Move
-            worker = Worker(
-               self.takeOpponentTurn
-            ) 
+            # worker = Worker(
+            #   self.takeOpponentTurn
+            # ) 
 
             # Execute
-            self.threadpool.start(worker)
+            # self.threadpool.start(worker)
 
     def takeOpponentTurn(self):
        # Opponent Takes Turn

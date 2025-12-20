@@ -84,4 +84,3 @@ class BishopModel(ChessPieceModel):
 
 		return returnMoves
 
-	# Move Piece
