@@ -32,8 +32,11 @@ class ChessBoardModel():
 		self.whiteQueenSideRookMoved = False 
 
 		# Used to Check for King Safety
-		self.whiteKingSquare = (0, 4)
-		self.blackKingSquare = (7, 4)
+		self.whiteKingSquareRow = 0
+		self.whiteKingSquareCol = 4
+
+		self.blackKingSquareRow = 7
+		self.blackKingSquareCol = 4
 
 	# Danger Moves
 	quiescenceMoveCmd = [MoveCommandType.PROMOTE, MoveCommandType.CAPTURE, MoveCommandType.ENPASSANT]
@@ -43,7 +46,6 @@ class ChessBoardModel():
 		nonBoardStates = {}
 
 		nonBoardStates['playerTurn'] = self.playerTurn 
-		nonBoardStates['humanPlayers'] = self.humanPlayers
 		nonBoardStates['enPassantColumn'] = self.enPassantColumn 
 		
 		nonBoardStates['blackKingMoved'] = self.blackKingMoved
@@ -54,8 +56,11 @@ class ChessBoardModel():
 		nonBoardStates['whiteKingSideRookMoved'] = self.whiteKingSideRookMoved
 		nonBoardStates['whiteQueenSideRookMoved'] = self.whiteQueenSideRookMoved
 		
-		nonBoardStates['whiteKingSquare'] = self.whiteKingSquare 
-		nonBoardStates['blackKingSquare'] = self.blackKingSquare
+		nonBoardStates['whiteKingSquareRow'] = self.whiteKingSquareRow
+		nonBoardStates['whiteKingSquareCol'] = self.whiteKingSquareCol
+
+		nonBoardStates['blackKingSquareRow'] = self.blackKingSquareRow
+		nonBoardStates['blackKingSquareCol'] = self.blackKingSquareCol
 
 		return nonBoardStates
 
@@ -63,7 +68,6 @@ class ChessBoardModel():
 	def resetBoardState(self, nonBoardStates):
 
 		self.playerTurn  = nonBoardStates['playerTurn']
-		self.humanPlayers = nonBoardStates['humanPlayers']
 		self.enPassantColumn = nonBoardStates['enPassantColumn']
 		
 		self.blackKingMoved = nonBoardStates['blackKingMoved'] 
@@ -74,8 +78,11 @@ class ChessBoardModel():
 		self.whiteKingSideRookMoved = nonBoardStates['whiteKingSideRookMoved']
 		self.whiteQueenSideRookMoved = nonBoardStates['whiteQueenSideRookMoved']
 		
-		self.whiteKingSquare = nonBoardStates['whiteKingSquare']
-		self.blackKingSquare = nonBoardStates['blackKingSquare']
+		self.whiteKingSquareRow = nonBoardStates['whiteKingSquareRow'] 
+		self.whiteKingSquareCol = nonBoardStates['whiteKingSquareCol']
+
+		self.blackKingSquareRow = nonBoardStates['blackKingSquareRow']
+		self.blackKingSquareCol = nonBoardStates['blackKingSquareCol']
 
 		return
 
@@ -114,10 +121,12 @@ class ChessBoardModel():
 		removedPiece = self.movePiece(cmd)
 
 		if currentPlayer == Player.BLACK:
-			if self.blackKingSquare in self._allPlayerCaptureTargets(Player.WHITE):
+			kingTuple = (self.blackKingSquareRow, self.blackKingSquareCol)
+			if kingTuple in self._allPlayerCaptureTargets(Player.WHITE):
 				return False
 		elif currentPlayer == Player.WHITE:
-			if self.whiteKingSquare in self._allPlayerCaptureTargets(Player.BLACK):
+			kingTuple = (self.whiteKingSquareRow, self.whiteKingSquareCol)
+			if kingTuple in self._allPlayerCaptureTargets(Player.BLACK):
 				return False
 
 		self.undoMove(cmd, removedPiece)
@@ -290,11 +299,13 @@ class ChessBoardModel():
 		# Update the King Square
 		if movePiece.type == PieceType.KING:
 			if movePiece.player == Player.BLACK:
-				self.blackKingSquare = (endRow, endCol)
+				self.blackKingSquareRow = endRow
+				self.blackKingSquareCol = endCol
 				self.blackKingMoved = True
 
 			elif movePiece.player == Player.WHITE:
-				self.whiteKingSquare = (endRow, endCol)
+				self.whiteKingSquareRow = endRow
+				self.whiteKingSquareCol = endCol
 				self.whiteKingMoved = True
 
 		# Update Rook 
@@ -314,6 +325,9 @@ class ChessBoardModel():
 	def _undoMoveOnBoard(self, originalRow: int, originalCol: int, currentRow: int, currentCol: int):
 		movePiece = self.board[currentRow][currentCol]
 		self.board[originalRow][originalCol] = movePiece
+		movePiece.row = originalRow
+		movePiece.col = originalCol
+
 		self.board[currentRow][currentCol] = None
 
 	def undoMove(self, cmd: MoveCommand, restorePiece):
@@ -369,7 +383,7 @@ class ChessBoardModel():
 			# Promote Pawn
 			case MoveCommandType.PROMOTE:
 				# Promote the Pawn to a Queen
-				self._undoMoveOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
+				self.board[cmd.endRow][cmd.endCol] = None
 
 				# Store Removed Piece
 				self.board[cmd.startRow][cmd.endCol] = restorePiece
@@ -443,9 +457,6 @@ class ChessBoardModel():
 			case MoveCommandType.PROMOTE:
 				# Store Removed Piece
 				removedPiece = self.board[cmd.startRow][cmd.endCol]
-
-				# Promote the Pawn to a Queen
-				self._movePieceOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
 
 				self.board[cmd.endRow][cmd.endCol] = ChessPieceFactory.createChessPiece(PieceType.QUEEN, self.playerTurn, cmd.endRow, cmd.endCol)
 
