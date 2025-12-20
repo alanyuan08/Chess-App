@@ -135,7 +135,7 @@ class PawnModel(ChessPieceModel):
 				# Normal
 				if self.col > 0:
 					target = chessBoardModel.board[self.row+1][self.col-1]
-					if target != None and target!= self.player:
+					if target != None and target.player != self.player:
 						returnMoves.append(
 							MoveCommand(self.row, self.col, self.row+1, self.col-1, MoveCommandType.CAPTURE)
 						)

@@ -77,7 +77,7 @@ class ChessBoardModel():
 			if testBoard.blackKingSquare in testBoard._allPlayerCaptureTargets(Player.WHITE):
 				return False
 		elif testTurn == Player.WHITE:
-			if testBoard.whiteKingSquare in testBoard._allPlayerCaptureTargets(Player.WHITE):
+			if testBoard.whiteKingSquare in testBoard._allPlayerCaptureTargets(Player.BLACK):
 				return False
 
 		return True
@@ -122,7 +122,6 @@ class ChessBoardModel():
 	# Validate King Safety for player after making move
 	def quietState(self):
 		captureMoves = self.allQuiesceneMoves()
-
 		if len(captureMoves) == 0:
 			return True
 		else:
@@ -142,33 +141,28 @@ class ChessBoardModel():
 
 				computeValue = testBoard.minMaxQuiesceSearch(False)
 				bestValue = max(bestValue, computeValue)
-				del testBoard
 
 			return bestValue
 
 		else:
-			bestValue = float('inf')
+			worstValue = float('inf')
 			for cmd in self.allQuiesceneMoves():
 				testBoard = copy.deepcopy(self)
 				testBoard.movePiece(cmd)
 
 				computeValue = testBoard.minMaxQuiesceSearch(True)
-				bestValue = min(bestValue, computeValue)
-				del testBoard
+				worstValue = min(worstValue, computeValue)
 
-			return bestValue
+			return worstValue
 
 	# MinMaxSearch -> General
 	def minMaxSearch(self, maximizingPlayer, depth):
 		# Termination Condition
 		if depth == 1:
 			if self.quietState():
-				return self.computeBoardValue()
+				return self.computeBoardValue()	
 			else:
-				if maximizingPlayer:
-					return float('-inf')
-				else:
-					return float('inf')
+				return self.minMaxQuiesceSearch(maximizingPlayer)
 
 		else:
 			if maximizingPlayer:
@@ -179,7 +173,6 @@ class ChessBoardModel():
 
 					computeValue = testBoard.minMaxSearch(False, depth - 1)
 					bestValue = max(bestValue, computeValue)
-					del testBoard
 
 				return bestValue
 
@@ -191,7 +184,6 @@ class ChessBoardModel():
 
 					computeValue = testBoard.minMaxSearch(True, depth - 1)
 					worstValue = min(worstValue, computeValue)
-					del testBoard
 
 				return worstValue
 
@@ -204,8 +196,7 @@ class ChessBoardModel():
 			testBoard = copy.deepcopy(self)
 			testBoard.movePiece(cmd)
 			print(cmd)
-			returnValue = testBoard.minMaxSearch(False, 4)
-			del testBoard	
+			returnValue = testBoard.minMaxSearch(False, 2)
 
 			if returnValue < worstValue:
 				worstValue = min(worstValue, returnValue)

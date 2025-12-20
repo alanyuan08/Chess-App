@@ -27,6 +27,7 @@ class RookModel(ChessPieceModel):
 
 	def pieceValue(self):
 		if self.player == Player.WHITE:
+			castleBonus = 0
 			return 500 + self.rookValueTable[self.row][self.col]
 		else:
 			return 500 + self.rookValueTable[7 - self.row][self.col]
