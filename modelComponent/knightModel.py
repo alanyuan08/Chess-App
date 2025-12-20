@@ -41,11 +41,11 @@ class KnightModel(ChessPieceModel):
 			if newRow >= 0 and newRow < 8 and newCol >= 0 and newCol < 8:
 				if chessBoardModel.board[newRow][newCol] == None:
 					returnMoves.append(
-						MoveCommand(self.row, self.col, newRow, newCol, MoveCommandType.MOVE, self.player)
+						MoveCommand(self.row, self.col, newRow, newCol, MoveCommandType.MOVE)
 					)
 				elif chessBoardModel.board[newRow][newCol].player != self.player:
 					returnMoves.append(
-						MoveCommand(self.row, self.col, newRow, newCol, MoveCommandType.CAPTURE, self.player)
+						MoveCommand(self.row, self.col, newRow, newCol, MoveCommandType.CAPTURE)
 					)
 
 		# Validate For King Safety

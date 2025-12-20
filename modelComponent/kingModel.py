@@ -33,11 +33,11 @@ class KingModel(ChessPieceModel):
 			if newRow >= 0 and newRow < 8 and newCol >= 0 and newCol < 8:
 				if chessBoardModel.board[newRow][newCol] == None:
 					returnMoves.append(
-						MoveCommand(self.row, self.col, newRow, newCol, MoveCommandType.MOVE, self.player)
+						MoveCommand(self.row, self.col, newRow, newCol, MoveCommandType.MOVE)
 					)
 				elif chessBoardModel.board[newRow][newCol].player != self.player:
 					returnMoves.append(
-						MoveCommand(self.row, self.col, newRow, newCol, MoveCommandType.CAPTURE, self.player)
+						MoveCommand(self.row, self.col, newRow, newCol, MoveCommandType.CAPTURE)
 					)
 
 		# King + Move to Castle are not in check
@@ -54,7 +54,7 @@ class KingModel(ChessPieceModel):
 					
 				if nullBlock == 4 and (self.row, self.col) not in opponentAttackTargets:
 					returnMoves.append(
-						MoveCommand(self.row, self.col, self.row, self.col-2, MoveCommandType.QUEENSIDECASTLE, self.player)
+						MoveCommand(self.row, self.col, self.row, self.col-2, MoveCommandType.QUEENSIDECASTLE)
 					)
 
 			# Black King Side Castle
@@ -66,7 +66,7 @@ class KingModel(ChessPieceModel):
 
 				if nullBlock == 3 and (self.row, self.col) not in opponentAttackTargets:
 					returnMoves.append(
-						MoveCommand(self.row, self.col, self.row, self.col+2, MoveCommandType.KINGSIDECASTLE, self.player)
+						MoveCommand(self.row, self.col, self.row, self.col+2, MoveCommandType.KINGSIDECASTLE)
 					)
 
 		elif self.player == Player.WHITE:
@@ -79,7 +79,7 @@ class KingModel(ChessPieceModel):
 
 				if nullBlock == 4 and (self.row, self.col) not in opponentAttackTargets:
 					returnMoves.append(
-						MoveCommand(self.row, self.col, self.row, self.col-2, MoveCommandType.QUEENSIDECASTLE, self.player)
+						MoveCommand(self.row, self.col, self.row, self.col-2, MoveCommandType.QUEENSIDECASTLE)
 					)
 
 			# White King Side Castle
@@ -91,7 +91,7 @@ class KingModel(ChessPieceModel):
 
 				if nullBlock == 3 and (self.row, self.col) not in opponentAttackTargets:
 					returnMoves.append(
-						MoveCommand(self.row, self.col, self.row, self.col+2, MoveCommandType.KINGSIDECASTLE, self.player)
+						MoveCommand(self.row, self.col, self.row, self.col+2, MoveCommandType.KINGSIDECASTLE)
 					)
 
 		# Validate For King Safety

@@ -3,7 +3,7 @@ from appEnums import PieceType, Player, MoveCommandType
 
 class MoveCommand:
 	def __init__(self, startRow: int, startCol: int, endRow: int, 
-		endCol, type: PieceType, player: Player):
+		endCol, type: PieceType):
 		self.startRow = startRow
 		self.startCol = startCol
 
@@ -11,7 +11,6 @@ class MoveCommand:
 		self.endCol = endCol
 
 		self.moveType = type
-		self.player = player
 
 	def __str__(self):
 		return "(" + str(self.startRow) + ", " + str(self.startCol) + ") " + "(" + str(self.endRow) + ", " + str(self.endCol) + ") " + str(self.moveType)

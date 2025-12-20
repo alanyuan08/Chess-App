@@ -55,6 +55,8 @@ class ChessBoardModel():
 
 		# Validate the Move Command is a Possible Move
 		targetPiece = self.board[initRow][initCol]
+		if targetPiece == None:
+			return None
 
 		if targetPiece.player == player:
 			possibleMoves = targetPiece.possibleMoves(self)
@@ -66,15 +68,16 @@ class ChessBoardModel():
 
 	# Validate King Safety for player after making move
 	def validateKingSafety(self, cmd: MoveCommand):
+		testTurn = self.playerTurn
+
 		testBoard = copy.deepcopy(self)
 		testBoard.movePiece(cmd)
 
-		opponent = ChessBoardModel.opponent(cmd.player)
-		if cmd.player == Player.WHITE:
-			if testBoard.whiteKingSquare in testBoard._allPlayerCaptureTargets(opponent):
+		if testTurn == Player.BLACK:
+			if testBoard.blackKingSquare in testBoard._allPlayerCaptureTargets(Player.WHITE):
 				return False
-		elif cmd.player == Player.BLACK:
-			if testBoard.blackKingSquare in testBoard._allPlayerCaptureTargets(opponent):
+		elif testTurn == Player.WHITE:
+			if testBoard.whiteKingSquare in testBoard._allPlayerCaptureTargets(Player.WHITE):
 				return False
 
 		return True
@@ -111,8 +114,7 @@ class ChessBoardModel():
 		validMoves = []
 
 		for cmd in self.allValidMoves():
-			target = self.board[cmd.endRow][cmd.endCol]
-			if target != None and target.type == PieceType.KING and cmd.moveType in self.quiescenceMoveCmd:
+			if cmd.moveType in self.quiescenceMoveCmd:
 				validMoves.append(cmd)
 
 		return validMoves
@@ -159,11 +161,14 @@ class ChessBoardModel():
 	# MinMaxSearch -> General
 	def minMaxSearch(self, maximizingPlayer, depth):
 		# Termination Condition
-		if depth <= 1:
+		if depth == 1:
 			if self.quietState():
 				return self.computeBoardValue()
 			else:
-				return self.minMaxQuiesceSearch(maximizingPlayer)
+				if maximizingPlayer:
+					return float('-inf')
+				else:
+					return float('inf')
 
 		else:
 			if maximizingPlayer:
@@ -198,7 +203,8 @@ class ChessBoardModel():
 		for cmd in self.allValidMoves():
 			testBoard = copy.deepcopy(self)
 			testBoard.movePiece(cmd)
-			returnValue = testBoard.minMaxSearch(False, 2)
+			print(cmd)
+			returnValue = testBoard.minMaxSearch(False, 4)
 			del testBoard	
 
 			if returnValue < worstValue:
@@ -210,6 +216,7 @@ class ChessBoardModel():
 	# This is used to determine king safety and castle
 	def _allPlayerCaptureTargets(self, player: Player):
 		attackSquare = {}
+
 		for row in range(0, 8):
 			for col in range(0, 8):
 				targetPiece = self.board[row][col]
@@ -261,14 +268,14 @@ class ChessBoardModel():
 		match cmd.moveType:
 			# Queen Side Castle
 			case MoveCommandType.QUEENSIDECASTLE:
-				if cmd.player == Player.BLACK:
+				if self.playerTurn == Player.BLACK:
 					# Move the King 2 steps to the left
 					self._movePieceOnBoard(7, 4, 7, 2)
 
 					# Move the Rook to the right of the king
 					self._movePieceOnBoard(7, 0, 7, 3)
 
-				elif cmd.player == Player.WHITE:
+				elif self.playerTurn == Player.WHITE:
 					# Move the King 2 steps to the left
 					self._movePieceOnBoard(0, 4, 0, 2)
 
@@ -277,14 +284,14 @@ class ChessBoardModel():
 
 			# King Side Castle
 			case MoveCommandType.KINGSIDECASTLE:
-				if cmd.player == Player.BLACK:
+				if self.playerTurn == Player.BLACK:
 					# Move the King 2 steps to the right
 					self._movePieceOnBoard(7, 4, 7, 6)
 
 					# Move the Rook to the right of the king
 					self._movePieceOnBoard(7, 7, 7, 5)
 
-				elif cmd.player == Player.WHITE:
+				elif self.playerTurn == Player.WHITE:
 					# Move the King 2 steps to the right
 					self._movePieceOnBoard(0, 4, 0, 6)
 
@@ -310,7 +317,7 @@ class ChessBoardModel():
 				# Promote the Pawn to a Queen
 				self._movePieceOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
 
-				self.board[cmd.endRow][cmd.endCol] = ChessPieceFactory.createChessPiece(PieceType.QUEEN, cmd.player, cmd.endRow, cmd.endCol)
+				self.board[cmd.endRow][cmd.endCol] = ChessPieceFactory.createChessPiece(PieceType.QUEEN, self.playerTurn, cmd.endRow, cmd.endCol)
 
 			# En Passant
 			case MoveCommandType.ENPASSANT:
