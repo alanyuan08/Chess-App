@@ -331,6 +331,7 @@ class ChessBoardModel():
 		self.board[currentRow][currentCol] = None
 
 	def undoMove(self, cmd: MoveCommand, restorePiece):
+		print(cmd, restorePiece)
 		# Swap the Player Turn
 		self.playerTurn = ChessBoardModel.opponent(self.playerTurn)
 
@@ -439,12 +440,24 @@ class ChessBoardModel():
 					self._movePieceOnBoard(0, 7, 0, 5)
 
 			# Move Piece
-			case MoveCommandType.MOVE | MoveCommandType.CAPTURE:
+			case MoveCommandType.MOVE:
+				# Move Starting Piece to Capture Point
+				self._movePieceOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
+
+			case MoveCommandType.CAPTURE:
 				# Store the Removed Piece
-				removedPiece = self.board[cmd.startRow][cmd.startCol]
+				target = self.board[cmd.endRow][cmd.endCol]
+				removedPiece = ChessPieceFactory.createChessPiece(
+					target.type, 
+					target.player, 
+					target.row, 
+					target.col
+				)
 
 				# Move Starting Piece to Capture Point
 				self._movePieceOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
+
+				self.board[cmd.endRow][cmd.endCol] = None
 
 			# Double Pawn Move
 			case MoveCommandType.PAWNOPENMOVE:
@@ -456,14 +469,26 @@ class ChessBoardModel():
 			# Promote Pawn
 			case MoveCommandType.PROMOTE:
 				# Store Removed Piece
-				removedPiece = self.board[cmd.startRow][cmd.endCol]
+				target = self.board[cmd.startRow][cmd.startCol]
+				removedPiece = ChessPieceFactory.createChessPiece(
+					target.type, 
+					target.player, 
+					target.row, 
+					target.col
+				)
 
 				self.board[cmd.endRow][cmd.endCol] = ChessPieceFactory.createChessPiece(PieceType.QUEEN, self.playerTurn, cmd.endRow, cmd.endCol)
 
 			# En Passant
 			case MoveCommandType.ENPASSANT:
 				# Store Removed Piece
-				removedPiece = self.board[cmd.startRow][cmd.endCol]
+				target = self.board[cmd.startRow][cmd.endCol]
+				removedPiece = ChessPieceFactory.createChessPiece(
+					target.type, 
+					target.player, 
+					target.row, 
+					target.col
+				)
 
 				# Move the Pawn to the target
 				self._movePieceOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
@@ -476,14 +501,4 @@ class ChessBoardModel():
 
 		# Create a new copy of the removed Piece
 		
-		if removePiece != None:
-			ChessPieceFactory.createChessPiece(
-				removedPiece.type, 
-				removedPiece.player, 
-				removedPiece.row, 
-				removedPiece.col
-			)
-
-		else:
-			return None
-
+		return removedPiece
