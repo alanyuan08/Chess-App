@@ -474,4 +474,16 @@ class ChessBoardModel():
 		# Swap the Player Turn
 		self.playerTurn = ChessBoardModel.opponent(self.playerTurn)
 
-		return removedPiece
+		# Create a new copy of the removed Piece
+		
+		if removePiece != None:
+			ChessPieceFactory.createChessPiece(
+				removedPiece.type, 
+				removedPiece.player, 
+				removedPiece.row, 
+				removedPiece.col
+			)
+
+		else:
+			return None
+
