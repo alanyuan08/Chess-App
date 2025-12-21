@@ -254,7 +254,7 @@ class ChessBoardModel():
 			nonBoardState = self.nonBoardState()
 			removedPiece = self.movePiece(cmd)
 
-			returnValue = self.minMaxSearch(False, 2)
+			returnValue = self.minMaxSearch(False, 4)
 			if returnValue < worstValue:
 				worstValue = min(worstValue, returnValue)
 				returnCmd = cmd
@@ -281,9 +281,6 @@ class ChessBoardModel():
 
 	# Move Piece on ChessBoard
 	def _movePieceOnBoard(self, startRow: int, startCol: int, endRow: int, endCol: int):
-		if self.board[startRow][startCol] == None:
-			print("BREAK")
-
 		self.board[endRow][endCol] = self.board[startRow][startCol]
 		self.board[endRow][endCol].row = endRow
 		self.board[endRow][endCol].col = endCol
@@ -317,9 +314,6 @@ class ChessBoardModel():
 					self.whiteKingSideRookMoved = True	
 
 	def _undoMoveOnBoard(self, originalRow: int, originalCol: int, currentRow: int, currentCol: int):
-		if self.board[currentRow][currentCol] == None:
-			print("BREAK")
-
 		self.board[originalRow][originalCol] = self.board[currentRow][currentCol] 
 		self.board[originalRow][originalCol].row = originalRow
 		self.board[originalRow][originalCol].col = originalCol
@@ -372,9 +366,6 @@ class ChessBoardModel():
 				# Move Starting Piece to Capture Point
 				self._undoMoveOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
 
-				if restorePiece == None:
-					print("BREAKPOINT")
-
 				# Restore Piece
 				self.board[cmd.endRow][cmd.endCol] = restorePiece
 
@@ -388,9 +379,6 @@ class ChessBoardModel():
 				# Promote the Pawn to a Queen
 				self.board[cmd.endRow][cmd.endCol] = None
 
-				if restorePiece == None:
-					print("BREAKPOINT")
-
 				# Store Removed Piece
 				self.board[cmd.startRow][cmd.startCol] = restorePiece
 
@@ -398,9 +386,6 @@ class ChessBoardModel():
 			case MoveCommandType.ENPASSANT:
 				# Move the Pawn to the target
 				self._undoMoveOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
-
-				if restorePiece == None:
-					print("BREAKPOINT")
 
 				# Store Removed Piece
 				self.board[cmd.startRow][cmd.endCol] = restorePiece
