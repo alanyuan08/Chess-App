@@ -37,15 +37,13 @@ class ChessBoardModel():
 
 		self.blackKingSquareRow = 7
 		self.blackKingSquareCol = 4
-
+		
 	# Danger Moves
 	quiescenceMoveCmd = [MoveCommandType.PROMOTE, MoveCommandType.CAPTURE, MoveCommandType.ENPASSANT]
 
 	# Store NonBoard States -> Used for Undo
 	def nonBoardState(self):
 		nonBoardStates = {}
-
-		nonBoardStates['playerTurn'] = self.playerTurn 
 		nonBoardStates['enPassantColumn'] = self.enPassantColumn 
 		
 		nonBoardStates['blackKingMoved'] = self.blackKingMoved
@@ -66,8 +64,6 @@ class ChessBoardModel():
 
 	# Reset Board State
 	def resetBoardState(self, nonBoardStates):
-
-		self.playerTurn  = nonBoardStates['playerTurn']
 		self.enPassantColumn = nonBoardStates['enPassantColumn']
 		
 		self.blackKingMoved = nonBoardStates['blackKingMoved'] 
@@ -123,15 +119,18 @@ class ChessBoardModel():
 		if currentPlayer == Player.BLACK:
 			kingTuple = (self.blackKingSquareRow, self.blackKingSquareCol)
 			if kingTuple in self._allPlayerCaptureTargets(Player.WHITE):
+				self.undoMove(cmd, removedPiece)
+				self.resetBoardState(nonBoardState)
 				return False
 		elif currentPlayer == Player.WHITE:
 			kingTuple = (self.whiteKingSquareRow, self.whiteKingSquareCol)
 			if kingTuple in self._allPlayerCaptureTargets(Player.BLACK):
+				self.undoMove(cmd, removedPiece)
+				self.resetBoardState(nonBoardState)
 				return False
 
 		self.undoMove(cmd, removedPiece)
 		self.resetBoardState(nonBoardState)
-
 		return True
 
 	# Return all Valid moves for currentPlayer
@@ -142,8 +141,8 @@ class ChessBoardModel():
 			for col in range(0, 8):
 				if self.board[row][col] != None:
 					if self.board[row][col].player == self.playerTurn:
-						possibleMoves = self.board[row][col].possibleMoves(self)
-						validMoves += possibleMoves
+						for cmd in self.board[row][col].possibleMoves(self):
+							validMoves.append(cmd)
 
 		return validMoves
 
@@ -166,64 +165,57 @@ class ChessBoardModel():
 		validMoves = []
 
 		for cmd in self.allValidMoves():
-			if cmd.moveType in self.quiescenceMoveCmd:
+			if cmd.moveType in [MoveCommandType.PROMOTE, MoveCommandType.ENPASSANT]:
 				validMoves.append(cmd)
+			elif cmd.moveType == MoveCommandType.CAPTURE:
+				target = self.board[cmd.endRow][cmd.endCol]
+				piece = self.board[cmd.startRow][cmd.startCol]
+
+				if piece.pieceValue() < target.pieceValue():
+					validMoves.append(cmd)
 
 		return validMoves
 
-	# Validate King Safety for player after making move
-	def quietState(self):
-		captureMoves = self.allQuiesceneMoves()
-		if len(captureMoves) == 0:
-			return True
-		else:
-			return False
-
-	# MinMaxSearch -> Quiesce for Horizon Problem
-	def minMaxQuiesceSearch(self, maximizingPlayer):
+	# MinMaxSearch -> General
+	def quiesceneMoves(self, maximizingPlayer):
 		# Termination Condition
-		noisyMoves = self.allQuiesceneMoves()
-
-		if len(noisyMoves) == 0:
+		quiescenceMoves = self.allQuiesceneMoves()
+		if len(quiescenceMoves) == 0:
 			return self.computeBoardValue()
-
-		if maximizingPlayer:
-			bestValue = float('-inf')
-			for cmd in noisyMoves:
-				nonBoardState = self.nonBoardState()
-				removedPiece = self.movePiece(cmd)
-
-				computeValue = self.minMaxQuiesceSearch(False)
-				bestValue = max(bestValue, computeValue)
-
-				self.undoMove(cmd, removedPiece)
-				self.resetBoardState(nonBoardState)
-
-			return bestValue
-
 		else:
-			worstValue = float('inf')
-			for cmd in noisyMoves:
-				nonBoardState = self.nonBoardState()
-				removedPiece = self.movePiece(cmd)
+			if maximizingPlayer:
+				bestValue = float('-inf')
+				for cmd in quiescenceMoves:
+					nonBoardState = self.nonBoardState()
+					removedPiece = self.movePiece(cmd)
 
-				computeValue = self.minMaxQuiesceSearch(True)
-				worstValue = min(worstValue, computeValue)
+					computeValue = self.quiesceneMoves(False)
+					bestValue = max(bestValue, computeValue)
 
-				self.undoMove(cmd, removedPiece)
-				self.resetBoardState(nonBoardState)
+					self.undoMove(cmd, removedPiece)
+					self.resetBoardState(nonBoardState)
 
-			return worstValue
+				return bestValue
+
+			else:
+				worstValue = float('inf')
+				for cmd in quiescenceMoves:
+					nonBoardState = self.nonBoardState()
+					removedPiece = self.movePiece(cmd)
+
+					computeValue = self.quiesceneMoves(True)
+					worstValue = min(worstValue, computeValue)
+
+					self.undoMove(cmd, removedPiece)
+					self.resetBoardState(nonBoardState)
+
+				return worstValue
 
 	# MinMaxSearch -> General
 	def minMaxSearch(self, maximizingPlayer, depth):
 		# Termination Condition
 		if depth == 0:
-			if maximizingPlayer:
-				return self.minMaxQuiesceSearch(False)
-			else:
-				return self.minMaxQuiesceSearch(True)
-
+			return self.quiesceneMoves(maximizingPlayer)
 		else:
 			if maximizingPlayer:
 				bestValue = float('-inf')
@@ -262,7 +254,7 @@ class ChessBoardModel():
 			nonBoardState = self.nonBoardState()
 			removedPiece = self.movePiece(cmd)
 
-			returnValue = self.minMaxSearch(False, 0)
+			returnValue = self.minMaxSearch(False, 2)
 			if returnValue < worstValue:
 				worstValue = min(worstValue, returnValue)
 				returnCmd = cmd
@@ -289,49 +281,52 @@ class ChessBoardModel():
 
 	# Move Piece on ChessBoard
 	def _movePieceOnBoard(self, startRow: int, startCol: int, endRow: int, endCol: int):
-		movePiece = self.board[startRow][startCol]
-		self.board[endRow][endCol] = movePiece
+		if self.board[startRow][startCol] == None:
+			print("BREAK")
+
+		self.board[endRow][endCol] = self.board[startRow][startCol]
+		self.board[endRow][endCol].row = endRow
+		self.board[endRow][endCol].col = endCol
+
 		self.board[startRow][startCol] = None
 
-		movePiece.row = endRow
-		movePiece.col = endCol
-
 		# Update the King Square
-		if movePiece.type == PieceType.KING:
-			if movePiece.player == Player.BLACK:
+		if self.board[endRow][endCol].type == PieceType.KING:
+			if self.board[endRow][endCol].player == Player.BLACK:
 				self.blackKingSquareRow = endRow
 				self.blackKingSquareCol = endCol
 				self.blackKingMoved = True
 
-			elif movePiece.player == Player.WHITE:
+			elif self.board[endRow][endCol].player == Player.WHITE:
 				self.whiteKingSquareRow = endRow
 				self.whiteKingSquareCol = endCol
 				self.whiteKingMoved = True
 
 		# Update Rook 
-		if movePiece.type == PieceType.ROOK:
-			if movePiece.player == Player.BLACK:
+		if self.board[endRow][endCol].type == PieceType.ROOK:
+			if self.board[endRow][endCol].player == Player.BLACK:
 				if startCol == 0:
 					self.blackQueenSideRookMoved = True
 				elif startCol == 7:
 					self.blackKingSideRookMoved = True
 
-			elif movePiece.player == Player.WHITE:
+			elif self.board[endRow][endCol].player == Player.WHITE:
 				if startCol == 0:
 					self.whiteQueenSideRookMoved = True
 				elif startCol == 7:
 					self.whiteKingSideRookMoved = True	
 
 	def _undoMoveOnBoard(self, originalRow: int, originalCol: int, currentRow: int, currentCol: int):
-		movePiece = self.board[currentRow][currentCol]
-		self.board[originalRow][originalCol] = movePiece
-		movePiece.row = originalRow
-		movePiece.col = originalCol
+		if self.board[currentRow][currentCol] == None:
+			print("BREAK")
+
+		self.board[originalRow][originalCol] = self.board[currentRow][currentCol] 
+		self.board[originalRow][originalCol].row = originalRow
+		self.board[originalRow][originalCol].col = originalCol
 
 		self.board[currentRow][currentCol] = None
 
 	def undoMove(self, cmd: MoveCommand, restorePiece):
-		print(cmd, restorePiece)
 		# Swap the Player Turn
 		self.playerTurn = ChessBoardModel.opponent(self.playerTurn)
 
@@ -369,9 +364,16 @@ class ChessBoardModel():
 					self._undoMoveOnBoard(0, 7, 0, 5)
 
 			# Move Piece
-			case MoveCommandType.MOVE | MoveCommandType.CAPTURE:
+			case MoveCommandType.MOVE:
 				# Move Starting Piece to Capture Point
 				self._undoMoveOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
+
+			case MoveCommandType.CAPTURE:
+				# Move Starting Piece to Capture Point
+				self._undoMoveOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
+
+				if restorePiece == None:
+					print("BREAKPOINT")
 
 				# Restore Piece
 				self.board[cmd.endRow][cmd.endCol] = restorePiece
@@ -386,13 +388,19 @@ class ChessBoardModel():
 				# Promote the Pawn to a Queen
 				self.board[cmd.endRow][cmd.endCol] = None
 
+				if restorePiece == None:
+					print("BREAKPOINT")
+
 				# Store Removed Piece
-				self.board[cmd.startRow][cmd.endCol] = restorePiece
+				self.board[cmd.startRow][cmd.startCol] = restorePiece
 
 			# En Passant
 			case MoveCommandType.ENPASSANT:
 				# Move the Pawn to the target
 				self._undoMoveOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
+
+				if restorePiece == None:
+					print("BREAKPOINT")
 
 				# Store Removed Piece
 				self.board[cmd.startRow][cmd.endCol] = restorePiece
@@ -457,8 +465,6 @@ class ChessBoardModel():
 				# Move Starting Piece to Capture Point
 				self._movePieceOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
 
-				self.board[cmd.endRow][cmd.endCol] = None
-
 			# Double Pawn Move
 			case MoveCommandType.PAWNOPENMOVE:
 				# Move the piece from start to end
@@ -477,19 +483,18 @@ class ChessBoardModel():
 					target.col
 				)
 
-				self.board[cmd.endRow][cmd.endCol] = ChessPieceFactory.createChessPiece(PieceType.QUEEN, self.playerTurn, cmd.endRow, cmd.endCol)
+				self.board[cmd.endRow][cmd.endCol] = ChessPieceFactory.createChessPiece(
+					PieceType.QUEEN, self.playerTurn, cmd.endRow, cmd.endCol)
 
+				# Remove the Start Item
 				self.board[cmd.startRow][cmd.startCol] = None
-				
+
 			# En Passant
 			case MoveCommandType.ENPASSANT:
 				# Store Removed Piece
 				target = self.board[cmd.startRow][cmd.endCol]
 				removedPiece = ChessPieceFactory.createChessPiece(
-					target.type, 
-					target.player, 
-					target.row, 
-					target.col
+					target.type, target.player, target.row, target.col
 				)
 
 				# Move the Pawn to the target
@@ -502,5 +507,4 @@ class ChessBoardModel():
 		self.playerTurn = ChessBoardModel.opponent(self.playerTurn)
 
 		# Create a new copy of the removed Piece
-		
 		return removedPiece

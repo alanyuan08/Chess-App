@@ -52,7 +52,7 @@ class KingModel(ChessPieceModel):
 					if chessBoardModel.board[7][i] == None and (7, i) not in opponentAttackTargets:
 						nullBlock += 1
 					
-				if nullBlock == 4 and (self.row, self.col) not in opponentAttackTargets:
+				if nullBlock == 4:
 					returnMoves.append(
 						MoveCommand(self.row, self.col, self.row, self.col-2, MoveCommandType.QUEENSIDECASTLE)
 					)
@@ -64,7 +64,7 @@ class KingModel(ChessPieceModel):
 					if chessBoardModel.board[7][i] == None and (7, i) not in opponentAttackTargets:
 						nullBlock += 1
 
-				if nullBlock == 3 and (self.row, self.col) not in opponentAttackTargets:
+				if nullBlock == 3:
 					returnMoves.append(
 						MoveCommand(self.row, self.col, self.row, self.col+2, MoveCommandType.KINGSIDECASTLE)
 					)
@@ -77,7 +77,7 @@ class KingModel(ChessPieceModel):
 					if chessBoardModel.board[0][i] == None and (0, i) not in opponentAttackTargets:
 						nullBlock += 1
 
-				if nullBlock == 4 and (self.row, self.col) not in opponentAttackTargets:
+				if nullBlock == 4:
 					returnMoves.append(
 						MoveCommand(self.row, self.col, self.row, self.col-2, MoveCommandType.QUEENSIDECASTLE)
 					)
@@ -89,7 +89,7 @@ class KingModel(ChessPieceModel):
 					if chessBoardModel.board[0][i] == None and (0, i) not in opponentAttackTargets:
 						nullBlock += 1
 
-				if nullBlock == 3 and (self.row, self.col) not in opponentAttackTargets:
+				if nullBlock == 3:
 					returnMoves.append(
 						MoveCommand(self.row, self.col, self.row, self.col+2, MoveCommandType.KINGSIDECASTLE)
 					)

@@ -14,6 +14,8 @@ from viewComponent.chessBoardView import ChessBoardView
 from viewModelComponent.chessBoardViewModel import ChessBoardViewModel
 
 if __name__ == '__main__':
+	sys.setrecursionlimit(500)
+
 	app = QApplication(sys.argv)
 
 	# Init Scene + View
