@@ -24,7 +24,7 @@ if __name__ == '__main__':
 	view.setFixedSize(720, 720)
 
 	# Create ChessBoard/ Chess Piece Model Components
-	chessBoardModel = ChessBoardFactory.createChessBoard([Player.WHITE, Player.BLACK])
+	chessBoardModel = ChessBoardFactory.createChessBoard([Player.WHITE])
 
 	# Create View Components
 	chessBoardView = ChessBoardView(scene, chessBoardModel)

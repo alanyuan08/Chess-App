@@ -222,7 +222,7 @@ class ChessBoardModel():
                 return worstValue
 
     # MinMaxSearch -> General
-    def minMaxSearch(self, maximizingPlayer, depth, alpha, beta):
+    def minMaxSearch(self, maximizingPlayer, depth):
         # Termination Condition
         if depth == 0:
             return self.computeBoardValue()
@@ -233,15 +233,11 @@ class ChessBoardModel():
                     nonBoardState = self.nonBoardState()
                     removedPiece = self.movePiece(cmd)
 
-                    computeValue = self.minMaxSearch(False, depth - 1, alpha, beta)
+                    computeValue = self.minMaxSearch(False, depth - 1)
                     bestValue = max(bestValue, computeValue)
 
                     self.undoMove(cmd, removedPiece)
                     self.resetBoardState(nonBoardState)
-
-                    alpha = max(alpha, computeValue)
-                    if beta <= alpha:
-                        break
 
                 return bestValue
 
@@ -251,15 +247,11 @@ class ChessBoardModel():
                     nonBoardState = self.nonBoardState()
                     removedPiece = self.movePiece(cmd)
 
-                    computeValue = self.minMaxSearch(True, depth - 1, alpha, beta)
+                    computeValue = self.minMaxSearch(True, depth - 1)
                     worstValue = min(worstValue, computeValue)
 
                     self.undoMove(cmd, removedPiece)
                     self.resetBoardState(nonBoardState)
-
-                    beta = min(beta, computeValue)
-                    if beta <= alpha:
-                        break
 
                 return worstValue
 
@@ -273,7 +265,7 @@ class ChessBoardModel():
             removedPiece = self.movePiece(cmd)
 
             print(cmd)
-            returnValue = self.minMaxSearch(False, 4, -float('inf'), float('inf'))
+            returnValue = self.minMaxSearch(False, 2)
             if returnValue < worstValue:
                 worstValue = min(worstValue, returnValue)
                 returnCmd = cmd
