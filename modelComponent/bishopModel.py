@@ -13,7 +13,7 @@ class BishopModel(ChessPieceModel):
 		self.col = col
 		self.type = PieceType.BISHOP
 
-	# Bishop Value Table White 
+	# Bishop Value Table Black 
 	bishopValueTable = [
 	    [-20, -10, -10, -10, -10, -10, -10, -20],
 	    [-10,   5,   0,   0,   0,   0,   5, -10],
@@ -25,8 +25,11 @@ class BishopModel(ChessPieceModel):
 	    [-20, -10, -10, -10, -10, -10, -10, -20]
 	]
 
-	def pieceValue(self):
-		if self.player == Player.WHITE:
+	def rawValue(self):
+		return 300
+
+	def pieceValue(self, chessBoard):
+		if self.player == Player.BLACK:
 			return 300 + self.bishopValueTable[self.row][self.col]
 		else:
 			return 300 + self.bishopValueTable[7 - self.row][self.col]

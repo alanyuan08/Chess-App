@@ -25,8 +25,11 @@ class KnightModel(ChessPieceModel):
 	    [-50, -40, -30, -30, -30, -30, -40, -50]
 	]
 
-	def pieceValue(self):
-		if self.player == Player.WHITE:
+	def rawValue(self):
+		return 300
+
+	def pieceValue(self, chessBoard):
+		if self.player == Player.BLACK:
 			return 300 + self.knightValueTable[self.row][self.col]
 		else:
 			return 300 + self.knightValueTable[7 - self.row][self.col]

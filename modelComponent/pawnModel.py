@@ -25,8 +25,11 @@ class PawnModel(ChessPieceModel):
 	    [ 0,  0,  0,  0,  0,  0,  0,  0] 
 	]
 
-	def pieceValue(self):
-		if self.player == Player.WHITE:
+	def rawValue(self):
+		return 100
+
+	def pieceValue(self, chessBoard):
+		if self.player == Player.BLACK:
 			return 100 + self.pawnValueTable[self.row][self.col]
 		else:
 			return 100 + self.pawnValueTable[7 - self.row][self.col]

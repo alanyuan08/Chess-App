@@ -13,8 +13,34 @@ class KingModel(ChessPieceModel):
 		self.col = col
 		self.type = PieceType.KING
 
-	def pieceValue(self):
+	def rawValue(self):
 		return 20000
+
+	def pieceValue(self, chessBoard):
+		returnScore = 20000
+		if self.player == Player.WHITE:
+			if chessBoard.whiteCastled:
+				returnScore += 100
+			else:
+				if chessBoard.whiteKingSideRookMoved:
+					returnScore -= 20
+				if chessBoard.whiteQueenSideRookMoved:
+					returnScore -= 20
+				if chessBoard.whiteKingMoved:
+					returnScore -= 20
+
+		elif self.player == Player.BLACK:
+			if chessBoard.blackCastled:
+				returnScore += 100
+			else:
+				if chessBoard.blackKingSideRookMoved:
+					returnScore -= 20
+				if chessBoard.blackQueenSideRookMoved:
+					returnScore -= 20
+				if chessBoard.blackKingMoved:
+					returnScore -= 20
+
+		return returnScore
 
 	@staticmethod
 	def opponent(player: Player):
