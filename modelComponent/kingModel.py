@@ -22,23 +22,19 @@ class KingModel(ChessPieceModel):
 			if chessBoard.whiteCastled:
 				returnScore += 100
 			else:
-				if chessBoard.whiteKingSideRookMoved:
-					returnScore -= 20
-				if chessBoard.whiteQueenSideRookMoved:
-					returnScore -= 20
-				if chessBoard.whiteKingMoved:
-					returnScore -= 20
+				if chessBoard.whiteKingSideRookMoved or \
+				chessBoard.whiteQueenSideRookMoved or \
+				chessBoard.whiteKingMoved:
+					returnScore -= 60
 
 		elif self.player == Player.BLACK:
 			if chessBoard.blackCastled:
 				returnScore += 100
 			else:
-				if chessBoard.blackKingSideRookMoved:
-					returnScore -= 20
-				if chessBoard.blackQueenSideRookMoved:
-					returnScore -= 20
-				if chessBoard.blackKingMoved:
-					returnScore -= 20
+				if chessBoard.blackKingSideRookMoved or \
+				chessBoard.blackQueenSideRookMoved or \
+				chessBoard.blackKingMoved:
+					returnScore -= 60
 
 		return returnScore
 

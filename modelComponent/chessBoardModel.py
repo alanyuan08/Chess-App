@@ -168,64 +168,42 @@ class ChessBoardModel():
         validMoves = []
 
         for cmd in self.allValidMoves():
-            if cmd.moveType in [MoveCommandType.PROMOTE, MoveCommandType.ENPASSANT]:
+            if cmd.moveType in self.quiescenceMoveCmd:
                 validMoves.append(cmd)
-            elif cmd.moveType == MoveCommandType.CAPTURE:
-                target = self.board[cmd.endRow][cmd.endCol]
-                capturingPiece = self.board[cmd.startRow][cmd.startCol]
-
-                if capturingPiece.rawValue() <= target.rawValue():
-                    validMoves.append(cmd)
 
         return validMoves
 
     # MinMaxSearch -> General
-    def quiesceneMoves(self, maximizingPlayer, alpha, beta):
-        # Termination Condition
-        if len(self.allQuiesceneMoves()) == 0:
-            return self.computeBoardValue()
-        else:
-            if maximizingPlayer:
-                bestValue = float('-inf')
-                for cmd in self.allQuiesceneMoves():
-                    nonBoardState = self.nonBoardState()
-                    removedPiece = self.movePiece(cmd)
+    def quiesceneSearch(self, alpha, beta):
 
-                    computeValue = self.quiesceneMoves(False, alpha, beta)
-                    bestValue = max(bestValue, computeValue)
+        staticEval = self.computeBoardValue()
+        if staticEval >= beta:
+            return beta
 
-                    self.undoMove(cmd, removedPiece)
-                    self.resetBoardState(nonBoardState)
+        if staticEval > alpha:
+            alpha = staticEval
 
-                    alpha = max(alpha, computeValue)
-                    if beta <= alpha:
-                        break
+        for cmd in self.allQuiesceneMoves():
+            nonBoardState = self.nonBoardState()
+            removedPiece = self.movePiece(cmd)
 
-                return bestValue
+            score = (-1) * self.quiesceneSearch((-1) * beta, (-1) * alpha)
 
-            else:
-                worstValue = float('inf')
-                for cmd in self.allQuiesceneMoves():
-                    nonBoardState = self.nonBoardState()
-                    removedPiece = self.movePiece(cmd)
+            self.undoMove(cmd, removedPiece)
+            self.resetBoardState(nonBoardState)
 
-                    computeValue = self.quiesceneMoves(True, alpha, beta)
-                    worstValue = min(worstValue, computeValue)
+            if score >= beta:
+                return beta
+            if score > alpha:
+                alpha = score
 
-                    self.undoMove(cmd, removedPiece)
-                    self.resetBoardState(nonBoardState)
-
-                    beta = min(beta, computeValue)
-                    if beta <= alpha:
-                        break
-
-                return worstValue
+        return alpha
 
     # MinMaxSearch -> General
     def minMaxSearch(self, maximizingPlayer, depth):
         # Termination Condition
         if depth == 0:
-            return self.computeBoardValue()
+            return self.quiesceneSearch(float('-inf'), float('inf'))
         else:
             if maximizingPlayer:
                 bestValue = float('-inf')
