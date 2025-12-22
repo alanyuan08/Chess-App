@@ -86,18 +86,18 @@ class ChessBoardView(QGraphicsPixmapItem):
 
 			# Queen Side Castle
 			case MoveCommandType.QUEENSIDECASTLE:
-				if cmd.player == Player.BLACK:
+				if cmd.startRow == 7:
 					self.movePieceToLocation(7, 0, 7, 3)
 					self.movePieceToLocation(7, 4, 7, 2)
-				elif cmd.player == Player.WHITE:
+				else:
 					self.movePieceToLocation(0, 0, 0, 3)
 					self.movePieceToLocation(0, 4, 0, 2)
 
 			# King Side Castle
-			case MoveCommandType.KINGSIDECASTLE:
-				if cmd.player == Player.BLACK:
+			case MoveCommandType.KINGSIDECASTLE:				
+				if cmd.startRow == 7:
 					self.movePieceToLocation(7, 7, 7, 5)
 					self.movePieceToLocation(7, 4, 7, 6)
-				elif cmd.player == Player.WHITE:
+				else:
 					self.movePieceToLocation(0, 7, 0, 5)
 					self.movePieceToLocation(0, 4, 0, 6)

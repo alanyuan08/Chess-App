@@ -35,11 +35,11 @@ class ChessBoardViewModel():
 
             # Run the compute for the Opponent's Move
             # worker = Worker(
-            #   self.takeOpponentTurn
-            # ) 
+            #    self.takeOpponentTurn
+            #) 
 
             # Execute
-             #self.threadpool.start(worker)
+            # self.threadpool.start(worker)
 
     def takeOpponentTurn(self):
        # Opponent Takes Turn

@@ -180,12 +180,9 @@ class ChessBoardModel():
         return validMoves
 
     # MinMaxSearch -> General
-    def quiesceneMoves(self, maximizingPlayer, alpha, beta, depth):
-        # Max-Depth
-        if depth == 0:
-            return self.computeBoardValue()
+    def quiesceneMoves(self, maximizingPlayer, alpha, beta):
         # Termination Condition
-        elif len(self.allQuiesceneMoves()) == 0:
+        if len(self.allQuiesceneMoves()) == 0:
             return self.computeBoardValue()
         else:
             if maximizingPlayer:
@@ -194,7 +191,7 @@ class ChessBoardModel():
                     nonBoardState = self.nonBoardState()
                     removedPiece = self.movePiece(cmd)
 
-                    computeValue = self.quiesceneMoves(False, alpha, beta, depth-1)
+                    computeValue = self.quiesceneMoves(False, alpha, beta)
                     bestValue = max(bestValue, computeValue)
 
                     self.undoMove(cmd, removedPiece)
@@ -212,7 +209,7 @@ class ChessBoardModel():
                     nonBoardState = self.nonBoardState()
                     removedPiece = self.movePiece(cmd)
 
-                    computeValue = self.quiesceneMoves(True, alpha, beta, depth-1)
+                    computeValue = self.quiesceneMoves(True, alpha, beta)
                     worstValue = min(worstValue, computeValue)
 
                     self.undoMove(cmd, removedPiece)
@@ -275,7 +272,7 @@ class ChessBoardModel():
             nonBoardState = self.nonBoardState()
             removedPiece = self.movePiece(cmd)
 
-            print(cmd, self.computeBoardValue())
+            print(cmd)
             returnValue = self.minMaxSearch(False, 4, -float('inf'), float('inf'))
             if returnValue < worstValue:
                 worstValue = min(worstValue, returnValue)
@@ -393,7 +390,7 @@ class ChessBoardModel():
 
             # Move Piece
             case MoveCommandType.MOVE:
-                # Move Starting Piece to Capture Point
+                # Move Starting Piece to Move Point
                 self._undoMoveOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
 
             case MoveCommandType.CAPTURE:
@@ -485,13 +482,7 @@ class ChessBoardModel():
 
             case MoveCommandType.CAPTURE:
                 # Store the Removed Piece
-                target = self.board[cmd.endRow][cmd.endCol]
-                removedPiece = ChessPieceFactory.createChessPiece(
-                    target.type, 
-                    target.player, 
-                    target.row, 
-                    target.col
-                )
+                removedPiece = self.board[cmd.endRow][cmd.endCol]
 
                 # Move Starting Piece to Capture Point
                 self._movePieceOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
@@ -506,13 +497,7 @@ class ChessBoardModel():
             # Promote Pawn
             case MoveCommandType.PROMOTE:
                 # Store Removed Piece
-                target = self.board[cmd.startRow][cmd.startCol]
-                removedPiece = ChessPieceFactory.createChessPiece(
-                    target.type, 
-                    target.player, 
-                    target.row, 
-                    target.col
-                )
+                removedPiece = self.board[cmd.startRow][cmd.startCol]
 
                 self.board[cmd.endRow][cmd.endCol] = ChessPieceFactory.createChessPiece(
                     PieceType.QUEEN, self.playerTurn, cmd.endRow, cmd.endCol)
@@ -523,10 +508,7 @@ class ChessBoardModel():
             # En Passant
             case MoveCommandType.ENPASSANT:
                 # Store Removed Piece
-                target = self.board[cmd.startRow][cmd.endCol]
-                removedPiece = ChessPieceFactory.createChessPiece(
-                    target.type, target.player, target.row, target.col
-                )
+                removedPiece = self.board[cmd.startRow][cmd.endCol]
 
                 # Move the Pawn to the target
                 self._movePieceOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)

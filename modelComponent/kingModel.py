@@ -74,11 +74,11 @@ class KingModel(ChessPieceModel):
 			# Black Queen Side Castle
 			if not chessBoardModel.blackKingMoved and not chessBoardModel.blackQueenSideRookMoved:
 				nullBlock = 0
-				for i in [1, 2, 3, 4]:
+				for i in [1, 2, 3]:
 					if chessBoardModel.board[7][i] == None and (7, i) not in opponentAttackTargets:
 						nullBlock += 1
 					
-				if nullBlock == 4:
+				if nullBlock == 3:
 					returnMoves.append(
 						MoveCommand(self.row, self.col, self.row, self.col-2, MoveCommandType.QUEENSIDECASTLE)
 					)
@@ -86,11 +86,11 @@ class KingModel(ChessPieceModel):
 			# Black King Side Castle
 			if not chessBoardModel.blackKingMoved and not chessBoardModel.blackKingSideRookMoved:
 				nullBlock = 0
-				for i in [4, 5, 6]:
+				for i in [5, 6]:
 					if chessBoardModel.board[7][i] == None and (7, i) not in opponentAttackTargets:
 						nullBlock += 1
 
-				if nullBlock == 3:
+				if nullBlock == 2:
 					returnMoves.append(
 						MoveCommand(self.row, self.col, self.row, self.col+2, MoveCommandType.KINGSIDECASTLE)
 					)
@@ -99,11 +99,11 @@ class KingModel(ChessPieceModel):
 			# White Queen Side Castle
 			if not chessBoardModel.whiteKingMoved and not chessBoardModel.whiteQueenSideRookMoved:
 				nullBlock = 0
-				for i in [1, 2, 3, 4]:
+				for i in [1, 2, 3]:
 					if chessBoardModel.board[0][i] == None and (0, i) not in opponentAttackTargets:
 						nullBlock += 1
 
-				if nullBlock == 4:
+				if nullBlock == 3:
 					returnMoves.append(
 						MoveCommand(self.row, self.col, self.row, self.col-2, MoveCommandType.QUEENSIDECASTLE)
 					)
@@ -111,11 +111,11 @@ class KingModel(ChessPieceModel):
 			# White King Side Castle
 			if not chessBoardModel.whiteKingMoved and not chessBoardModel.whiteKingSideRookMoved:
 				nullBlock = 0
-				for i in [4, 5, 6]:
+				for i in [5, 6]:
 					if chessBoardModel.board[0][i] == None and (0, i) not in opponentAttackTargets:
 						nullBlock += 1
 
-				if nullBlock == 3:
+				if nullBlock == 2:
 					returnMoves.append(
 						MoveCommand(self.row, self.col, self.row, self.col+2, MoveCommandType.KINGSIDECASTLE)
 					)
