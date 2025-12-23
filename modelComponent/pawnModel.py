@@ -63,7 +63,7 @@ class PawnModel(ChessPieceModel):
 					returnMoves.append(
 						MoveCommand(self.row, self.col, self.row-1, self.col, MoveCommandType.PROMOTE)
 					)
-			else:
+			elif self.row > 1:
 				# Double Pawn Move
 				if self.row == 6:
 					if chessBoardModel.board[self.row-1][self.col] == None and chessBoardModel.board[self.row-2][self.col] == None:
@@ -75,9 +75,12 @@ class PawnModel(ChessPieceModel):
 				if self.row == 3:
 					opponentEnPassantCol = chessBoardModel.enPassantColumn
 					if opponentEnPassantCol == self.col-1 or opponentEnPassantCol == self.col+1:
-						returnMoves.append(
-							MoveCommand(self.row, self.col, self.row-1, opponentEnPassantCol, MoveCommandType.ENPASSANT)
-						)
+
+						opponentPawn = chessBoardModel.board[self.row][opponentEnPassantCol]
+						if opponentPawn.player != self.player:
+							returnMoves.append(
+								MoveCommand(self.row, self.col, self.row-1, opponentEnPassantCol, MoveCommandType.ENPASSANT)
+							)
 
 				# Normal
 				if self.col > 0:
@@ -123,7 +126,7 @@ class PawnModel(ChessPieceModel):
 						MoveCommand(self.row, self.col, self.row+1, self.col, MoveCommandType.PROMOTE)
 					)
 
-			else:
+			elif self.row < 6:
 				# Double Pawn Move
 				if self.row == 1:
 					if chessBoardModel.board[self.row+1][self.col] == None and chessBoardModel.board[self.row+2][self.col] == None:
@@ -135,9 +138,12 @@ class PawnModel(ChessPieceModel):
 				if self.row == 4:
 					opponentEnPassantCol = chessBoardModel.enPassantColumn
 					if opponentEnPassantCol == self.col-1 or opponentEnPassantCol == self.col+1:
-						returnMoves.append(
-							MoveCommand(self.row, self.col, self.row+1, opponentEnPassantCol, MoveCommandType.ENPASSANT)
-						)
+
+						opponentPawn = chessBoardModel.board[self.row][opponentEnPassantCol]
+						if opponentPawn.player != self.player:
+							returnMoves.append(
+								MoveCommand(self.row, self.col, self.row+1, opponentEnPassantCol, MoveCommandType.ENPASSANT)
+							)
 
 				# Normal
 				if self.col > 0:

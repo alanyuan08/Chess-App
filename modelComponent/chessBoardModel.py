@@ -243,7 +243,7 @@ class ChessBoardModel():
             removedPiece = self.movePiece(cmd)
 
             print(cmd)
-            returnValue = self.minMaxSearch(False, 2)
+            returnValue = self.minMaxSearch(False, 4)
             if returnValue < worstValue:
                 worstValue = min(worstValue, returnValue)
                 returnCmd = cmd
@@ -270,12 +270,6 @@ class ChessBoardModel():
 
     # Move Piece on ChessBoard
     def _movePieceOnBoard(self, startRow: int, startCol: int, endRow: int, endCol: int):
-        if self.board[startRow][startCol] == None:
-            print("BLAH8")
-
-        if self.board[endRow][endCol] != None:
-            print("BLAH7")
-        
         self.board[endRow][endCol] = self.board[startRow][startCol]
         self.board[endRow][endCol].row = endRow
         self.board[endRow][endCol].col = endCol
@@ -312,13 +306,7 @@ class ChessBoardModel():
                 elif startCol == 7:
                     self.whiteKingSideCanCastle = True  
 
-    def _undoMoveOnBoard(self, originalRow: int, originalCol: int, currentRow: int, currentCol: int):
-        if self.board[currentRow][currentCol] == None:
-            print("BLAH5")
-
-        if self.board[originalRow][originalCol] != None:
-            print("BLAH4")
-        
+    def _undoMoveOnBoard(self, originalRow: int, originalCol: int, currentRow: int, currentCol: int):        
         self.board[originalRow][originalCol] = self.board[currentRow][currentCol] 
         self.board[originalRow][originalCol].row = originalRow
         self.board[originalRow][originalCol].col = originalCol
@@ -394,10 +382,11 @@ class ChessBoardModel():
             # Promote Pawn
             case MoveCommandType.PROMOTE:
                 # Promote the Pawn to a Queen
-                self.board[cmd.endRow][cmd.endCol] = None
+                self.board[cmd.endRow][cmd.endCol] = restorePiece
 
                 # Store Removed Piece
-                self.board[cmd.startRow][cmd.startCol] = restorePiece
+                self.board[cmd.startRow][cmd.startCol] = ChessPieceFactory.createChessPiece(
+                    PieceType.PAWN, self.playerTurn, cmd.startRow, cmd.startCol)
 
             # En Passant
             case MoveCommandType.ENPASSANT:
@@ -471,9 +460,6 @@ class ChessBoardModel():
                 removedPiece = self.board[cmd.endRow][cmd.endCol]
                 self.board[cmd.endRow][cmd.endCol] = None
 
-                if removedPiece == None:
-                    print("BLAH1")
-
                 # Move Starting Piece to Capture Point
                 self._movePieceOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
 
@@ -486,25 +472,16 @@ class ChessBoardModel():
 
             # Promote Pawn
             case MoveCommandType.PROMOTE:
-                # Store Removed Piece
-                removedPiece = self.board[cmd.startRow][cmd.startCol]
-
-                if removedPiece == None:
-                    print("BLAH2")
+                # Promote MAY be a capture or a move
+                removedPiece = self.board[cmd.endRow][cmd.endCol]
 
                 self.board[cmd.endRow][cmd.endCol] = ChessPieceFactory.createChessPiece(
                     PieceType.QUEEN, self.playerTurn, cmd.endRow, cmd.endCol)
-
-                # Remove the Start Item
-                self.board[cmd.startRow][cmd.startCol] = None
 
             # En Passant
             case MoveCommandType.ENPASSANT:
                 # Store Removed Piece
                 removedPiece = self.board[cmd.startRow][cmd.endCol]
-
-                if removedPiece == None:
-                    print("BLAH3")
 
                 # Move the Pawn to the target
                 self._movePieceOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
