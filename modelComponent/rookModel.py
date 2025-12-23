@@ -42,19 +42,20 @@ class RookModel(ChessPieceModel):
 				newCol = self.col + direction[1] * i
 				i += 1
 
-				if newRow >= 0 and newRow < 8 and newCol >= 0 and newCol < 8:
-					if chessBoardModel.board[newRow][newCol] == None:
-						returnMoves.append(
-							MoveCommand(self.row, self.col, newRow, newCol, MoveCommandType.MOVE)
-						)
-					elif chessBoardModel.board[newRow][newCol].player != self.player:
+				if not (newRow >= 0 and newRow < 8 and newCol >= 0 and newCol < 8):
+					break
+
+
+				if chessBoardModel.board[newRow][newCol] == None:
+					returnMoves.append(
+						MoveCommand(self.row, self.col, newRow, newCol, MoveCommandType.MOVE)
+					)
+				else:
+					if chessBoardModel.board[newRow][newCol].player != self.player:
 						returnMoves.append(
 							MoveCommand(self.row, self.col, newRow, newCol, MoveCommandType.CAPTURE)
 						)
-						break
-					else:
-						break
-				else:
+					
 					break
 
 		# Validate For King Safety

@@ -123,14 +123,12 @@ class ChessBoardModel():
         returnValue = True
 
         if currentPlayer == Player.BLACK:
-            kingTuple = (self.blackKingSquareRow, self.blackKingSquareCol)
-            if kingTuple in self._allPlayerCaptureTargets(Player.WHITE):
-                returnValue = False
+            kingPiece = self.board[self.blackKingSquareRow][self.blackKingSquareCol]
+            returnValue = kingPiece.evaluateKingSafety(self)
 
         elif currentPlayer == Player.WHITE:
-            kingTuple = (self.whiteKingSquareRow, self.whiteKingSquareCol)
-            if kingTuple in self._allPlayerCaptureTargets(Player.BLACK):
-                returnValue = False
+            kingPiece = self.board[self.whiteKingSquareRow][self.whiteKingSquareCol]
+            returnValue = kingPiece.evaluateKingSafety(self)
 
         self.undoMove(cmd, removedPiece)
         self.resetBoardState(nonBoardState)
@@ -243,7 +241,7 @@ class ChessBoardModel():
             removedPiece = self.movePiece(cmd)
 
             print(cmd)
-            returnValue = self.minMaxSearch(False, 4)
+            returnValue = self.minMaxSearch(False, 2)
             if returnValue < worstValue:
                 worstValue = min(worstValue, returnValue)
                 returnCmd = cmd

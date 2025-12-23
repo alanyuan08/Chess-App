@@ -123,7 +123,7 @@ class KingModel(ChessPieceModel):
 		# Validate For King Safety
 		return [move for move in returnMoves if chessBoardModel.validateKingSafety(move)]
 		
-	# List of targets - Used to check for Castle / King Safety
+	# List of targets - Used to check for Castle
 	def captureTargets(self, chessBoardModel):
 		returnMoves = []
 		for possibleMoves in [(-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1)]:
@@ -135,6 +135,81 @@ class KingModel(ChessPieceModel):
 					returnMoves.append((newRow, newCol))
 
 		return returnMoves
+
+	# Test King Safety
+	def evaluateKingSafety(self, chessBoardModel):
+		# Test for Opponent Knights
+		for possibleMoves in [(2, 1), (1, 2), (-2, -1), (-1, -2), (-2, 1), (-1, 2), (2, -1), (1, -2)]:
+			newRow = self.row + possibleMoves[0]
+			newCol = self.col + possibleMoves[1]
+			if newRow >= 0 and newRow < 8 and newCol >= 0 and newCol < 8:
+				target = chessBoardModel.board[newRow][newCol] 
+				if target != None and target.type == PieceType.KNIGHT and target.player != self.player:
+					return False
+
+		# Test for Opponent Horizontals
+		horizontalCapture = [PieceType.KING, PieceType.ROOK, PieceType.QUEEN]
+		for direction in [(-1, 0), (0, 1), (1, 0), (0, -1)]:
+			i = 1
+			while(True):
+				newRow = self.row + direction[0] * i
+				newCol = self.col + direction[1] * i
+				i += 1
+
+				if not (newRow >= 0 and newRow < 8 and newCol >= 0 and newCol < 8):
+					break
+
+				target = chessBoardModel.board[newRow][newCol]
+				if target != None:
+					if target.type in horizontalCapture and target.player != self.player:
+						return False
+					break
+
+		# Test for Diagonal Captures
+		diagonalCapture = [PieceType.KING, PieceType.BISHOP, PieceType.QUEEN]
+		for direction in [(-1, 1), (1, 1), (1, -1), (-1, -1)]:
+			i = 1
+			while(True):
+				newRow = self.row + direction[0] * i
+				newCol = self.col + direction[1] * i
+				i += 1
+
+				if not (newRow >= 0 and newRow < 8 and newCol >= 0 and newCol < 8):
+					break
+
+				target = chessBoardModel.board[newRow][newCol]
+				if target != None:
+					if target.type in diagonalCapture and target.player != self.player:
+						return False
+
+					break
+
+		# Test for enemy pawns 
+		if self.player == Player.WHITE:
+			# Black Pawn Moves Down, White King Checks below
+			if self.row + 1 < 8 and self.col - 1 > 0:
+				blackPawn = chessBoardModel.board[self.row + 1][self.col - 1]
+				if blackPawn != None and blackPawn.type == PieceType.PAWN and blackPawn.player != self.player:
+					return False
+
+			if self.row + 1 < 8 and self.col + 1 < 8:
+				blackPawn = chessBoardModel.board[self.row + 1][self.col + 1]
+				if blackPawn != None and blackPawn.type == PieceType.PAWN and blackPawn.player != self.player:
+					return False
+
+		elif self.player == Player.BLACK:
+			# White Pawn Moves Up, Black King Checks Above
+			if self.row - 1 > 0 and self.col - 1 > 0:
+				whitePawn = chessBoardModel.board[self.row - 1][self.col - 1]
+				if whitePawn != None and whitePawn.type == PieceType.PAWN and whitePawn.player != self.player:
+					return False
+
+			if self.row - 1 > 0 and self.col + 1 < 8:
+				whitePawn = chessBoardModel.board[self.row - 1][self.col + 1]
+				if whitePawn != None and whitePawn.type == PieceType.PAWN and whitePawn.player != self.player:
+					return False
+
+		return True
 
 
 
