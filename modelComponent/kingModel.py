@@ -13,28 +13,25 @@ class KingModel(ChessPieceModel):
 		self.col = col
 		self.type = PieceType.KING
 
-	def rawValue(self):
-		return 20000
-
 	def pieceValue(self, chessBoard):
 		returnScore = 20000
 		if self.player == Player.WHITE:
 			if chessBoard.whiteCastled:
 				returnScore += 100
 			else:
-				if chessBoard.whiteKingSideRookMoved or \
-				chessBoard.whiteQueenSideRookMoved or \
-				chessBoard.whiteKingMoved:
-					returnScore -= 60
+				if not chessBoard.whiteKingSideCanCastle:
+					returnScore -= 30
+				if not chessBoard.whiteQueenSideCanCastle:
+					returnScore -= 30
 
 		elif self.player == Player.BLACK:
 			if chessBoard.blackCastled:
 				returnScore += 100
 			else:
-				if chessBoard.blackKingSideRookMoved or \
-				chessBoard.blackQueenSideRookMoved or \
-				chessBoard.blackKingMoved:
-					returnScore -= 60
+				if not chessBoard.blackKingSideCanCastle:
+					returnScore -= 30
+				if not chessBoard.blackQueenSideCanCastle:
+					returnScore -= 30
 
 		return returnScore
 
@@ -75,69 +72,59 @@ class KingModel(ChessPieceModel):
 
 		if self.player == Player.BLACK:
 			# Black Queen Side Castle
-			if not chessBoardModel.blackKingMoved and not chessBoardModel.blackQueenSideRookMoved:
-
-				if self.checkRook(chessBoardModel, 7, 0):
-					nullBlock = 0
-					for i in [1, 2, 3]:
-						if chessBoardModel.board[7][i] == None and (7, i) not in opponentAttackTargets:
-							nullBlock += 1
-						
-					if nullBlock == 3:
-						returnMoves.append(
-							MoveCommand(self.row, self.col, self.row, self.col-2, MoveCommandType.QUEENSIDECASTLE)
-						)
+			if chessBoardModel.blackQueenSideCanCastle and self.checkRook(chessBoardModel, 7, 0):
+				nullBlock = 0
+				for i in [1, 2, 3]:
+					if chessBoardModel.board[7][i] == None and (7, i) not in opponentAttackTargets:
+						nullBlock += 1
+					
+				if nullBlock == 3:
+					returnMoves.append(
+						MoveCommand(self.row, self.col, self.row, self.col-2, MoveCommandType.QUEENSIDECASTLE)
+					)
 
 			# Black King Side Castle
-			if not chessBoardModel.blackKingMoved and not chessBoardModel.blackKingSideRookMoved:
+			if chessBoardModel.blackKingSideCanCastle and self.checkRook(chessBoardModel, 7, 7):
+				nullBlock = 0
+				for i in [5, 6]:
+					if chessBoardModel.board[7][i] == None and (7, i) not in opponentAttackTargets:
+						nullBlock += 1
 
-				if self.checkRook(chessBoardModel, 7, 7):
-					nullBlock = 0
-					for i in [5, 6]:
-						if chessBoardModel.board[7][i] == None and (7, i) not in opponentAttackTargets:
-							nullBlock += 1
-
-					if nullBlock == 2:
-						returnMoves.append(
-							MoveCommand(self.row, self.col, self.row, self.col+2, MoveCommandType.KINGSIDECASTLE)
-						)
+				if nullBlock == 2:
+					returnMoves.append(
+						MoveCommand(self.row, self.col, self.row, self.col+2, MoveCommandType.KINGSIDECASTLE)
+					)
 
 		elif self.player == Player.WHITE:
 			# White Queen Side Castle
-			if not chessBoardModel.whiteKingMoved and not chessBoardModel.whiteQueenSideRookMoved:
+			if chessBoardModel.whiteQueenSideCanCastle and self.checkRook(chessBoardModel, 0, 0):
+				nullBlock = 0
+				for i in [1, 2, 3]:
+					if chessBoardModel.board[0][i] == None and (0, i) not in opponentAttackTargets:
+						nullBlock += 1
 
-				if self.checkRook(chessBoardModel, 0, 0):
-					nullBlock = 0
-					for i in [1, 2, 3]:
-						if chessBoardModel.board[0][i] == None and (0, i) not in opponentAttackTargets:
-							nullBlock += 1
-
-					if nullBlock == 3:
-						returnMoves.append(
-							MoveCommand(self.row, self.col, self.row, self.col-2, MoveCommandType.QUEENSIDECASTLE)
-						)
+				if nullBlock == 3:
+					returnMoves.append(
+						MoveCommand(self.row, self.col, self.row, self.col-2, MoveCommandType.QUEENSIDECASTLE)
+					)
 
 			# White King Side Castle
-			if not chessBoardModel.whiteKingMoved and not chessBoardModel.whiteKingSideRookMoved:
+			if chessBoardModel.whiteKingSideCanCastle and self.checkRook(chessBoardModel, 0, 7):
+				nullBlock = 0
+				for i in [5, 6]:
+					if chessBoardModel.board[0][i] == None and (0, i) not in opponentAttackTargets:
+						nullBlock += 1
 
-				if self.checkRook(chessBoardModel, 0, 7):
-					nullBlock = 0
-					for i in [5, 6]:
-						if chessBoardModel.board[0][i] == None and (0, i) not in opponentAttackTargets:
-							nullBlock += 1
-
-					if nullBlock == 2:
-						returnMoves.append(
-							MoveCommand(self.row, self.col, self.row, self.col+2, MoveCommandType.KINGSIDECASTLE)
-						)
+				if nullBlock == 2:
+					returnMoves.append(
+						MoveCommand(self.row, self.col, self.row, self.col+2, MoveCommandType.KINGSIDECASTLE)
+					)
 
 		# Validate For King Safety
 		return [move for move in returnMoves if chessBoardModel.validateKingSafety(move)]
 		
 	# List of targets - Used to check for Castle / King Safety
 	def captureTargets(self, chessBoardModel):
-		returnMoves = []
-
 		returnMoves = []
 		for possibleMoves in [(-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1)]:
 			newRow = self.row + possibleMoves[0]

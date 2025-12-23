@@ -25,9 +25,6 @@ class BishopModel(ChessPieceModel):
 	    [-20, -10, -10, -10, -10, -10, -10, -20]
 	]
 
-	def rawValue(self):
-		return 300
-
 	def pieceValue(self, chessBoard):
 		if self.player == Player.BLACK:
 			return 300 + self.bishopValueTable[self.row][self.col]

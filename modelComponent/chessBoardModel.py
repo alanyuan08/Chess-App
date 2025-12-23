@@ -23,13 +23,11 @@ class ChessBoardModel():
         self.enPassantColumn = None
 
         # Used to check if player can Castle
-        self.blackKingMoved = False
-        self.blackKingSideRookMoved = False
-        self.blackQueenSideRookMoved = False
+        self.blackKingSideCanCastle = True
+        self.blackQueenSideCanCastle = True
 
-        self.whiteKingMoved = False
-        self.whiteKingSideRookMoved = False
-        self.whiteQueenSideRookMoved = False 
+        self.whiteKingSideCanCastle = True
+        self.whiteQueenSideCanCastle = True
 
         # Used to Keep Score for Castle
         self.whiteCastled = False
@@ -50,13 +48,14 @@ class ChessBoardModel():
         nonBoardStates = {}
         nonBoardStates['enPassantColumn'] = self.enPassantColumn 
         
-        nonBoardStates['blackKingMoved'] = self.blackKingMoved
-        nonBoardStates['blackKingSideRookMoved'] = self.blackKingSideRookMoved
-        nonBoardStates['blackQueenSideRookMoved'] = self.blackQueenSideRookMoved
+        nonBoardStates['blackKingSideCanCastle'] = self.blackKingSideCanCastle
+        nonBoardStates['blackQueenSideCanCastle'] = self.blackQueenSideCanCastle
 
-        nonBoardStates['whiteKingMoved'] = self.whiteKingMoved
-        nonBoardStates['whiteKingSideRookMoved'] = self.whiteKingSideRookMoved
-        nonBoardStates['whiteQueenSideRookMoved'] = self.whiteQueenSideRookMoved
+        nonBoardStates['whiteKingSideCanCastle'] = self.whiteKingSideCanCastle
+        nonBoardStates['whiteQueenSideCanCastle'] = self.whiteQueenSideCanCastle
+
+        nonBoardStates['whiteCastled'] = False
+        nonBoardStates['blackCastled'] = False
         
         nonBoardStates['whiteKingSquareRow'] = self.whiteKingSquareRow
         nonBoardStates['whiteKingSquareCol'] = self.whiteKingSquareCol
@@ -70,13 +69,14 @@ class ChessBoardModel():
     def resetBoardState(self, nonBoardStates):
         self.enPassantColumn = nonBoardStates['enPassantColumn']
         
-        self.blackKingMoved = nonBoardStates['blackKingMoved'] 
-        self.blackKingSideRookMoved = nonBoardStates['blackKingSideRookMoved'] 
-        self.blackQueenSideRookMoved = nonBoardStates['blackQueenSideRookMoved']
+        self.blackKingSideCanCastle = nonBoardStates['blackKingSideCanCastle'] 
+        self.blackQueenSideCanCastle = nonBoardStates['blackQueenSideCanCastle']
 
-        self.whiteKingMoved = nonBoardStates['whiteKingMoved']
-        self.whiteKingSideRookMoved = nonBoardStates['whiteKingSideRookMoved']
-        self.whiteQueenSideRookMoved = nonBoardStates['whiteQueenSideRookMoved']
+        self.whiteKingSideCanCastle = nonBoardStates['whiteKingSideCanCastle']
+        self.whiteQueenSideCanCastle = nonBoardStates['whiteQueenSideCanCastle']
+
+        self.whiteCastled = nonBoardStates['whiteCastled']
+        self.blackCastled = nonBoardStates['blackCastled']
         
         self.whiteKingSquareRow = nonBoardStates['whiteKingSquareRow'] 
         self.whiteKingSquareCol = nonBoardStates['whiteKingSquareCol']
@@ -270,6 +270,12 @@ class ChessBoardModel():
 
     # Move Piece on ChessBoard
     def _movePieceOnBoard(self, startRow: int, startCol: int, endRow: int, endCol: int):
+        if self.board[startRow][startCol] == None:
+            print("BLAH8")
+
+        if self.board[endRow][endCol] != None:
+            print("BLAH7")
+        
         self.board[endRow][endCol] = self.board[startRow][startCol]
         self.board[endRow][endCol].row = endRow
         self.board[endRow][endCol].col = endCol
@@ -281,28 +287,38 @@ class ChessBoardModel():
             if self.board[endRow][endCol].player == Player.BLACK:
                 self.blackKingSquareRow = endRow
                 self.blackKingSquareCol = endCol
-                self.blackKingMoved = True
+
+                self.blackKingSideCanCastle = False
+                self.blackQueenSideCanCastle = False
 
             elif self.board[endRow][endCol].player == Player.WHITE:
                 self.whiteKingSquareRow = endRow
                 self.whiteKingSquareCol = endCol
-                self.whiteKingMoved = True
+
+                self.whiteKingSideCanCastle = False
+                self.whiteQueenSideCanCastle = False
 
         # Update Rook 
         if self.board[endRow][endCol].type == PieceType.ROOK:
             if self.board[endRow][endCol].player == Player.BLACK:
                 if startCol == 0:
-                    self.blackQueenSideRookMoved = True
+                    self.blackQueenSideCanCastle = False
                 elif startCol == 7:
-                    self.blackKingSideRookMoved = True
+                    self.blackKingSideCanCastle = False
 
             elif self.board[endRow][endCol].player == Player.WHITE:
                 if startCol == 0:
-                    self.whiteQueenSideRookMoved = True
+                    self.whiteQueenSideCanCastle = False
                 elif startCol == 7:
-                    self.whiteKingSideRookMoved = True  
+                    self.whiteKingSideCanCastle = True  
 
     def _undoMoveOnBoard(self, originalRow: int, originalCol: int, currentRow: int, currentCol: int):
+        if self.board[currentRow][currentCol] == None:
+            print("BLAH5")
+
+        if self.board[originalRow][originalCol] != None:
+            print("BLAH4")
+        
         self.board[originalRow][originalCol] = self.board[currentRow][currentCol] 
         self.board[originalRow][originalCol].row = originalRow
         self.board[originalRow][originalCol].col = originalCol
@@ -453,6 +469,10 @@ class ChessBoardModel():
             case MoveCommandType.CAPTURE:
                 # Store the Removed Piece
                 removedPiece = self.board[cmd.endRow][cmd.endCol]
+                self.board[cmd.endRow][cmd.endCol] = None
+
+                if removedPiece == None:
+                    print("BLAH1")
 
                 # Move Starting Piece to Capture Point
                 self._movePieceOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
@@ -469,6 +489,9 @@ class ChessBoardModel():
                 # Store Removed Piece
                 removedPiece = self.board[cmd.startRow][cmd.startCol]
 
+                if removedPiece == None:
+                    print("BLAH2")
+
                 self.board[cmd.endRow][cmd.endCol] = ChessPieceFactory.createChessPiece(
                     PieceType.QUEEN, self.playerTurn, cmd.endRow, cmd.endCol)
 
@@ -479,6 +502,9 @@ class ChessBoardModel():
             case MoveCommandType.ENPASSANT:
                 # Store Removed Piece
                 removedPiece = self.board[cmd.startRow][cmd.endCol]
+
+                if removedPiece == None:
+                    print("BLAH3")
 
                 # Move the Pawn to the target
                 self._movePieceOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)

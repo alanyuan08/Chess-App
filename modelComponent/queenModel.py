@@ -25,9 +25,6 @@ class QueenModel(ChessPieceModel):
 	    [-20, -10, -10,  -5,  -5, -10, -10, -20]
 	];
 
-	def rawValue(self):
-		return 900
-
 	def pieceValue(self, chessBoard):
 		if self.player == Player.BLACK:
 			return 900 + self.queenValueTable[self.row][self.col]

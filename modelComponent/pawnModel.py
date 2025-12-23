@@ -25,14 +25,18 @@ class PawnModel(ChessPieceModel):
 	    [ 0,  0,  0,  0,  0,  0,  0,  0] 
 	]
 
-	def rawValue(self):
-		return 100
-
 	def pieceValue(self, chessBoard):
 		if self.player == Player.BLACK:
 			return 100 + self.pawnValueTable[self.row][self.col]
 		else:
 			return 100 + self.pawnValueTable[7 - self.row][self.col]
+
+	def checkOpponentPawn(self, chessBoardModel, row: int, col: int):
+		rookPiece = chessBoardModel.board[row][col]
+		if rookPiece != None and rookPiece.type == PieceType.ROOK and rookPiece.player == self.player:
+			return True
+		else:
+			return False
 
 	def possibleMoves(self, chessBoardModel):
 		returnMoves = []

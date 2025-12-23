@@ -25,9 +25,6 @@ class RookModel(ChessPieceModel):
 	    [ 0,  0,  0,  5,  5,  0,  0,  0] 
 	]
 
-	def rawValue(self):
-		return 500
-
 	def pieceValue(self, chessBoard):
 		if self.player == Player.BLACK:
 			return 500 + self.rookValueTable[self.row][self.col]
