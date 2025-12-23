@@ -198,52 +198,44 @@ class ChessBoardModel():
         return alpha
 
     # MinMaxSearch -> General
-    def minMaxSearch(self, maximizingPlayer, depth):
+    def negamax(self, depth, alpha, beta):
         # Termination Condition
         if depth == 0:
             return self.quiesceneSearch(float('-inf'), float('inf'))
         else:
-            if maximizingPlayer:
-                bestValue = float('-inf')
-                for cmd in self.allValidMoves():
-                    nonBoardState = self.nonBoardState()
-                    removedPiece = self.movePiece(cmd)
+            maxEval = float('inf')
 
-                    computeValue = self.minMaxSearch(False, depth - 1)
-                    bestValue = max(bestValue, computeValue)
+            for cmd in self.allValidMoves():
+                nonBoardState = self.nonBoardState()
+                removedPiece = self.movePiece(cmd)
 
-                    self.undoMove(cmd, removedPiece)
-                    self.resetBoardState(nonBoardState)
+                score = (-1) * self.negamax(depth - 1, (-1) * beta, (-1) * alpha)
+                
+                self.undoMove(cmd, removedPiece)
+                self.resetBoardState(nonBoardState)
 
-                return bestValue
+                maxEval = max(maxEval, score)
+                alpha = max(alpha, score)
+                
+                if alpha >= beta:
+                    break
+                    
+            return alpha
 
-            else:
-                worstValue = float('inf')
-                for cmd in self.allValidMoves():
-                    nonBoardState = self.nonBoardState()
-                    removedPiece = self.movePiece(cmd)
-
-                    computeValue = self.minMaxSearch(True, depth - 1)
-                    worstValue = min(worstValue, computeValue)
-
-                    self.undoMove(cmd, removedPiece)
-                    self.resetBoardState(nonBoardState)
-
-                return worstValue
-
-    # Compute Best Move Using Min-Max
+    # Take Opponent Turn
     def computeBestMove(self):
         returnCmd = None
-        worstValue = float('inf')
+        bestScore = float('-inf')
 
         for cmd in self.allValidMoves():
             nonBoardState = self.nonBoardState()
             removedPiece = self.movePiece(cmd)
 
             print(cmd)
-            returnValue = self.minMaxSearch(False, 2)
-            if returnValue < worstValue:
-                worstValue = min(worstValue, returnValue)
+            returnValue = (-1) * self.negamax(2, float('-inf'), float('inf'))
+
+            if returnValue > bestScore:
+                bestScore = returnValue
                 returnCmd = cmd
                                 
             self.undoMove(cmd, removedPiece)
