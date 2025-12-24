@@ -72,14 +72,18 @@ class ChessBoardModel():
         currentPlayer = self.playerTurn
         removedPiece = self.movePiece(cmd)
 
-        returnValue = True
+        returnValue = False
         if currentPlayer == Player.BLACK:
             kingPiece = self.board[self.blackKingSquareRow][self.blackKingSquareCol]
-            returnValue = kingPiece.evaluateKingSafety(self)
+
+            if kingPiece.type == PieceType.KING:
+                returnValue = kingPiece.evaluateKingSafety(self)
 
         elif currentPlayer == Player.WHITE:
             kingPiece = self.board[self.whiteKingSquareRow][self.whiteKingSquareCol]
-            returnValue = kingPiece.evaluateKingSafety(self)
+
+            if kingPiece.type == PieceType.KING:
+                returnValue = kingPiece.evaluateKingSafety(self)
 
         self.undoMove(cmd, removedPiece)
         return returnValue
