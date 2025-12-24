@@ -12,6 +12,7 @@ class RookModel(ChessPieceModel):
 		self.row = row
 		self.col = col
 		self.type = PieceType.ROOK
+		self.moved = False
 
 	# Rook Value Table White
 	rookValueTable = [
@@ -36,15 +37,12 @@ class RookModel(ChessPieceModel):
 		returnMoves = []
 
 		for direction in [(-1, 0), (0, 1), (1, 0), (0, -1)]:
-			i = 1
-			while(True):
+			for i in range(1, 8):
 				newRow = self.row + direction[0] * i
 				newCol = self.col + direction[1] * i
-				i += 1
 
 				if not (newRow >= 0 and newRow < 8 and newCol >= 0 and newCol < 8):
 					break
-
 
 				if chessBoardModel.board[newRow][newCol] == None:
 					returnMoves.append(
@@ -66,11 +64,9 @@ class RookModel(ChessPieceModel):
 		returnMoves = []
 
 		for direction in [(-1, 0), (0, 1), (1, 0), (0, -1)]:
-			i = 1
-			while(True):
+			for i in range(1, 8):
 				newRow = self.row + direction[0] * i
 				newCol = self.col + direction[1] * i
-				i += 1
 
 				if not (newRow >= 0 and newRow < 8 and newCol >= 0 and newCol < 8):
 					break

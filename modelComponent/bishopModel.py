@@ -12,6 +12,7 @@ class BishopModel(ChessPieceModel):
 		self.row = row
 		self.col = col
 		self.type = PieceType.BISHOP
+		self.moved = False
 
 	# Bishop Value Table Black 
 	bishopValueTable = [
@@ -36,11 +37,9 @@ class BishopModel(ChessPieceModel):
 		returnMoves = []
 
 		for direction in [(-1, 1), (1, 1), (1, -1), (-1, -1)]:
-			i = 1
-			while(True):
+			for i in range(1, 8):
 				newRow = self.row + direction[0] * i
 				newCol = self.col + direction[1] * i
-				i += 1
 
 				if not (newRow >= 0 and newRow < 8 and newCol >= 0 and newCol < 8):
 					break
@@ -65,11 +64,9 @@ class BishopModel(ChessPieceModel):
 		returnMoves = []
 
 		for direction in [(-1, 1), (1, 1), (1, -1), (-1, -1)]:
-			i = 1
-			while(True):
+			for i in range(1, 8):
 				newRow = self.row + direction[0] * i
 				newCol = self.col + direction[1] * i
-				i += 1
 
 				if not (newRow >= 0 and newRow < 8 and newCol >= 0 and newCol < 8):
 					break
@@ -78,10 +75,9 @@ class BishopModel(ChessPieceModel):
 					returnMoves.append((newRow, newCol))
 
 				else:
-					if  chessBoardModel.board[newRow][newCol].player != self.player:
+					if chessBoardModel.board[newRow][newCol].player != self.player:
 						returnMoves.append((newRow, newCol))
 					break
-
 
 		return returnMoves
 

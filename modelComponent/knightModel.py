@@ -12,6 +12,7 @@ class KnightModel(ChessPieceModel):
 		self.row = row
 		self.col = col
 		self.type = PieceType.KNIGHT
+		self.moved = False
 
 	# Knight Value Table White
 	knightValueTable = [
