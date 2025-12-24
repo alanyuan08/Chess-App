@@ -12,7 +12,7 @@ class QueenModel(ChessPieceModel):
 		self.row = row
 		self.col = col
 		self.type = PieceType.QUEEN
-		self.moved = False
+		self.moves = 0
 
 	# Queen Value Table White
 	queenValueTable = [
@@ -64,10 +64,10 @@ class QueenModel(ChessPieceModel):
 	def captureTargets(self, chessBoardModel):
 		returnMoves = []
 
-		for direction in [(-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1)]:
+		for dr, dc in [(-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1)]:
 			for i in range(1, 8):
-				newRow = self.row + direction[0] * i
-				newCol = self.col + direction[1] * i
+				newRow = self.row + dr * i
+				newCol = self.col + dc * i
 
 				if not (newRow >= 0 and newRow < 8 and newCol >= 0 and newCol < 8):
 					break
@@ -76,9 +76,7 @@ class QueenModel(ChessPieceModel):
 					returnMoves.append((newRow, newCol))
 
 				else:
-					if chessBoardModel.board[newRow][newCol].player != self.player:
-						returnMoves.append((newRow, newCol))
-
+					returnMoves.append((newRow, newCol))
 					break
 
 		return returnMoves

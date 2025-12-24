@@ -23,9 +23,6 @@ class ChessBoardModel():
         self.whiteEnPassantColumn = None
         self.blackEnPassantColumn = None
 
-        # Previous Moved Status
-        self.previousMovedStatus = None
-
         # Used to Keep Score for Castle
         self.whiteCastled = False
         self.blackCastled = False
@@ -249,8 +246,9 @@ class ChessBoardModel():
         self.board[endRow][endCol] = self.board[startRow][startCol]
         self.board[endRow][endCol].row = endRow
         self.board[endRow][endCol].col = endCol
-        self.board[endRow][endCol].moved = True
+        self.board[endRow][endCol].moves += 1
 
+        # Remove the Init Piece
         self.board[startRow][startCol] = None
 
         # Update the King Square
@@ -262,8 +260,9 @@ class ChessBoardModel():
         self.board[originalRow][originalCol].col = originalCol
 
         # Undo Castle will take in account of both Rook and King
-        self.board[originalRow][originalCol].moved = self.previousMovedStatus
+        self.board[originalRow][originalCol].moves -= 1
 
+        # Remove the Final Piece
         self.board[currentRow][currentCol] = None
 
         # Update the King Square
@@ -364,9 +363,6 @@ class ChessBoardModel():
         # Set enPassant to Null - Reset this if the opponent does a double pawn move
         self.whiteEnPassantColumn = None
         self.blackEnPassantColumn = None
-
-        # Store the current Move Status of the starting piece for undo
-        self.previousMovedStatus = self.board[cmd.startRow][cmd.startCol].moved
 
         # Captured Piece 
         removedPiece = None

@@ -12,7 +12,7 @@ class PawnModel(ChessPieceModel):
 		self.row = row
 		self.col = col
 		self.type = PieceType.PAWN
-		self.moved = False
+		self.moves = 0
 
 	# Pawn Value Table White
 	pawnValueTable = [

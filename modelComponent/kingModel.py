@@ -12,7 +12,7 @@ class KingModel(ChessPieceModel):
 		self.row = row
 		self.col = col
 		self.type = PieceType.KING
-		self.moved = False
+		self.moves = 0
 
 	def pieceValue(self, chessBoard):
 		returnScore = 20000
@@ -24,7 +24,7 @@ class KingModel(ChessPieceModel):
 			returnScore += 100
 
 		# Reduction for cannot Castle
-		if self.moved:
+		if self.moves > 0:
 			returnScore -= 60
 		else:
 			if self.checkRook(chessBoard, self.row, 0):
@@ -44,7 +44,7 @@ class KingModel(ChessPieceModel):
 	def checkRook(self, chessBoardModel, row: int, col: int):
 		rookPiece = chessBoardModel.board[row][col]
 		if rookPiece != None and rookPiece.type == PieceType.ROOK \
-			and rookPiece.player == self.player and not rookPiece.moved:
+			and rookPiece.player == self.player and rookPiece.moves == 0:
 			return True
 		else:
 			return False
@@ -73,7 +73,7 @@ class KingModel(ChessPieceModel):
 
 		if (self.row, self.col) not in opponentAttackTargets:
 			# Queen Side Castle
-			if not self.moved and self.checkRook(chessBoardModel, self.row, 0):
+			if self.moves == 0 and self.checkRook(chessBoardModel, self.row, 0):
 				if all(chessBoardModel.board[self.row][i] == None for i in [1, 2, 3]):
 					if (self.row, 2) not in opponentAttackTargets and (self.row, 3) not in opponentAttackTargets:
 						returnMoves.append(
@@ -81,7 +81,7 @@ class KingModel(ChessPieceModel):
 						)
 
 			# King Side Castle
-			if not self.moved and self.checkRook(chessBoardModel, self.row, 7):
+			if self.moves == 0 and self.checkRook(chessBoardModel, self.row, 7):
 				if all(chessBoardModel.board[self.row][i] == None for i in [5, 6]):
 					if (self.row, 5) not in opponentAttackTargets and (self.row, 6) not in opponentAttackTargets:
 						returnMoves.append(
@@ -94,22 +94,20 @@ class KingModel(ChessPieceModel):
 	# List of targets - Used to check for Castle
 	def captureTargets(self, chessBoardModel):
 		returnMoves = []
-		for possibleMoves in [(-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1)]:
-			newRow = self.row + possibleMoves[0]
-			newCol = self.col + possibleMoves[1]
+		for dr, dc in [(-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1)]:
+			newRow = self.row + dr
+			newCol = self.col + dc
 			if newRow >= 0 and newRow < 8 and newCol >= 0 and newCol < 8:
-				captureTarget = chessBoardModel.board[newRow][newCol]
-				if captureTarget == None or captureTarget.player != self.player:
-					returnMoves.append((newRow, newCol))
+				returnMoves.append((newRow, newCol))
 
 		return returnMoves
 
 	# Test King Safety
 	def evaluateKingSafety(self, chessBoardModel):
 		# Test for Opponent Knights
-		for possibleMoves in [(2, 1), (1, 2), (-2, -1), (-1, -2), (-2, 1), (-1, 2), (2, -1), (1, -2)]:
-			newRow = self.row + possibleMoves[0]
-			newCol = self.col + possibleMoves[1]
+		for dr, dc in [(2, 1), (1, 2), (-2, -1), (-1, -2), (-2, 1), (-1, 2), (2, -1), (1, -2)]:
+			newRow = self.row + dr
+			newCol = self.col + dc
 			if newRow >= 0 and newRow < 8 and newCol >= 0 and newCol < 8:
 				target = chessBoardModel.board[newRow][newCol] 
 				if target != None and target.type == PieceType.KNIGHT and target.player != self.player:
@@ -117,10 +115,10 @@ class KingModel(ChessPieceModel):
 
 		# Test for Opponent Horizontals
 		horizontalCapture = [PieceType.ROOK, PieceType.QUEEN]
-		for direction in [(-1, 0), (0, 1), (1, 0), (0, -1)]:
+		for dr, dc in [(-1, 0), (0, 1), (1, 0), (0, -1)]:
 			for i in range(1, 8):
-				newRow = self.row + direction[0] * i
-				newCol = self.col + direction[1] * i
+				newRow = self.row + dr * i
+				newCol = self.col + dc * i
 
 				if not (newRow >= 0 and newRow < 8 and newCol >= 0 and newCol < 8):
 					break
@@ -136,10 +134,10 @@ class KingModel(ChessPieceModel):
 
 		# Test for Diagonal Captures
 		diagonalCapture = [PieceType.BISHOP, PieceType.QUEEN]
-		for direction in [(-1, 1), (1, 1), (1, -1), (-1, -1)]:
+		for dr, dc in [(-1, 1), (1, 1), (1, -1), (-1, -1)]:
 			for i in range(1, 8):
-				newRow = self.row + direction[0] * i
-				newCol = self.col + direction[1] * i
+				newRow = self.row + dr * i
+				newCol = self.col + dc * i
 
 				if not (newRow >= 0 and newRow < 8 and newCol >= 0 and newCol < 8):
 					break

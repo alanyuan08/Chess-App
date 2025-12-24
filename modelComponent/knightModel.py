@@ -12,7 +12,7 @@ class KnightModel(ChessPieceModel):
 		self.row = row
 		self.col = col
 		self.type = PieceType.KNIGHT
-		self.moved = False
+		self.moves = 0
 
 	# Knight Value Table White
 	knightValueTable = [
@@ -59,9 +59,7 @@ class KnightModel(ChessPieceModel):
 			newRow = self.row + possibleMoves[0]
 			newCol = self.col + possibleMoves[1]
 			if newRow >= 0 and newRow < 8 and newCol >= 0 and newCol < 8:
-				captureTarget = chessBoardModel.board[newRow][newCol]
-				if captureTarget == None or captureTarget.player != self.player:
-					returnMoves.append((newRow, newCol))
+				returnMoves.append((newRow, newCol))
 
 		return returnMoves
 
