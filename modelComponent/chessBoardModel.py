@@ -294,7 +294,7 @@ class ChessBoardModel():
                 if startCol == 0:
                     self.whiteQueenSideCanCastle = False
                 elif startCol == 7:
-                    self.whiteKingSideCanCastle = True  
+                    self.whiteKingSideCanCastle = False  
 
     def _undoMoveOnBoard(self, originalRow: int, originalCol: int, currentRow: int, currentCol: int):        
         self.board[originalRow][originalCol] = self.board[currentRow][currentCol] 
