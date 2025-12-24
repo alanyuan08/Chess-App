@@ -81,6 +81,5 @@ class QueenModel(ChessPieceModel):
 
 					break
 
-
 		return returnMoves
 

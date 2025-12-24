@@ -20,7 +20,8 @@ class ChessBoardModel():
         self.humanPlayers = []
 
         # En Passant Column - Set after pawn move, then cleared 
-        self.enPassantColumn = None
+        self.whiteEnPassantColumn = None
+        self.blackEnPassantColumn = None
 
         # Previous Moved Status
         self.previousMovedStatus = None
@@ -347,11 +348,18 @@ class ChessBoardModel():
                 # Store Removed Piece
                 self.board[cmd.startRow][cmd.endCol] = restorePiece
 
+                # Unset the En Passant Column
+                if self.playerTurn == Player.WHITE:
+                    self.whiteEnPassantColumn = None
+                else:
+                    self.blackEnPassantColumn = None
+
         return 
 
     def movePiece(self, cmd: MoveCommand):
         # Set enPassant to Null - Reset this if the opponent does a double pawn move
-        self.enPassantColumn = None
+        self.whiteEnPassantColumn = None
+        self.blackEnPassantColumn = None
 
         # Store the current Move Status of the starting piece for undo
         self.previousMovedStatus = self.board[cmd.startRow][cmd.startCol].moved
@@ -422,7 +430,10 @@ class ChessBoardModel():
                 # Move the piece from start to end
                 self._movePieceOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
 
-                self.enPassantColumn = cmd.endCol
+                if self.playerTurn == Player.WHITE:
+                    self.whiteEnPassantColumn = cmd.endCol
+                else:
+                    self.blackEnPassantColumn = cmd.endCol
 
             # Promote Pawn
             case MoveCommandType.PROMOTE:
