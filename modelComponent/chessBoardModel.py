@@ -370,46 +370,36 @@ class ChessBoardModel():
         match cmd.moveType:
             # Queen Side Castle
             case MoveCommandType.QUEENSIDECASTLE:
+                # Determine the row of the Castle 
+                row = 7 if self.playerTurn == Player.BLACK else 0
+
+                # Move the King 2 steps to the left
+                self._movePieceOnBoard(row, 4, row, 2)
+
+                # Move the Rook to the right of the king
+                self._movePieceOnBoard(row, 0, row, 3)
+
+                # Update Castle
                 if self.playerTurn == Player.BLACK:
-                    # Move the King 2 steps to the left
-                    self._movePieceOnBoard(7, 4, 7, 2)
-
-                    # Move the Rook to the right of the king
-                    self._movePieceOnBoard(7, 0, 7, 3)
-
-                    # Update Castle
                     self.blackCastled = True
-
-                elif self.playerTurn == Player.WHITE:
-                    # Move the King 2 steps to the left
-                    self._movePieceOnBoard(0, 4, 0, 2)
-
-                    # Move the Rook to the right of the king
-                    self._movePieceOnBoard(0, 0, 0, 3)
-
-                    # Update Castle
+                else:
                     self.whiteCastled = True
 
             # King Side Castle
             case MoveCommandType.KINGSIDECASTLE:
+                # Determine the row of the Castle 
+                row = 7 if self.playerTurn == Player.BLACK else 0
+
+                # Move the King 2 steps to the left
+                self._movePieceOnBoard(row, 4, row, 6)
+
+                # Move the Rook to the right of the king
+                self._movePieceOnBoard(row, 7, row, 5)
+
+                # Update Castle
                 if self.playerTurn == Player.BLACK:
-                    # Move the King 2 steps to the right
-                    self._movePieceOnBoard(7, 4, 7, 6)
-
-                    # Move the Rook to the right of the king
-                    self._movePieceOnBoard(7, 7, 7, 5)
-
-                    # Update Castle
                     self.blackCastled = True
-
-                elif self.playerTurn == Player.WHITE:
-                    # Move the King 2 steps to the right
-                    self._movePieceOnBoard(0, 4, 0, 6)
-
-                    # Move the Rook to the right of the king
-                    self._movePieceOnBoard(0, 7, 0, 5)
-
-                    # Update Castle
+                else:
                     self.whiteCastled = True
 
             # Move Piece
