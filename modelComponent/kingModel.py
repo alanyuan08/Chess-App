@@ -72,13 +72,13 @@ class KingModel(ChessPieceModel):
 
 		if self.player == Player.BLACK:
 			# Black Queen Side Castle
-			if chessBoardModel.blackQueenSideCanCastle and self.checkRook(chessBoardModel, 7, 0):
+			if chessBoardModel.blackQueenSideCanCastle and self.checkRook(chessBoardModel, 0, 7):
 				nullBlock = 0
 				for i in [1, 2, 3]:
 					if chessBoardModel.board[7][i] == None and (7, i) not in opponentAttackTargets:
 						nullBlock += 1
 					
-				if nullBlock == 3:
+				if nullBlock == 3 and (self.row, self.col) not in opponentAttackTargets:
 					returnMoves.append(
 						MoveCommand(self.row, self.col, self.row, self.col-2, MoveCommandType.QUEENSIDECASTLE)
 					)
@@ -90,7 +90,7 @@ class KingModel(ChessPieceModel):
 					if chessBoardModel.board[7][i] == None and (7, i) not in opponentAttackTargets:
 						nullBlock += 1
 
-				if nullBlock == 2:
+				if nullBlock == 2 and (self.row, self.col) not in opponentAttackTargets:
 					returnMoves.append(
 						MoveCommand(self.row, self.col, self.row, self.col+2, MoveCommandType.KINGSIDECASTLE)
 					)
@@ -103,19 +103,19 @@ class KingModel(ChessPieceModel):
 					if chessBoardModel.board[0][i] == None and (0, i) not in opponentAttackTargets:
 						nullBlock += 1
 
-				if nullBlock == 3:
+				if nullBlock == 3 and (self.row, self.col) not in opponentAttackTargets:
 					returnMoves.append(
 						MoveCommand(self.row, self.col, self.row, self.col-2, MoveCommandType.QUEENSIDECASTLE)
 					)
 
 			# White King Side Castle
-			if chessBoardModel.whiteKingSideCanCastle and self.checkRook(chessBoardModel, 0, 7):
+			if chessBoardModel.whiteKingSideCanCastle  and self.checkRook(chessBoardModel, 0, 7):
 				nullBlock = 0
 				for i in [5, 6]:
 					if chessBoardModel.board[0][i] == None and (0, i) not in opponentAttackTargets:
 						nullBlock += 1
 
-				if nullBlock == 2:
+				if nullBlock == 2 and (self.row, self.col) not in opponentAttackTargets:
 					returnMoves.append(
 						MoveCommand(self.row, self.col, self.row, self.col+2, MoveCommandType.KINGSIDECASTLE)
 					)
