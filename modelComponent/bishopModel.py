@@ -36,10 +36,10 @@ class BishopModel(ChessPieceModel):
 	def possibleMoves(self, chessBoardModel):
 		returnMoves = []
 
-		for direction in [(-1, 1), (1, 1), (1, -1), (-1, -1)]:
+		for dr, dc in [(-1, 1), (1, 1), (1, -1), (-1, -1)]:
 			for i in range(1, 8):
-				newRow = self.row + direction[0] * i
-				newCol = self.col + direction[1] * i
+				newRow = self.row + dr * i
+				newCol = self.col + dc * i
 
 				if not (newRow >= 0 and newRow < 8 and newCol >= 0 and newCol < 8):
 					break

@@ -57,9 +57,9 @@ class KingModel(ChessPieceModel):
 		opponent = KingModel.opponent(self.player)
 		opponentAttackTargets = chessBoardModel._allPlayerCaptureTargets(opponent)
 
-		for newDirection in [(-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1)]:
-			newRow = self.row + newDirection[0]
-			newCol = self.col + newDirection[1]
+		for dr, dc in [(-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1)]:
+			newRow = self.row + dr
+			newCol = self.col + dc
 			if newRow >= 0 and newRow < 8 and newCol >= 0 and newCol < 8:
 				if (newRow, newCol) not in opponentAttackTargets:
 					if chessBoardModel.board[newRow][newCol] == None:
@@ -71,21 +71,22 @@ class KingModel(ChessPieceModel):
 							MoveCommand(self.row, self.col, newRow, newCol, MoveCommandType.CAPTURE)
 						)
 
-		# Queen Side Castle
-		if not self.moved and self.checkRook(chessBoardModel, self.row, 0):
-			if all(chessBoardModel.board[self.row][i] == None for i in [1, 2, 3]):
-				if (self.row, 2) not in opponentAttackTargets and (self.row, 3) not in opponentAttackTargets:
-					returnMoves.append(
-						MoveCommand(self.row, self.col, self.row, self.col-2, MoveCommandType.QUEENSIDECASTLE)
-					)
+		if (self.row, self.col) not in opponentAttackTargets:
+			# Queen Side Castle
+			if not self.moved and self.checkRook(chessBoardModel, self.row, 0):
+				if all(chessBoardModel.board[self.row][i] == None for i in [1, 2, 3]):
+					if (self.row, 2) not in opponentAttackTargets and (self.row, 3) not in opponentAttackTargets:
+						returnMoves.append(
+							MoveCommand(self.row, self.col, self.row, self.col-2, MoveCommandType.QUEENSIDECASTLE)
+						)
 
-		# King Side Castle
-		if not self.moved and self.checkRook(chessBoardModel, self.row, 7):
-			if all(chessBoardModel.board[self.row][i] == None for i in [5, 6]):
-				if (self.row, 5) not in opponentAttackTargets and (self.row, 6) not in opponentAttackTargets:
-					returnMoves.append(
-						MoveCommand(self.row, self.col, self.row, self.col+2, MoveCommandType.KINGSIDECASTLE)
-					)
+			# King Side Castle
+			if not self.moved and self.checkRook(chessBoardModel, self.row, 7):
+				if all(chessBoardModel.board[self.row][i] == None for i in [5, 6]):
+					if (self.row, 5) not in opponentAttackTargets and (self.row, 6) not in opponentAttackTargets:
+						returnMoves.append(
+							MoveCommand(self.row, self.col, self.row, self.col+2, MoveCommandType.KINGSIDECASTLE)
+						)
 
 		# Move is Validated to not be in opponent attack target
 		return returnMoves
