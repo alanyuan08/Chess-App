@@ -15,7 +15,7 @@ class KingModel(ChessPieceModel):
 		self.moves = 0
 
 	def pieceValue(self, chessBoard):
-		returnScore = 20000
+		returnScore = 10000
 
 		# Castle Bonus
 		if self.player == Player.WHITE and chessBoard.whiteCastled:

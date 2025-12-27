@@ -72,15 +72,11 @@ class ChessBoardModel():
         returnValue = False
         if currentPlayer == Player.BLACK:
             kingPiece = self.board[self.blackKingSquareRow][self.blackKingSquareCol]
-
-            if kingPiece.type == PieceType.KING:
-                returnValue = kingPiece.evaluateKingSafety(self)
+            returnValue = kingPiece.evaluateKingSafety(self)
 
         elif currentPlayer == Player.WHITE:
             kingPiece = self.board[self.whiteKingSquareRow][self.whiteKingSquareCol]
-
-            if kingPiece.type == PieceType.KING:
-                returnValue = kingPiece.evaluateKingSafety(self)
+            returnValue = kingPiece.evaluateKingSafety(self)
 
         self.undoMove(cmd, removedPiece)
         return returnValue
@@ -97,14 +93,14 @@ class ChessBoardModel():
         
         # 2. Captures (MVV-LVA)
         if cmd.moveType in [MoveCommandType.CAPTURE, MoveCommandType.ENPASSANT]:
-            victim = board[cmd.endRow][cmd.endCol]
-            aggressor = board[cmd.startRow][cmd.startCol]
+            capturedPiece = board[cmd.endRow][cmd.endCol]
+            startPiece = board[cmd.startRow][cmd.startCol]
             
-            # En Passant victim is always a pawn
-            vic_val = vals[victim.type] if victim else 100 
-            agg_val = vals[aggressor.type]
+            # En Passant capturedPiece is always a pawn
+            capturedPieceVal = vals[capturedPiece.type]
+            startingPieceVal = vals[startPiece.type]
             
-            return (vic_val * 100) - agg_val
+            return (capturedPieceVal * 100) - startingPieceVal
 
         # 3. Castling (Mid Priority)
         if cmd.moveType in [MoveCommandType.KINGSIDECASTLE, MoveCommandType.QUEENSIDECASTLE]:
@@ -144,13 +140,9 @@ class ChessBoardModel():
 
     # Return all Capture Moves
     def allQuiesceneMoves(self):
-        validMoves = []
-
-        for cmd in self.allValidMoves():
-            if cmd.moveType in self.quiescenceMoveCmd:
-                validMoves.append(cmd)
-
-        return validMoves
+        return list(filter(
+            lambda cmd: cmd.moveType in self.quiescenceMoveCmd, self.allValidMoves()
+        ))
 
     # MinMaxSearch -> General
     def quiesceneSearch(self, alpha, beta):
@@ -176,13 +168,21 @@ class ChessBoardModel():
 
     # MinMaxSearch -> General
     def negamax(self, depth, alpha, beta):
+        validMoves = self.allValidMoves()
+        # No Valid Moves is CheckMate
+        if len(validMoves) == 0:
+            if self.playerTurn == Player.WHITE:
+                return float('inf')
+            else:
+                return float('-inf')
+
         # Termination Condition
         if depth == 0:
             return self.quiesceneSearch(float('-inf'), float('inf'))
         else:
             maxEval = float('inf')
 
-            for cmd in self.allValidMoves():
+            for cmd in validMoves:
                 removedPiece = self.movePiece(cmd)
                 score = (-1) * self.negamax(depth - 1, (-1) * beta, (-1) * alpha)
                 self.undoMove(cmd, removedPiece)
