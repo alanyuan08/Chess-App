@@ -177,19 +177,15 @@ class PawnModel(ChessPieceModel):
 		returnMoves = []
 		if self.player == Player.BLACK:
 			if self.row > 0:
-				# Capture Point
 				if self.col > 0:
 					returnMoves.append((self.row-1, self.col-1))
-
 				if self.col < 7:
 					returnMoves.append((self.row-1, self.col+1))
 
 		elif self.player == Player.WHITE:
-			if self.row < 7:
-				# Capture Point
+			if self.row < 8:
 				if self.col > 0:
 					returnMoves.append((self.row+1, self.col-1))
-
 				if self.col < 7:
 					returnMoves.append((self.row+1, self.col+1))
 
