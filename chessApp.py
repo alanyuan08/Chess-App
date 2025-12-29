@@ -14,7 +14,7 @@ from viewComponent.chessBoardView import ChessBoardView
 from viewModelComponent.chessBoardViewModel import ChessBoardViewModel
 
 if __name__ == '__main__':
-	sys.setrecursionlimit(10000)
+	sys.setrecursionlimit(1000)
 
 	app = QApplication(sys.argv)
 
@@ -24,7 +24,7 @@ if __name__ == '__main__':
 	view.setFixedSize(720, 720)
 
 	# Create ChessBoard/ Chess Piece Model Components
-	chessBoardModel = ChessBoardFactory.createChessBoard([Player.WHITE, Player.BLACK])
+	chessBoardModel = ChessBoardFactory.createChessBoard([Player.WHITE])
 
 	# Create View Components
 	chessBoardView = ChessBoardView(scene, chessBoardModel)

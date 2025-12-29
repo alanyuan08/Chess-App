@@ -83,22 +83,14 @@ class ChessBoardModel():
 
     # Compute Move Priority
     def getMovePriority(self, cmd, board):
-    # Piece Values
-        vals = {PieceType.PAWN: 100, PieceType.KNIGHT: 300, PieceType.BISHOP: 300, 
-                PieceType.ROOK: 500, PieceType.QUEEN: 900, PieceType.KING: 10000}
-
         # 1. Promotions (High Priority)
         if cmd.moveType == MoveCommandType.PROMOTE:
             return 90000 # Treat as Queen value
         
         # 2. Captures (MVV-LVA)
         if cmd.moveType in [MoveCommandType.CAPTURE, MoveCommandType.ENPASSANT]:
-            capturedPiece = board[cmd.endRow][cmd.endCol]
-            startPiece = board[cmd.startRow][cmd.startCol]
-            
-            # En Passant capturedPiece is always a pawn
-            capturedPieceVal = vals[capturedPiece.type]
-            startingPieceVal = vals[startPiece.type]
+            capturedPieceVal = board[cmd.endRow][cmd.endCol].pieceValue()
+            startingPieceVal = board[cmd.startRow][cmd.startCol].pieceValue()  
             
             return (capturedPieceVal * 100) - startingPieceVal
 
@@ -132,20 +124,35 @@ class ChessBoardModel():
             for col in range(0, 8):
                 if self.board[row][col] != None:
                     if self.board[row][col].player == Player.WHITE:
-                        returnValue += self.board[row][col].pieceValue(self)
+                        returnValue += self.board[row][col].computedValue(self)
                     else:
-                        returnValue -= self.board[row][col].pieceValue(self)
+                        returnValue -= self.board[row][col].computedValue(self)
 
         return returnValue
 
     # Return all Capture Moves
-    def allQuiesceneMoves(self):
+    def allQuiesceneMoves(self, validMoves):
         return list(filter(
-            lambda cmd: cmd.moveType in self.quiescenceMoveCmd, self.allValidMoves()
+            lambda cmd: cmd.moveType in self.quiescenceMoveCmd, validMoves
         ))
 
     # MinMaxSearch -> General
     def quiesceneSearch(self, alpha, beta):
+        validMoves = self.allValidMoves()
+        # No Valid Moves = Lose
+        if len(validMoves) == 0:
+            opponent = ChessBoardModel.opponent(self.player)
+            opponentAttackTargets = chessBoardModel._allPlayerCaptureTargets(opponent)
+            if self.playerTurn == Player.WHITE:
+                if (self.whiteKingSquareRow, self.whiteKingSquareCol) in opponentAttackTargets:
+                    return float('-inf')
+                else:
+                    return 0
+            else:
+                if (self.blackKingSquareRow, self.blackKingSquareCol) in opponentAttackTargets:
+                    return float('-inf')
+                else:
+                    return 0
 
         staticEval = self.computeBoardValue()
         if staticEval >= beta:
@@ -154,7 +161,7 @@ class ChessBoardModel():
         if staticEval > alpha:
             alpha = staticEval
 
-        for cmd in self.allQuiesceneMoves():
+        for cmd in self.allQuiesceneMoves(validMoves):
             removedPiece = self.movePiece(cmd)
             score = (-1) * self.quiesceneSearch((-1) * beta, (-1) * alpha)
             self.undoMove(cmd, removedPiece)
@@ -169,18 +176,29 @@ class ChessBoardModel():
     # MinMaxSearch -> General
     def negamax(self, depth, alpha, beta):
         validMoves = self.allValidMoves()
-        # No Valid Moves is CheckMate
+        
+        # No Valid Moves = Lose
         if len(validMoves) == 0:
+            opponent = ChessBoardModel.opponent(self.player)
+            opponentAttackTargets = chessBoardModel._allPlayerCaptureTargets(opponent)
             if self.playerTurn == Player.WHITE:
-                return float('inf')
+                if (self.whiteKingSquareRow, self.whiteKingSquareCol) in opponentAttackTargets:
+                    return float('-inf')
+                else:
+                    # Check Stalemate
+                    return 0
             else:
-                return float('-inf')
+                if (self.blackKingSquareRow, self.blackKingSquareCol) in opponentAttackTargets:
+                    return float('-inf')
+                else:
+                    # Check Stalemate
+                    return 0
 
         # Termination Condition
         if depth == 0:
             return self.quiesceneSearch(float('-inf'), float('inf'))
         else:
-            maxEval = float('inf')
+            maxEval = float('-inf')
 
             for cmd in validMoves:
                 removedPiece = self.movePiece(cmd)
@@ -193,7 +211,7 @@ class ChessBoardModel():
                 if alpha >= beta:
                     break
                     
-            return alpha
+            return maxEval
 
     # Take Opponent Turn
     def computeBestMove(self):

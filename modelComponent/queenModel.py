@@ -24,13 +24,16 @@ class QueenModel(ChessPieceModel):
 	    [-10,   0,   5,   5,   5,   5,   0, -10],
 	    [-10,   0,   0,   0,   0,   0,   0, -10],
 	    [-20, -10, -10,  -5,  -5, -10, -10, -20]
-	];
+	]
 
-	def pieceValue(self, chessBoard):
+	def pieceValue(self):
+		return 900
+
+	def computedValue(self, chessBoard):
 		if self.player == Player.BLACK:
-			return 900 + self.queenValueTable[self.row][self.col]
+			return self.pieceValue() + self.queenValueTable[self.row][self.col]
 		else:
-			return 900 + self.queenValueTable[7 - self.row][self.col]
+			return self.pieceValue() + self.queenValueTable[7 - self.row][self.col]
 
 	# List all Possible Moves from Location
 	def possibleMoves(self, chessBoardModel):

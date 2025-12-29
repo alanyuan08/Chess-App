@@ -26,11 +26,14 @@ class BishopModel(ChessPieceModel):
 	    [-20, -10, -10, -10, -10, -10, -10, -20]
 	]
 
-	def pieceValue(self, chessBoard):
+	def pieceValue(self):
+		return 300
+
+	def computedValue(self, chessBoard):
 		if self.player == Player.BLACK:
-			return 300 + self.bishopValueTable[self.row][self.col]
+			return self.pieceValue() + self.bishopValueTable[self.row][self.col]
 		else:
-			return 300 + self.bishopValueTable[7 - self.row][self.col]
+			return self.pieceValue() + self.bishopValueTable[7 - self.row][self.col]
 
 	# List all Possible Moves from Location
 	def possibleMoves(self, chessBoardModel):
