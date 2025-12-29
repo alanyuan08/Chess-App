@@ -74,8 +74,10 @@ class BishopModel(ChessPieceModel):
 				if not (newRow >= 0 and newRow < 8 and newCol >= 0 and newCol < 8):
 					break
 
-				returnMoves.append((newRow, newCol))
-				if chessBoardModel.board[newRow][newCol] != None:
+				if chessBoardModel.board[newRow][newCol] == None:
+					returnMoves.append((newRow, newCol))
+				else: 
+					returnMoves.append((newRow, newCol))
 					break
 
 		return returnMoves

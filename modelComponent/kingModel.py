@@ -56,23 +56,22 @@ class KingModel(ChessPieceModel):
 	def possibleMoves(self, chessBoardModel):
 		returnMoves = []
 
-		# King + Move to Castle are not in check
-		opponent = KingModel.opponent(self.player)
-		opponentAttackTargets = chessBoardModel._allPlayerCaptureTargets(opponent)
-
 		for dr, dc in [(-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1)]:
 			newRow = self.row + dr
 			newCol = self.col + dc
 			if newRow >= 0 and newRow < 8 and newCol >= 0 and newCol < 8:
-				if (newRow, newCol) not in opponentAttackTargets:
-					if chessBoardModel.board[newRow][newCol] == None:
-						returnMoves.append(
-							MoveCommand(self.row, self.col, newRow, newCol, MoveCommandType.MOVE)
-						)
-					elif chessBoardModel.board[newRow][newCol].player != self.player:
-						returnMoves.append(
-							MoveCommand(self.row, self.col, newRow, newCol, MoveCommandType.CAPTURE)
-						)
+				if chessBoardModel.board[newRow][newCol] == None:
+					returnMoves.append(
+						MoveCommand(self.row, self.col, newRow, newCol, MoveCommandType.MOVE)
+					)
+				elif chessBoardModel.board[newRow][newCol].player != self.player:
+					returnMoves.append(
+						MoveCommand(self.row, self.col, newRow, newCol, MoveCommandType.CAPTURE)
+					)
+
+		# King + Move to Castle are not in check
+		opponent = KingModel.opponent(self.player)
+		opponentAttackTargets = chessBoardModel._allPlayerCaptureTargets(opponent)
 
 		if (self.row, self.col) not in opponentAttackTargets:
 			# Queen Side Castle
@@ -92,7 +91,7 @@ class KingModel(ChessPieceModel):
 						)
 
 		# Move is Validated to not be in opponent attack target
-		return returnMoves
+		return [move for move in returnMoves if chessBoardModel.validateKingSafety(move)]
 		
 	# List of targets - Used to check for Castle
 	def captureTargets(self, chessBoardModel):

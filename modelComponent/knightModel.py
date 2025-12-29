@@ -58,9 +58,9 @@ class KnightModel(ChessPieceModel):
 	def captureTargets(self, chessBoardModel):
 		returnMoves = []
 
-		for possibleMoves in [(2, 1), (1, 2), (-2, -1), (-1, -2), (-2, 1), (-1, 2), (2, -1), (1, -2)]:
-			newRow = self.row + possibleMoves[0]
-			newCol = self.col + possibleMoves[1]
+		for dr, dc in [(2, 1), (1, 2), (-2, -1), (-1, -2), (-2, 1), (-1, 2), (2, -1), (1, -2)]:
+			newRow = self.row + dr
+			newCol = self.col + dc
 			if newRow >= 0 and newRow < 8 and newCol >= 0 and newCol < 8:
 				returnMoves.append((newRow, newCol))
 

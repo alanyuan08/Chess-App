@@ -235,18 +235,18 @@ class ChessBoardModel():
 
     # This is used to determine king safety and castle
     def _allPlayerCaptureTargets(self, player):
-        attackSquare = {}
+        captureSquares = {}
 
         for row in range(0, 8):
             for col in range(0, 8):
                 targetPiece = self.board[row][col]
                 if targetPiece != None and targetPiece.player == player:
 
-                    possibleMoves = targetPiece.captureTargets(self)
-                    for move in possibleMoves:
-                        attackSquare[move] = True
+                    captureTargets = targetPiece.captureTargets(self)
+                    for target in captureTargets:
+                        captureSquares[target] = True
         
-        return attackSquare
+        return captureSquares
 
     def _updateKingSquare(self, kingRow: int, kingCol: int):
         # Update the King Square
