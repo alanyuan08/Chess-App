@@ -141,8 +141,8 @@ class ChessBoardModel():
         validMoves = self.allValidMoves()
         # No Valid Moves = Lose
         if len(validMoves) == 0:
-            opponent = ChessBoardModel.opponent(self.player)
-            opponentAttackTargets = chessBoardModel._allPlayerCaptureTargets(opponent)
+            opponent = ChessBoardModel.opponent(self.playerTurn)
+            opponentAttackTargets = self._allPlayerCaptureTargets(opponent)
             if self.playerTurn == Player.WHITE:
                 if (self.whiteKingSquareRow, self.whiteKingSquareCol) in opponentAttackTargets:
                     return float('-inf')
@@ -179,8 +179,8 @@ class ChessBoardModel():
         
         # No Valid Moves = Lose
         if len(validMoves) == 0:
-            opponent = ChessBoardModel.opponent(self.player)
-            opponentAttackTargets = chessBoardModel._allPlayerCaptureTargets(opponent)
+            opponent = ChessBoardModel.opponent(self.playerTurn)
+            opponentAttackTargets = self._allPlayerCaptureTargets(opponent)
             if self.playerTurn == Player.WHITE:
                 if (self.whiteKingSquareRow, self.whiteKingSquareCol) in opponentAttackTargets:
                     return float('-inf')
