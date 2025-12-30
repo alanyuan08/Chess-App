@@ -14,7 +14,7 @@ from viewComponent.chessBoardView import ChessBoardView
 from viewModelComponent.chessBoardViewModel import ChessBoardViewModel
 
 if __name__ == '__main__':
-	sys.setrecursionlimit(1000)
+	sys.setrecursionlimit(3000)
 
 	app = QApplication(sys.argv)
 

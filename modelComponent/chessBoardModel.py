@@ -89,10 +89,16 @@ class ChessBoardModel():
         
         # 2. Captures (MVV-LVA)
         if cmd.moveType in [MoveCommandType.CAPTURE, MoveCommandType.ENPASSANT]:
-            capturedPieceVal = board[cmd.endRow][cmd.endCol].pieceValue()
+            capturedPieceVal = 0
+            if cmd.moveType == MoveCommandType.ENPASSANT:
+                capturedPieceVal = board[cmd.startRow][cmd.endCol].pieceValue()
+            else:
+                capturedPieceVal = board[cmd.endRow][cmd.endCol].pieceValue()
+
             startingPieceVal = board[cmd.startRow][cmd.startCol].pieceValue()  
             
-            return (capturedPieceVal * 100) - startingPieceVal
+            return (capturedPieceVal * 10) - startingPieceVal
+
 
         # 3. Castling (Mid Priority)
         if cmd.moveType in [MoveCommandType.KINGSIDECASTLE, MoveCommandType.QUEENSIDECASTLE]:
@@ -222,8 +228,8 @@ class ChessBoardModel():
 
         for cmd in self.allValidMoves():
             removedPiece = self.movePiece(cmd)
-            print(cmd)
-            returnValue = (-1) * self.negamax(2, (-1) * beta, (-1) * alpha)
+            print(cmd)  
+            returnValue = (-1) * self.negamax(2 , (-1) * beta, (-1) * alpha)
             if returnValue > bestScore:
                 bestScore = returnValue
                 returnCmd = cmd
