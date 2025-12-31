@@ -99,7 +99,6 @@ class ChessBoardModel():
             
             return (capturedPieceVal * 10) - startingPieceVal
 
-
         # 3. Castling (Mid Priority)
         if cmd.moveType in [MoveCommandType.KINGSIDECASTLE, MoveCommandType.QUEENSIDECASTLE]:
             return 50
@@ -144,22 +143,6 @@ class ChessBoardModel():
 
     # MinMaxSearch -> General
     def quiesceneSearch(self, alpha, beta):
-        validMoves = self.allValidMoves()
-        # No Valid Moves = Lose
-        if len(validMoves) == 0:
-            opponent = ChessBoardModel.opponent(self.playerTurn)
-            opponentAttackTargets = self._allPlayerCaptureTargets(opponent)
-            if self.playerTurn == Player.WHITE:
-                if (self.whiteKingSquareRow, self.whiteKingSquareCol) in opponentAttackTargets:
-                    return float('-inf')
-                else:
-                    return 0
-            else:
-                if (self.blackKingSquareRow, self.blackKingSquareCol) in opponentAttackTargets:
-                    return float('-inf')
-                else:
-                    return 0
-
         staticEval = self.computeBoardValue()
         if staticEval >= beta:
             return beta
@@ -167,6 +150,7 @@ class ChessBoardModel():
         if staticEval > alpha:
             alpha = staticEval
 
+        validMoves = self.allValidMoves()
         for cmd in self.allQuiesceneMoves(validMoves):
             removedPiece = self.movePiece(cmd)
             score = (-1) * self.quiesceneSearch((-1) * beta, (-1) * alpha)
@@ -202,7 +186,7 @@ class ChessBoardModel():
 
         # Termination Condition
         if depth == 0:
-            return self.quiesceneSearch(float('-inf'), float('inf'))
+            return self.quiesceneSearch(alpha, beta)
         else:
             maxEval = float('-inf')
 

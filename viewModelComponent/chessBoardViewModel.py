@@ -36,7 +36,7 @@ class ChessBoardViewModel():
             # Run the compute for the Opponent's Move
             worker = Worker(
                 self.takeOpponentTurn
-            ) 
+            )
 
             # Execute
             self.threadpool.start(worker)
