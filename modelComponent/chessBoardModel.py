@@ -293,7 +293,7 @@ class ChessBoardModel():
 
         for score, cmd in scores_and_moves:
             removedPiece = self.movePiece(cmd)
-            returnValue = (-1) * self.negamax(4 , (-1) * beta, (-1) * alpha)
+            returnValue = (-1) * self.negamax(2 , (-1) * beta, (-1) * alpha)
             print(cmd)
             if returnValue > bestScore:
                 bestScore = returnValue
