@@ -5,6 +5,9 @@ from modelComponent.chessPieceModel import ChessPieceModel
 # Enum
 from appEnums import Player, MoveCommandType, PieceType
 
+# Math
+import math
+
 class KingModel(ChessPieceModel):
 	def __init__(self, player: Player, row: int, col: int):
 
@@ -14,10 +17,37 @@ class KingModel(ChessPieceModel):
 		self.type = PieceType.KING
 		self.moves = 0
 
+	# King Value Table White
+	kingValueTableEarlyGame = [
+	    [-50, -40, -40, -50, -50, -40, -40, -50],
+	    [-30, -30, -30, -30, -30, -30, -30, -30],
+	    [-30, -30, -30, -30, -30, -30, -30, -30],
+	    [-30, -30, -30, -30, -30, -30, -30, -30],
+	    [-20, -20, -20, -20, -20, -20, -20, -20],
+	    [-10, -10, -10, -10, -10, -10, -10, -10],
+	    [ 10,  10,   0,   0,   0,   0,  10,  10],
+	    [ 20,  30,  10,   0,   0,  10,  30,  20]
+	]
+
+	kingValueTableEndGame = [
+	    [-50, -30, -30, -30, -30, -30, -30, -50],
+	    [-30, -10,   0,   0,   0,   0, -10, -30], 
+	    [-30,   0,  15,  20,  20,  15,   0, -30],
+	    [-30,   0,  30,  40,  40,  30,   0, -30],
+	    [-30,   0,  30,  40,  40,  30,   0, -30],
+	    [-30,   0,  15,  20,  20,  15,   0, -30],
+	    [-30, -10,   0,   0,   0,   0, -10, -30],
+	    [-50, -30, -30, -30, -30, -30, -30, -50] 
+	]
+
+	# King is not part of phase calculations
+	def phaseWeight(self):
+		return 0
+
 	def pieceValue(self):
 		return 10000
 
-	def computedValue(self, chessBoard):
+	def computedValue(self, chessBoard, phaseWeight):
 		returnScore = self.pieceValue()
 
 		# Castle Bonus
@@ -35,7 +65,18 @@ class KingModel(ChessPieceModel):
 			elif self.checkRook(chessBoard, self.row, 7):
 				returnScore -= 30
 
-		return returnScore
+		row = 0
+		if self.player == Player.BLACK:
+			row = self.row
+		else:
+			row = 7 - self.row
+
+		earlyGame = self.kingValueTableEarlyGame[row][self.col]
+		endGame = self.kingValueTableEndGame[row][self.col]
+
+		computedPhase = earlyGame * phaseWeight + endGame * (24 - phaseWeight) 
+
+		return returnScore + math.ceil(computedPhase / 24)
 
 	@staticmethod
 	def opponent(player: Player):

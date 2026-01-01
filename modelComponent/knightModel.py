@@ -26,15 +26,20 @@ class KnightModel(ChessPieceModel):
 	    [-50, -40, -30, -30, -30, -30, -40, -50]
 	]
 
+	def phaseWeight(self):
+		return 1
+
 	def pieceValue(self):
 		return 300
 
-	def computedValue(self, chessBoard):
+	def computedValue(self, chessBoard, phaseWeight):
+		row = 0
 		if self.player == Player.BLACK:
-			return self.pieceValue() + self.knightValueTable[self.row][self.col]
+			row = self.row
 		else:
-			return self.pieceValue() + self.knightValueTable[7 - self.row][self.col]
+			row = 7 - self.row
 
+		return self.pieceValue() + self.knightValueTable[row][self.col]
 
 	def possibleMoves(self, chessBoardModel):
 		returnMoves = []

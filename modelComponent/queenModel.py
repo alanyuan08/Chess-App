@@ -5,6 +5,9 @@ from modelComponent.chessPieceModel import ChessPieceModel
 # Enum
 from appEnums import Player, MoveCommandType, PieceType
 
+# Math
+import math
+
 class QueenModel(ChessPieceModel):
 	def __init__(self, player: Player, row: int, col: int):
 
@@ -15,25 +18,47 @@ class QueenModel(ChessPieceModel):
 		self.moves = 0
 
 	# Queen Value Table White
-	queenValueTable = [
-	    [-20, -10, -10,  -5,  -5, -10, -10, -20],
-	    [-10,   0,   0,   0,   0,   0,   0, -10],
-	    [-10,   0,   5,   5,   5,   5,   0, -10],
+	queenValueTableEarlyGame = [
+	    [-20, -15, -15, -10, -10, -15, -15, -20],
+	    [-10,  -5,  -5,   0,   0,  -5,  -5, -10],
+	    [ -5,   0,   0,   5,   5,   0,   0,  -5],
+	    [ -5,   0,   5,  10,  10,   5,   0,  -5],
+	    [ -5,   0,   5,  10,  10,   5,   0,  -5],
+	    [ -5,   5,   5,   5,   5,   5,   5,  -5],
+	    [  0,   5,  10,  10,  10,  10,   5,   0],
+	    [ -5,  -5,   0,  10,   0,   0,  -5,  -5]
+    ]
+
+	queenValueTableEndGame = [
+	    [-10,  -5,  -5,  -5,  -5,  -5,  -5, -10],
 	    [ -5,   0,   5,   5,   5,   5,   0,  -5],
+	    [  0,   5,  10,  15,  15,  10,   5,   0],
+	    [  5,  10,  20,  30,  30,  20,  10,   5],
+	    [  5,  10,  20,  30,  30,  20,  10,   5],
+	    [  0,   5,  10,  15,  15,  10,   5,   0],
 	    [ -5,   0,   5,   5,   5,   5,   0,  -5],
-	    [-10,   0,   5,   5,   5,   5,   0, -10],
-	    [-10,   0,   0,   0,   0,   0,   0, -10],
-	    [-20, -10, -10,  -5,  -5, -10, -10, -20]
+	    [-20, -15, -10,  -5,  -5, -10, -15, -20]
 	]
 
 	def pieceValue(self):
 		return 900
 
-	def computedValue(self, chessBoard):
+	def phaseWeight(self):
+		return 4
+
+	def computedValue(self, chessBoard, phaseWeight):
+		row = 0
 		if self.player == Player.BLACK:
-			return self.pieceValue() + self.queenValueTable[self.row][self.col]
+			row = self.row
 		else:
-			return self.pieceValue() + self.queenValueTable[7 - self.row][self.col]
+			row = 7 - self.row
+
+		earlyGame = self.queenValueTableEarlyGame[row][self.col]
+		endGame = self.queenValueTableEndGame[row][self.col]
+
+		computedPhase = earlyGame * phaseWeight + endGame * (24 - phaseWeight) 
+
+		return self.pieceValue() + math.ceil(computedPhase / 24)
 
 	# List all Possible Moves from Location
 	def possibleMoves(self, chessBoardModel):

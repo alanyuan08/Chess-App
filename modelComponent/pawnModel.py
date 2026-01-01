@@ -26,14 +26,21 @@ class PawnModel(ChessPieceModel):
 	    [ 0,  0,  0,  0,  0,  0,  0,  0] 
 	]
 
+	# Pawn isn't part of Phase Weights
+	def phaseWeight(self):
+		return 0
+
 	def pieceValue(self):
 		return 100
 
-	def computedValue(self, chessBoard):
+	def computedValue(self, chessBoard, phaseWeight):
+		row = 0
 		if self.player == Player.BLACK:
-			return self.pieceValue() + self.pawnValueTable[self.row][self.col]
+			row = self.row
 		else:
-			return self.pieceValue() + self.pawnValueTable[7 - self.row][self.col]
+			row = 7 - self.row
+
+		return self.pieceValue() + self.pawnValueTable[row][self.col]
 
 	def checkOpponentPawn(self, chessBoardModel, row: int, col: int):
 		rookPiece = chessBoardModel.board[row][col]

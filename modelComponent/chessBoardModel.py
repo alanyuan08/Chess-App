@@ -126,17 +126,30 @@ class ChessBoardModel():
 
         return validMoves
 
+
+    # Maximum Value is 24, used for early/ mid board evaluation
+    def calculateGamePhase(self):
+        totalPhaseWeight = 0
+        
+        for row in range(0, 8):
+            for col in range(0, 8):
+                if self.board[row][col] != None:
+                    totalPhaseWeight += self.board[row][col].phaseWeight()
+
+        return totalPhaseWeight
+
     # Compute Board Value - Assume White is the Protagonist
     def computeBoardValue(self):
         returnValue = 0
 
+        phaseWeight = self.calculateGamePhase()
         for row in range(0, 8):
             for col in range(0, 8):
                 if self.board[row][col] != None:
                     if self.board[row][col].player == Player.WHITE:
-                        returnValue += self.board[row][col].computedValue(self)
+                        returnValue += self.board[row][col].computedValue(self, phaseWeight)
                     else:
-                        returnValue -= self.board[row][col].computedValue(self)
+                        returnValue -= self.board[row][col].computedValue(self, phaseWeight)
 
         return returnValue
 
@@ -215,9 +228,6 @@ class ChessBoardModel():
     # Iterative Deepening
     def computeMoveWrapperDepth2(self, cmd):
         return self._defaultMoveWrapper(cmd, 2)
-
-    def computeMoveWrapperDepth4(self, cmd):
-        return self._defaultMoveWrapper(cmd, 4)
 
     def _defaultMoveWrapper(self, cmd, depth):
         newBoard = copy.deepcopy(self)
