@@ -140,15 +140,15 @@ class ChessBoardModel():
 
     # Compute Pawn Penalizer for Isolated / Double Pawn
     def pawnPenalizer(self, player, phaseWeight):
-        filePawnCount = [for _ in range(8)]
+        filePawnCount = [0 for _ in range(8)]
 
         for row in range(0, 8):
             for col in range(0, 8):
-                if self.board[row][col] != None and self.board[row][col].type == PieceType.PAWN:
-                    filePawnCount[row] += 1
+                piece = self.board[row][col]
+                if piece != None and piece.type == PieceType.PAWN and piece.player == player:
+                    filePawnCount[col] += 1
 
         penalizer = 0
-
         # Pawn Penalizer
         for file in range(0, 8):
             pawnCount = filePawnCount[file]
