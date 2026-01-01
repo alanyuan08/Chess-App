@@ -5,6 +5,9 @@ from modelComponent.chessPieceModel import ChessPieceModel
 # Enum
 from appEnums import Player, MoveCommandType, PieceType
 
+# Math
+import math
+
 class PawnModel(ChessPieceModel):
 	def __init__(self, player: Player, row: int, col: int):
 
@@ -15,7 +18,7 @@ class PawnModel(ChessPieceModel):
 		self.moves = 0
 
 	# Pawn Value Table White
-	pawnValueTable = [
+	pawnValueTableEarlyGame = [
 	    [ 0,  0,  0,  0,  0,  0,  0,  0],
 	    [50, 50, 50, 50, 50, 50, 50, 50],
 	    [10, 10, 20, 30, 30, 20, 10, 10],
@@ -24,6 +27,17 @@ class PawnModel(ChessPieceModel):
 	    [ 5, -5,-10,  0,  0,-10, -5,  5],
 	    [ 5, 10, 10,-20,-20, 10, 10,  5],
 	    [ 0,  0,  0,  0,  0,  0,  0,  0] 
+	]
+
+	pawnValueTableEndGame = [
+	    [0,   0,   0,   0,   0,   0,   0,   0],
+	    [150, 150, 150, 150, 150, 150, 150, 150],
+	    [80,  80,  80,  80,  80,  80,  80,  80],
+	    [40,  40,  40,  40,  40,  40,  40,  40],
+	    [20,  20,  20,  20,  20,  20,  20,  20],
+	    [10,  10,  10,  10,  10,  10,  10,  10],
+	    [0,   0,   0,   0,   0,   0,   0,   0],
+	    [0,   0,   0,   0,   0,   0,   0,   0]
 	]
 
 	# Pawn isn't part of Phase Weights
@@ -40,7 +54,12 @@ class PawnModel(ChessPieceModel):
 		else:
 			row = 7 - self.row
 
-		return self.pieceValue() + self.pawnValueTable[row][self.col]
+		earlyGame = self.pawnValueTableEarlyGame[row][self.col]
+		endGame = self.pawnValueTableEndGame[row][self.col]
+
+		computedPhase = earlyGame * phaseWeight + endGame * (24 - phaseWeight) 
+
+		return self.pieceValue() + math.ceil(computedPhase / 24)
 
 	def checkOpponentPawn(self, chessBoardModel, row: int, col: int):
 		rookPiece = chessBoardModel.board[row][col]

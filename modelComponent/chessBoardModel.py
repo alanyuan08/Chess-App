@@ -10,7 +10,7 @@ from modelComponent.moveCommand import MoveCommand
 # Multi Process Pool
 import multiprocessing
 import copy
-import time
+import math
 
 # Controller 
 class ChessBoardModel():
@@ -138,11 +138,48 @@ class ChessBoardModel():
 
         return totalPhaseWeight
 
+    # Compute Pawn Penalizer for Isolated / Double Pawn
+    def pawnPenalizer(self, player, phaseWeight):
+        filePawnCount = [for _ in range(8)]
+
+        for row in range(0, 8):
+            for col in range(0, 8):
+                if self.board[row][col] != None and self.board[row][col].type == PieceType.PAWN:
+                    filePawnCount[row] += 1
+
+        penalizer = 0
+
+        # Pawn Penalizer
+        for file in range(0, 8):
+            pawnCount = filePawnCount[file]
+
+            if pawnCount > 0:
+                # Penalizer for Double / Triple/ Quad Pawns
+                if pawnCount > 1:
+                    penalizer += (pawnCount - 1) * 15
+
+                # Compute for Isolated Pawns
+                isIsolated = True
+                if file > 0 and filePawnCount[file-1] > 0:
+                    isIsolated = False
+                if file < 7 and filePawnCount[file+1] > 0:
+                    isIsolated = False
+                    
+                if isIsolated:
+                    earlyGame  = 15
+                    endGame = 25
+                    computedPhase = earlyGame * phaseWeight + endGame * (24 - phaseWeight) 
+                
+                    penalizer += math.ceil(computedPhase / 24)
+
+        return penalizer
+
     # Compute Board Value - Assume White is the Protagonist
     def computeBoardValue(self):
         returnValue = 0
 
         phaseWeight = self.calculateGamePhase()
+        # Compute for Piece
         for row in range(0, 8):
             for col in range(0, 8):
                 if self.board[row][col] != None:
@@ -150,6 +187,10 @@ class ChessBoardModel():
                         returnValue += self.board[row][col].computedValue(self, phaseWeight)
                     else:
                         returnValue -= self.board[row][col].computedValue(self, phaseWeight)
+
+        # Compute for Double/ Isolated Pawns
+        returnValue += self.pawnPenalizer(Player.WHITE, phaseWeight)
+        returnValue -= self.pawnPenalizer(Player.BLACK, phaseWeight)
 
         return returnValue
 
