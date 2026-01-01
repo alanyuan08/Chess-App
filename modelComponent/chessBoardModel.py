@@ -7,6 +7,11 @@ from modelFactory.chessPieceFactory import ChessPieceFactory
 # Model
 from modelComponent.moveCommand import MoveCommand
 
+# Multi Process Pool
+import multiprocessing
+import copy
+import time
+
 # Controller 
 class ChessBoardModel():
     def __init__(self):
@@ -142,8 +147,12 @@ class ChessBoardModel():
         ))
 
     # MinMaxSearch -> General
-    def quiesceneSearch(self, alpha, beta):
+    def quiesceneSearch(self, alpha, beta, depth = 0):
         staticEval = self.computeBoardValue()
+
+        if depth >= 10:
+            return staticEval
+
         if staticEval >= beta:
             return beta
 
@@ -153,7 +162,7 @@ class ChessBoardModel():
         validMoves = self.allValidMoves()
         for cmd in self.allQuiesceneMoves(validMoves):
             removedPiece = self.movePiece(cmd)
-            score = (-1) * self.quiesceneSearch((-1) * beta, (-1) * alpha)
+            score = (-1) * self.quiesceneSearch((-1) * beta, (-1) * alpha, depth + 1)
             self.undoMove(cmd, removedPiece)
 
             if score >= beta:
@@ -203,17 +212,38 @@ class ChessBoardModel():
                     
             return maxEval
 
-    # Take Opponent Turn
-    def computeBestMove(self):
-        returnCmd = None
-        bestScore = float('-inf')
+    # Iterative Deepening
+    def computeMoveWrapperDepth2(self, cmd):
+        return self._defaultMoveWrapper(cmd, 2)
+
+    def computeMoveWrapperDepth4(self, cmd):
+        return self._defaultMoveWrapper(cmd, 4)
+
+    def _defaultMoveWrapper(self, cmd, depth):
+        newBoard = copy.deepcopy(self)
+        newBoard.movePiece(cmd)
+
         alpha = float('-inf')
         beta = float('inf')
+        score = (-1) * newBoard.negamax(depth, (-1) * beta, (-1) * alpha)
+        return score, cmd
 
-        for cmd in self.allValidMoves():
+    # Take Opponent Turn
+    def computeBestMove(self):
+        commandList = self.allValidMoves()
+        with multiprocessing.Pool() as pool:
+            scores_and_moves = pool.map(self.computeMoveWrapperDepth2, commandList)
+
+        scores_and_moves.sort(key=lambda x: x[0], reverse=True)
+
+        alpha = float('-inf')
+        beta = float('inf')
+        bestScore = float('-inf')
+
+        for score, cmd in scores_and_moves:
             removedPiece = self.movePiece(cmd)
-            print(cmd)  
-            returnValue = (-1) * self.negamax(2 , (-1) * beta, (-1) * alpha)
+            returnValue = (-1) * self.negamax(4 , (-1) * beta, (-1) * alpha)
+            print(cmd)
             if returnValue > bestScore:
                 bestScore = returnValue
                 returnCmd = cmd

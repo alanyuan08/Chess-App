@@ -42,7 +42,7 @@ class ChessBoardViewModel():
             self.threadpool.start(worker)
 
     def takeOpponentTurn(self):
-       # Opponent Takes Turn
+        # Opponent Takes Turn
         opponentCmd = self.chessBoardModel.computeBestMove()
 
         if opponentCmd != None:
