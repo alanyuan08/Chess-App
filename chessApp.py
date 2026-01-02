@@ -4,14 +4,14 @@ import sys
 # Import Enums
 from appEnums import Player
 
-# Import Factory
-from modelFactory.chessBoardFactory import ChessBoardFactory
-
 # Import View
 from viewComponent.chessBoardView import ChessBoardView
 
 # Import ViewModel
 from viewModelComponent.chessBoardViewModel import ChessBoardViewModel
+
+# Import Model
+from modelComponent.chessGameModel import ChessGameModel
 
 if __name__ == '__main__':
 	sys.setrecursionlimit(3000)
@@ -23,14 +23,14 @@ if __name__ == '__main__':
 	view = QGraphicsView(scene)
 	view.setFixedSize(720, 720)
 
-	# Create ChessBoard/ Chess Piece Model Components
-	chessBoardModel = ChessBoardFactory.createChessBoard([Player.WHITE, Player.BLACK])
+	# Create Chess Game Moded / ChessBoard/ Chess Piece Model Components
+	chessGameModel = ChessGameModel([Player.WHITE])
 
 	# Create View Components
-	chessBoardView = ChessBoardView(scene, chessBoardModel)
+	chessBoardView = ChessBoardView(scene, chessGameModel)
 
 	# Create ChessBoard ViewModel
-	chessBoardController = ChessBoardViewModel(chessBoardView, chessBoardModel);
+	chessBoardController = ChessBoardViewModel(chessBoardView, chessGameModel)
 
 	view.show()
 	app.exec()

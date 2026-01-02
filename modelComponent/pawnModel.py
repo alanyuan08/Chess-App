@@ -58,7 +58,6 @@ class PawnModel(ChessPieceModel):
 		endGame = self.pawnValueTableEndGame[row][self.col]
 
 		computedPhase = earlyGame * phaseWeight + endGame * (24 - phaseWeight) 
-
 		return self.pieceValue() + math.ceil(computedPhase / 24)
 
 	def checkOpponentPawn(self, chessBoardModel, row: int, col: int):

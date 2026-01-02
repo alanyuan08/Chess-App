@@ -38,9 +38,7 @@ class ChessBoardModel():
 
         self.blackKingSquareRow = 7
         self.blackKingSquareCol = 4
-        
-    # Danger Moves
-    quiescenceMoveCmd = [MoveCommandType.PROMOTE, MoveCommandType.CAPTURE, MoveCommandType.ENPASSANT]
+
 
     @staticmethod
     def opponent(player: Player):
@@ -49,8 +47,24 @@ class ChessBoardModel():
         else:
             return Player.WHITE
 
+    # Return all Valid moves for currentPlayer
+    def allValidMoves(self):
+        validMoves = []
+
+        for row in range(0, 8):
+            for col in range(0, 8):
+                if self.board[row][col] != None:
+                    if self.board[row][col].player == self.playerTurn:
+                        for cmd in self.board[row][col].possibleMoves(self):
+                            validMoves.append(cmd)
+
+        validMoves.sort(key=lambda move: self._getMovePriority(move), reverse=True)
+
+        return validMoves
+
     # Validate the Move
-    def validateMove(self, initRow: int, initCol: int, targetRow: int, targetCol: int, player: Player):
+    def validateMove(self, initRow: int, initCol: int, targetRow: int, 
+        targetCol: int, player: Player):
         # It's not your turn to move
         if player != self.playerTurn:
             return None
@@ -68,295 +82,7 @@ class ChessBoardModel():
 
         return None
 
-    # Validate King Safety for player after making move
-    def validateKingSafety(self, cmd: MoveCommand):
-        # This is explictly defined here to avoid confusion after the move
-        currentPlayer = self.playerTurn
-        removedPiece = self.movePiece(cmd)
-
-        returnValue = False
-        if currentPlayer == Player.BLACK:
-            kingPiece = self.board[self.blackKingSquareRow][self.blackKingSquareCol]
-            returnValue = kingPiece.evaluateKingSafety(self)
-
-        elif currentPlayer == Player.WHITE:
-            kingPiece = self.board[self.whiteKingSquareRow][self.whiteKingSquareCol]
-            returnValue = kingPiece.evaluateKingSafety(self)
-
-        self.undoMove(cmd, removedPiece)
-        return returnValue
-
-    # Compute Move Priority
-    def getMovePriority(self, cmd, board):
-        # 1. Promotions (High Priority)
-        if cmd.moveType == MoveCommandType.PROMOTE:
-            return 90000 # Treat as Queen value
-        
-        # 2. Captures (MVV-LVA)
-        if cmd.moveType in [MoveCommandType.CAPTURE, MoveCommandType.ENPASSANT]:
-            capturedPieceVal = 0
-            if cmd.moveType == MoveCommandType.ENPASSANT:
-                capturedPieceVal = board[cmd.startRow][cmd.endCol].pieceValue()
-            else:
-                capturedPieceVal = board[cmd.endRow][cmd.endCol].pieceValue()
-
-            startingPieceVal = board[cmd.startRow][cmd.startCol].pieceValue()  
-            
-            return (capturedPieceVal * 10) - startingPieceVal
-
-        # 3. Castling (Mid Priority)
-        if cmd.moveType in [MoveCommandType.KINGSIDECASTLE, MoveCommandType.QUEENSIDECASTLE]:
-            return 50
-
-        # 4. Standard Moves (Low Priority)
-        return 0
-
-    # Return all Valid moves for currentPlayer
-    def allValidMoves(self):
-        validMoves = []
-
-        for row in range(0, 8):
-            for col in range(0, 8):
-                if self.board[row][col] != None:
-                    if self.board[row][col].player == self.playerTurn:
-                        for cmd in self.board[row][col].possibleMoves(self):
-                            validMoves.append(cmd)
-
-        validMoves.sort(key=lambda m: self.getMovePriority(m, self.board), reverse=True)
-
-        return validMoves
-
-
-    # Maximum Value is 24, used for early/ mid board evaluation
-    def calculateGamePhase(self):
-        totalPhaseWeight = 0
-        
-        for row in range(0, 8):
-            for col in range(0, 8):
-                if self.board[row][col] != None:
-                    totalPhaseWeight += self.board[row][col].phaseWeight()
-
-        return totalPhaseWeight
-
-    # Compute Pawn Penalizer for Isolated / Double Pawn
-    def pawnPenalizer(self, player, phaseWeight):
-        filePawnCount = [0 for _ in range(8)]
-
-        for row in range(0, 8):
-            for col in range(0, 8):
-                piece = self.board[row][col]
-                if piece != None and piece.type == PieceType.PAWN and piece.player == player:
-                    filePawnCount[col] += 1
-
-        penalizer = 0
-        # Pawn Penalizer
-        for file in range(0, 8):
-            pawnCount = filePawnCount[file]
-
-            if pawnCount > 0:
-                # Penalizer for Double / Triple/ Quad Pawns
-                if pawnCount > 1:
-                    penalizer += (pawnCount - 1) * 15
-
-                # Compute for Isolated Pawns
-                isIsolated = True
-                if file > 0 and filePawnCount[file-1] > 0:
-                    isIsolated = False
-                if file < 7 and filePawnCount[file+1] > 0:
-                    isIsolated = False
-                    
-                if isIsolated:
-                    earlyGame  = 15
-                    endGame = 25
-                    computedPhase = earlyGame * phaseWeight + endGame * (24 - phaseWeight) 
-                
-                    penalizer += math.ceil(computedPhase / 24)
-
-        return penalizer
-
-    # Compute Board Value - Assume White is the Protagonist
-    def computeBoardValue(self):
-        returnValue = 0
-
-        phaseWeight = self.calculateGamePhase()
-        # Compute for Piece
-        for row in range(0, 8):
-            for col in range(0, 8):
-                if self.board[row][col] != None:
-                    if self.board[row][col].player == Player.WHITE:
-                        returnValue += self.board[row][col].computedValue(self, phaseWeight)
-                    else:
-                        returnValue -= self.board[row][col].computedValue(self, phaseWeight)
-
-        # Compute for Double/ Isolated Pawns
-        returnValue += self.pawnPenalizer(Player.WHITE, phaseWeight)
-        returnValue -= self.pawnPenalizer(Player.BLACK, phaseWeight)
-
-        return returnValue
-
-    # Return all Capture Moves
-    def allQuiesceneMoves(self, validMoves):
-        return list(filter(
-            lambda cmd: cmd.moveType in self.quiescenceMoveCmd, validMoves
-        ))
-
-    # MinMaxSearch -> General
-    def quiesceneSearch(self, alpha, beta, depth = 0):
-        staticEval = self.computeBoardValue()
-
-        if depth >= 10:
-            return staticEval
-
-        if staticEval >= beta:
-            return beta
-
-        if staticEval > alpha:
-            alpha = staticEval
-
-        validMoves = self.allValidMoves()
-        for cmd in self.allQuiesceneMoves(validMoves):
-            removedPiece = self.movePiece(cmd)
-            score = (-1) * self.quiesceneSearch((-1) * beta, (-1) * alpha, depth + 1)
-            self.undoMove(cmd, removedPiece)
-
-            if score >= beta:
-                return beta
-            if score > alpha:
-                alpha = score
-
-        return alpha
-
-    # MinMaxSearch -> General
-    def negamax(self, depth, alpha, beta):
-        validMoves = self.allValidMoves()
-        
-        # No Valid Moves = Lose
-        if len(validMoves) == 0:
-            opponent = ChessBoardModel.opponent(self.playerTurn)
-            opponentAttackTargets = self._allPlayerCaptureTargets(opponent)
-            if self.playerTurn == Player.WHITE:
-                if (self.whiteKingSquareRow, self.whiteKingSquareCol) in opponentAttackTargets:
-                    return float('-inf')
-                else:
-                    # Check Stalemate
-                    return 0
-            else:
-                if (self.blackKingSquareRow, self.blackKingSquareCol) in opponentAttackTargets:
-                    return float('-inf')
-                else:
-                    # Check Stalemate
-                    return 0
-
-        # Termination Condition
-        if depth == 0:
-            return self.quiesceneSearch(alpha, beta)
-        else:
-            maxEval = float('-inf')
-
-            for cmd in validMoves:
-                removedPiece = self.movePiece(cmd)
-                score = (-1) * self.negamax(depth - 1, (-1) * beta, (-1) * alpha)
-                self.undoMove(cmd, removedPiece)
-
-                maxEval = max(maxEval, score)
-                alpha = max(alpha, score)
-                
-                if alpha >= beta:
-                    break
-                    
-            return maxEval
-
-    # Iterative Deepening
-    def computeMoveWrapperDepth2(self, cmd):
-        return self._defaultMoveWrapper(cmd, 2)
-
-    def _defaultMoveWrapper(self, cmd, depth):
-        newBoard = copy.deepcopy(self)
-        newBoard.movePiece(cmd)
-
-        alpha = float('-inf')
-        beta = float('inf')
-        score = (-1) * newBoard.negamax(depth, (-1) * beta, (-1) * alpha)
-        return score, cmd
-
-    # Take Opponent Turn
-    def computeBestMove(self):
-        commandList = self.allValidMoves()
-        with multiprocessing.Pool() as pool:
-            scores_and_moves = pool.map(self.computeMoveWrapperDepth2, commandList)
-
-        scores_and_moves.sort(key=lambda x: x[0], reverse=True)
-
-        alpha = float('-inf')
-        beta = float('inf')
-        bestScore = float('-inf')
-
-        for score, cmd in scores_and_moves:
-            removedPiece = self.movePiece(cmd)
-            returnValue = (-1) * self.negamax(2 , (-1) * beta, (-1) * alpha)
-            print(cmd)
-            if returnValue > bestScore:
-                bestScore = returnValue
-                returnCmd = cmd
-
-            alpha = max(alpha, returnValue)
-            self.undoMove(cmd, removedPiece)
-
-        return returnCmd
-
-    # This is used to determine king safety and castle
-    def _allPlayerCaptureTargets(self, player):
-        captureSquares = {}
-
-        for row in range(0, 8):
-            for col in range(0, 8):
-                targetPiece = self.board[row][col]
-                if targetPiece != None and targetPiece.player == player:
-
-                    captureTargets = targetPiece.captureTargets(self)
-                    for target in captureTargets:
-                        captureSquares[target] = True
-        
-        return captureSquares
-
-    def _updateKingSquare(self, kingRow: int, kingCol: int):
-        # Update the King Square
-        if self.board[kingRow][kingCol].type == PieceType.KING:
-            if self.board[kingRow][kingCol].player == Player.BLACK:
-                self.blackKingSquareRow = kingRow
-                self.blackKingSquareCol = kingCol
-
-            elif self.board[kingRow][kingCol].player == Player.WHITE:
-                self.whiteKingSquareRow = kingRow
-                self.whiteKingSquareCol = kingCol
-
-    # Move Piece on ChessBoard
-    def _movePieceOnBoard(self, startRow: int, startCol: int, endRow: int, endCol: int):
-        self.board[endRow][endCol] = self.board[startRow][startCol]
-        self.board[endRow][endCol].row = endRow
-        self.board[endRow][endCol].col = endCol
-        self.board[endRow][endCol].moves += 1
-
-        # Remove the Init Piece
-        self.board[startRow][startCol] = None
-
-        # Update the King Square
-        self._updateKingSquare(endRow, endCol)
-
-    def _undoMoveOnBoard(self, originalRow: int, originalCol: int, currentRow: int, currentCol: int):        
-        self.board[originalRow][originalCol] = self.board[currentRow][currentCol] 
-        self.board[originalRow][originalCol].row = originalRow
-        self.board[originalRow][originalCol].col = originalCol
-
-        # Undo Castle will take in account of both Rook and King
-        self.board[originalRow][originalCol].moves -= 1
-
-        # Remove the Final Piece
-        self.board[currentRow][currentCol] = None
-
-        # Update the King Square
-        self._updateKingSquare(originalRow, originalCol)
-
+    # Undo Move - Used to for Pruning
     def undoMove(self, cmd: MoveCommand, restorePiece):
         # Swap the Player Turn
         self.playerTurn = ChessBoardModel.opponent(self.playerTurn)
@@ -448,6 +174,7 @@ class ChessBoardModel():
 
         return 
 
+    # Move Piece
     def movePiece(self, cmd: MoveCommand):
         # Set enPassant to Null - Reset this if the opponent does a double pawn move
         self.whiteEnPassantColumn = None
@@ -538,3 +265,103 @@ class ChessBoardModel():
 
         # Create a new copy of the removed Piece
         return removedPiece
+
+    # Validate King Safety for player after making move
+    def validateKingSafety(self, cmd: MoveCommand):
+        # This is explictly defined here to avoid confusion after the move
+        currentPlayer = self.playerTurn
+        removedPiece = self.movePiece(cmd)
+
+        returnValue = False
+        if currentPlayer == Player.BLACK:
+            kingPiece = self.board[self.blackKingSquareRow][self.blackKingSquareCol]
+            returnValue = kingPiece.evaluateKingSafety(self)
+
+        elif currentPlayer == Player.WHITE:
+            kingPiece = self.board[self.whiteKingSquareRow][self.whiteKingSquareCol]
+            returnValue = kingPiece.evaluateKingSafety(self)
+
+        self.undoMove(cmd, removedPiece)
+        return returnValue
+
+    # Compute Move Priority
+    def _getMovePriority(self, cmd: MoveCommand):
+        # 1. Promotions (High Priority)
+        if cmd.moveType == MoveCommandType.PROMOTE:
+            return 90000 # Treat as Queen value
+        
+        # 2. Captures (MVV-LVA)
+        if cmd.moveType in [MoveCommandType.CAPTURE, MoveCommandType.ENPASSANT]:
+            capturedPieceVal = 0
+            if cmd.moveType == MoveCommandType.ENPASSANT:
+                capturedPieceVal = self.board[cmd.startRow][cmd.endCol].pieceValue()
+            else:
+                capturedPieceVal = self.board[cmd.endRow][cmd.endCol].pieceValue()
+
+            startingPieceVal = self.board[cmd.startRow][cmd.startCol].pieceValue()  
+            
+            return (capturedPieceVal * 10) - startingPieceVal
+
+        # 3. Castling (Mid Priority)
+        if cmd.moveType in [MoveCommandType.KINGSIDECASTLE, MoveCommandType.QUEENSIDECASTLE]:
+            return 50
+
+        # 4. Standard Moves (Low Priority)
+        return 0
+
+    # This is used to determine castle eligability
+    def _allPlayerCaptureTargets(self, player: Player):
+        captureSquares = {}
+
+        for row in range(0, 8):
+            for col in range(0, 8):
+                targetPiece = self.board[row][col]
+                if targetPiece != None and targetPiece.player == player:
+
+                    captureTargets = targetPiece.captureTargets(self)
+                    for target in captureTargets:
+                        captureSquares[target] = True
+        
+        return captureSquares
+
+    # Used for evaluating King Safety
+    def _updateKingSquare(self, kingRow: int, kingCol: int):
+        # Update the King Square
+        if self.board[kingRow][kingCol].type == PieceType.KING:
+            if self.board[kingRow][kingCol].player == Player.BLACK:
+                self.blackKingSquareRow = kingRow
+                self.blackKingSquareCol = kingCol
+
+            elif self.board[kingRow][kingCol].player == Player.WHITE:
+                self.whiteKingSquareRow = kingRow
+                self.whiteKingSquareCol = kingCol
+
+    # Helper Method, Move Piece
+    def _movePieceOnBoard(self, startRow: int, startCol: int, endRow: int, endCol: int):
+        self.board[endRow][endCol] = self.board[startRow][startCol]
+        self.board[endRow][endCol].row = endRow
+        self.board[endRow][endCol].col = endCol
+        self.board[endRow][endCol].moves += 1
+
+        # Remove the Init Piece
+        self.board[startRow][startCol] = None
+
+        # Update the King Square
+        self._updateKingSquare(endRow, endCol)
+
+    # Helper Method, Undo Move Piece
+    def _undoMoveOnBoard(self, originalRow: int, originalCol: int, 
+        currentRow: int, currentCol: int):        
+        self.board[originalRow][originalCol] = self.board[currentRow][currentCol] 
+        self.board[originalRow][originalCol].row = originalRow
+        self.board[originalRow][originalCol].col = originalCol
+
+        # Undo Castle will take in account of both Rook and King
+        self.board[originalRow][originalCol].moves -= 1
+
+        # Remove the Final Piece
+        self.board[currentRow][currentCol] = None
+
+        # Update the King Square
+        self._updateKingSquare(originalRow, originalCol)
+

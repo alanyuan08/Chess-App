@@ -1,5 +1,6 @@
 from PySide6.QtCore import Signal, QObject
-from PySide6.QtWidgets import QWidget, QGraphicsScene, QGraphicsView, QApplication, QGraphicsItem, QGraphicsPixmapItem, QGraphicsSceneMouseEvent
+from PySide6.QtWidgets import QWidget, QGraphicsScene, QGraphicsView, \
+	QApplication, QGraphicsItem, QGraphicsPixmapItem, QGraphicsSceneMouseEvent
 from PySide6.QtGui import QPixmap
 import sys
 
@@ -19,7 +20,7 @@ from viewModelComponent.chessBoardViewModel import ChessBoardViewModel
 
 # QGraphics for ChessBoard
 class ChessBoardView(QGraphicsPixmapItem):
-	def __init__(self, scene: QGraphicsScene, chessBoard: ChessBoardModel):
+	def __init__(self, scene: QGraphicsScene, chessGameModel: ChessBoardModel):
 		pixmap = QPixmap("img/chessBackground.jpg")
 		super().__init__(pixmap.scaled(720, 720), None)
 
@@ -30,6 +31,7 @@ class ChessBoardView(QGraphicsPixmapItem):
 		# Create Chess Piece Views
 		for row in range(0, 8):
 			for col in range(0, 8):
+				chessBoard = chessGameModel.chessBoard
 				pieceModel = chessBoard.board[row][col]
 				if pieceModel != None:
 					humanPlayer = False

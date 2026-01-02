@@ -13,6 +13,7 @@ class MoveCommand:
 		self.moveType = type
 
 	def __str__(self):
-		return "(" + str(self.startRow) + ", " + str(self.startCol) + ") " + "(" + str(self.endRow) + ", " + str(self.endCol) + ") " + str(self.moveType)
+		return "(" + str(self.startRow) + ", " + str(self.startCol) + ") " \
+		+ "(" + str(self.endRow) + ", " + str(self.endCol) + ") " + str(self.moveType)
 
 
