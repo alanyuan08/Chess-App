@@ -261,6 +261,22 @@ class ChessBoardModel():
                 else:
                     self.blackEnPassantColumn = None
 
+    # This is used to determine castle eligability
+    def allOpponentCaptureTargets(self) -> set[tuple[int, int]]:
+        captureSquares = set()
+
+        opponent = ChessBoardModel.opponent(self.playerTurn)
+        for row in range(0, 8):
+            for col in range(0, 8):
+                targetPiece = self.board[row][col]
+                if targetPiece != None and targetPiece.player == opponent:
+
+                    captureTargets = targetPiece.captureTargets(self)
+                    for target in captureTargets:
+                        captureSquares.add(target)
+        
+        return captureSquares
+
     # Used for evaluating King Safety
     def _updateKingSquare(self, kingRow: int, kingCol: int) -> None:
         # Update the King Square
@@ -387,20 +403,4 @@ class ChessBoardModel():
                         return False
 
         return True
-
-    # This is used to determine castle eligability
-    def allOpponentCaptureTargets(self) -> set[tuple[int, int]]:
-        captureSquares = set()
-
-        opponent = ChessBoardModel.opponent(self.playerTurn)
-        for row in range(0, 8):
-            for col in range(0, 8):
-                targetPiece = self.board[row][col]
-                if targetPiece != None and targetPiece.player == opponent:
-
-                    captureTargets = targetPiece.captureTargets(self)
-                    for target in captureTargets:
-                        captureSquares.add(target)
-        
-        return captureSquares
 

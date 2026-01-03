@@ -52,7 +52,7 @@ class ChessGameModel():
         return returnCmd
 
     # Compute Board Value - White is Positive/ Black is Negative
-    def computeBoardValue(self) -> int:
+    def _computeBoardValue(self) -> int:
         returnValue = 0
 
         phaseWeight = self._calculateGamePhase()
@@ -63,10 +63,10 @@ class ChessGameModel():
                 gamePiece = board[row][col]
                 if gamePiece != None:
                     if gamePiece.player == Player.WHITE:
-                        returnValue += gamePiece.computedValue(
+                        returnValue += gamePiece._computedValue(
                             self.chessBoard, phaseWeight)
                     else:
-                        returnValue -= gamePiece.computedValue(
+                        returnValue -= gamePiece._computedValue(
                             self.chessBoard, phaseWeight)
 
         # Compute for Double/ Isolated Pawns
@@ -76,7 +76,7 @@ class ChessGameModel():
         return returnValue
 
     # MinMaxSearch -> General
-    def negamax(self, depth, alpha, beta) -> int:
+    def _negamax(self, depth, alpha, beta) -> int:
         validMoves = self.chessBoard.allValidMoves()
         
         # No Valid Moves = Lose
@@ -97,7 +97,7 @@ class ChessGameModel():
 
             for cmd in validMoves:
                 removedPiece = self.chessBoard.movePiece(cmd)
-                score = (-1) * self.negamax(depth - 1, (-1) * beta, (-1) * alpha)
+                score = (-1) * self._negamax(depth - 1, (-1) * beta, (-1) * alpha)
                 self.chessBoard.undoMove(cmd, removedPiece)
 
                 maxEval = max(maxEval, score)
@@ -109,8 +109,8 @@ class ChessGameModel():
             return maxEval
 
     # MinMaxSearch -> General
-    def quiesceneSearch(self, alpha, beta, depth = 0) -> int:
-        staticEval = self.computeBoardValue()
+    def _quiesceneSearch(self, alpha, beta, depth = 0) -> int:
+        staticEval = self._computeBoardValue()
 
         if depth >= 10:
             return staticEval
@@ -135,7 +135,7 @@ class ChessGameModel():
 
         for cmd in self._allQuiesceneMoves(validMoves):
             removedPiece = self.chessBoard.movePiece(cmd)
-            score = (-1) * self.quiesceneSearch((-1) * beta, (-1) * alpha, depth + 1)
+            score = (-1) * self._quiesceneSearch((-1) * beta, (-1) * alpha, depth + 1)
             self.chessBoard.undoMove(cmd, removedPiece)
 
             if score >= beta:
