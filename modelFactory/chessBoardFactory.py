@@ -10,7 +10,7 @@ from modelComponent.chessBoardModel import ChessBoardModel
 class ChessBoardFactory:
 
 	@staticmethod
-	def createChessBoard(humanPlayers: list[Player]):
+	def createChessBoard(humanPlayers: list[Player]) -> list[list[ChessBoardModel]]:
 		newBoard = ChessBoardModel()
 
 		materialLine = [PieceType.ROOK, PieceType.KNIGHT, PieceType.BISHOP, PieceType.QUEEN, \

@@ -8,12 +8,13 @@ from modelComponent.knightModel import KnightModel
 from modelComponent.rookModel import RookModel
 from modelComponent.pawnModel import PawnModel
 from modelComponent.bishopModel import BishopModel
+from modelComponent.chessPieceModel import ChessPieceModel
 
 class ChessPieceFactory:
 
 	@staticmethod
 	def createChessPiece(type: PieceType, 
-		player: Player, row: int, col: int):
+		player: Player, row: int, col: int) -> ChessPieceModel:
 		match type:
 			case PieceType.KING:
 				return KingModel(player, row, col)
