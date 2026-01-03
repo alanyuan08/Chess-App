@@ -179,46 +179,36 @@ class ChessBoardModel():
         match cmd.moveType:
             # Queen Side Castle (Undo)
             case MoveCommandType.QUEENSIDECASTLE:
+                # Determine the row of the Castle 
+                row = 7 if self.playerTurn == Player.BLACK else 0
+
+                # Move the King 2 steps to the left
+                self._undoMoveOnBoard(row, 4, row, 2)
+
+                # Move the Rook to the right of the king
+                self._undoMoveOnBoard(row, 0, row, 3)
+
+                # Update Castle
                 if self.playerTurn == Player.BLACK:
-                    # Move the King 2 steps to the left
-                    self._undoMoveOnBoard(7, 4, 7, 2)
-
-                    # Move the Rook to the right of the king
-                    self._undoMoveOnBoard(7, 0, 7, 3)
-
-                    # Update Castle
                     self.blackCastled = False
-
-                elif self.playerTurn == Player.WHITE:
-                    # Move the King 2 steps to the left
-                    self._undoMoveOnBoard(0, 4, 0, 2)
-
-                    # Move the Rook to the right of the king
-                    self._undoMoveOnBoard(0, 0, 0, 3)
-
-                    # Update Castle
+                else:
                     self.whiteCastled = False
 
             # King Side Castle
             case MoveCommandType.KINGSIDECASTLE:
+                 # Determine the row of the Castle 
+                row = 7 if self.playerTurn == Player.BLACK else 0
+
+                # Move the King 2 steps to the left
+                self._undoMoveOnBoard(row, 4, row, 6)
+
+                # Move the Rook to the right of the king
+                self._undoMoveOnBoard(row, 7, row, 5)
+
+                # Update Castle
                 if self.playerTurn == Player.BLACK:
-                    # Move the King 2 steps to the right
-                    self._undoMoveOnBoard(7, 4, 7, 6)
-
-                    # Move the Rook to the right of the king
-                    self._undoMoveOnBoard(7, 7, 7, 5)
-
-                    # Update Castle
                     self.blackCastled = False
-
-                elif self.playerTurn == Player.WHITE:
-                    # Move the King 2 steps to the right
-                    self._undoMoveOnBoard(0, 4, 0, 6)
-
-                    # Move the Rook to the right of the king
-                    self._undoMoveOnBoard(0, 7, 0, 5)
-
-                    # Update Castle
+                else:
                     self.whiteCastled = False
 
             # Move Piece
@@ -320,8 +310,7 @@ class ChessBoardModel():
 
     # Validate King Safety for player after making move
     def validateKingSafety(self, cmd: MoveCommand) -> bool:
-        # This is explictly defined here to avoid confusion after the move
-        currentPlayer = self.playerTurn
+        currentPlayer = self.playerTurn        
         removedPiece = self.movePiece(cmd)
 
         returnValue = self._testKingSafety(currentPlayer)

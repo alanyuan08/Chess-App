@@ -19,12 +19,17 @@ class ChessGameModel():
     def __init__(self, playersArray):
         self.chessBoard = ChessBoardFactory.createChessBoard(playersArray)
 
+        # Game Moves
+        self.gameMoves = []
+
         # Stores the Transposition Table
         self.transpositionTable = {}
 
     # Move Piece
     def movePiece(self, cmd: MoveCommand):
         self.chessBoard.movePiece(cmd)
+
+        self.gameMoves.append(cmd)
 
     # Validate Move
     def validateMove(self, initRow: int, initCol: int, targetRow: int, 
