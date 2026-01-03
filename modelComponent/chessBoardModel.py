@@ -312,15 +312,16 @@ class ChessBoardModel():
         self.undoMove(cmd, removedPiece)
         return returnValue
 
+    # Retrieve King Tuple
+    def kingTuple(self) -> tuple[int, int]:
+        if self.playerTurn == Player.WHITE:
+            return (self.whiteKingSquareRow, self.whiteKingSquareCol)
+        else:
+            return (self.blackKingSquareRow, self.blackKingSquareCol)
+
     # Test King Safety
     def _testKingSafety(self) -> bool:
-        row = self.whiteKingSquareRow
-        col = self.whiteKingSquareCol
-
-        # Retrieve King Piece
-        if self.playerTurn == Player.BLACK:
-            row = self.blackKingSquareRow
-            col = self.blackKingSquareCol
+        row, col = self.kingTuple()
 
         # Test for Opponent Knights
         for dr, dc in [(2, 1), (1, 2), (-2, -1), (-1, -2), (-2, 1), (-1, 2), (2, -1), (1, -2)]:
@@ -388,7 +389,7 @@ class ChessBoardModel():
         return True
 
     # This is used to determine castle eligability
-    def allOpponentCaptureTargets(self) -> set[tuple[str, int]]:
+    def allOpponentCaptureTargets(self) -> set[tuple[int, int]]:
         captureSquares = set()
 
         opponent = ChessBoardModel.opponent(self.playerTurn)

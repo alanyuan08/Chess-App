@@ -22,6 +22,10 @@ class ChessGameModel():
         # Stores the Transposition Table
         self.transpositionTable = {}
 
+    # Move Piece
+    def movePiece(self, cmd: MoveCommand):
+        self.chessBoard.movePiece(cmd)
+
     # Take Opponent Turn
     def computeBestMove(self) -> MoveCommand:
         commandList = self.chessBoard.allValidMoves()
@@ -78,20 +82,12 @@ class ChessGameModel():
         # No Valid Moves = Lose
         if len(validMoves) == 0:
             opponentAttackTargets = self.chessBoard.allOpponentCaptureTargets()
-            if self.playerTurn == Player.WHITE:
-                if (self.chessBoard.whiteKingSquareRow, self.chessBoard.whiteKingSquareCol) \
-                    in opponentAttackTargets:
-                    return float('-inf')
-                else:
-                    # Check Stalemate
-                    return 0
+
+            kingTuple = self.chessBoard.kingTuple
+            if kingTuple in opponentAttackTargets:
+                return float('-inf')
             else:
-                if (self.chessBoard.blackKingSquareRow, self.chessBoard.blackKingSquareCol) \
-                    in opponentAttackTargets:
-                    return float('-inf')
-                else:
-                    # Check Stalemate
-                    return 0
+                return 0
 
         # Termination Condition
         if depth == 0:
@@ -130,20 +126,12 @@ class ChessGameModel():
         # No Valid Moves = Lose
         if len(validMoves) == 0:
             opponentAttackTargets = self.chessBoard.allOpponentCaptureTargets()
-            if self.playerTurn == Player.WHITE:
-                if (self.chessBoard.whiteKingSquareRow, self.chessBoard.whiteKingSquareCol) \
-                    in opponentAttackTargets:
-                    return float('-inf')
-                else:
-                    # Check Stalemate
-                    return 0
+
+            kingTuple = self.chessBoard.kingTuple
+            if kingTuple in opponentAttackTargets:
+                return float('-inf')
             else:
-                if (self.chessBoard.blackKingSquareRow, self.chessBoard.blackKingSquareCol) \
-                    in opponentAttackTargets:
-                    return float('-inf')
-                else:
-                    # Check Stalemate
-                    return 0
+                return 0
 
         for cmd in self._allQuiesceneMoves(validMoves):
             removedPiece = self.chessBoard.movePiece(cmd)

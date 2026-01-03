@@ -70,7 +70,7 @@ class RookModel(ChessPieceModel):
 		return [move for move in returnMoves if chessBoard.validateKingSafety(move)]
 
 	# List of targets - Used to check for Castle / King Safety
-	def captureTargets(self, chessBoard: ChessBoardProtocal):
+	def captureTargets(self, chessBoard: ChessBoardProtocal) -> list[tuple[int, int]]:
 		returnMoves = []
 
 		for dr, dc in [(-1, 0), (0, 1), (1, 0), (0, -1)]:
