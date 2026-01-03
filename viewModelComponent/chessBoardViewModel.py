@@ -50,6 +50,7 @@ class ChessBoardViewModel():
             # Communicate the command to FrontEnd
             self.communicatorProxy.signal_update_request(moveCommand)
 
+        if self.computerTurn():
             # Run the compute for the Opponent's Move
             self.threadpool.start(Worker(
                 self.takeOpponentTurn
