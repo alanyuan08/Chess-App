@@ -26,12 +26,10 @@ class ChessBoardViewModel():
 
         # White Moves First
         if self.computerTurn():
-            worker = Worker(
-                self.takeOpponentTurn
-            )
-
             # Execute
-            self.threadpool.start(worker)
+            self.threadpool.start(Worker(
+                self.takeOpponentTurn
+            ))
 
     def computerTurn(self):
         gameModel = self.chessGameModel.chessBoard
@@ -46,7 +44,6 @@ class ChessBoardViewModel():
         moveCommand = self.chessGameModel.validateMove(initRow, 
             initCol, targetRow, targetCol, player)
 
-        print(moveCommand)
         if moveCommand != None:
             # Move for the Chess Model
             self.chessGameModel.movePiece(moveCommand)
@@ -54,12 +51,10 @@ class ChessBoardViewModel():
             self.communicatorProxy.signal_update_request(moveCommand)
 
             # Run the compute for the Opponent's Move
-            worker = Worker(
+            self.threadpool.start(Worker(
                 self.takeOpponentTurn
-            )
+            ))
 
-            # Execute
-            self.threadpool.start(worker)
 
     def takeOpponentTurn(self):
         # Opponent Takes Turn
