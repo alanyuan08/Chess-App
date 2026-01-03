@@ -52,7 +52,7 @@ class ChessGameModel():
         return returnCmd
 
     # Compute Board Value - White is Positive/ Black is Negative
-    def computeBoardValue(self):
+    def computeBoardValue(self) -> int:
         returnValue = 0
 
         phaseWeight = self._calculateGamePhase()
@@ -76,7 +76,7 @@ class ChessGameModel():
         return returnValue
 
     # MinMaxSearch -> General
-    def negamax(self, depth, alpha, beta):
+    def negamax(self, depth, alpha, beta) -> int:
         validMoves = self.chessBoard.allValidMoves()
         
         # No Valid Moves = Lose
@@ -109,7 +109,7 @@ class ChessGameModel():
             return maxEval
 
     # MinMaxSearch -> General
-    def quiesceneSearch(self, alpha, beta, depth = 0):
+    def quiesceneSearch(self, alpha, beta, depth = 0) -> int:
         staticEval = self.computeBoardValue()
 
         if depth >= 10:
@@ -146,7 +146,7 @@ class ChessGameModel():
         return alpha
 
     # Return all Capture Moves
-    def _allQuiesceneMoves(self, validMoves):
+    def _allQuiesceneMoves(self, validMoves) -> list[MoveCommand]
         # QuiescenceMoves
         quiescenceMoveCmd = [MoveCommandType.PROMOTE, MoveCommandType.CAPTURE, \
             MoveCommandType.ENPASSANT]
@@ -156,7 +156,7 @@ class ChessGameModel():
         ))
 
     # Compute Pawn Penalizer for Isolated / Double Pawn
-    def _pawnPenalizer(self, player, phaseWeight):
+    def _pawnPenalizer(self, player, phaseWeight) -> int:
         filePawnCount = [0 for _ in range(8)]
 
         board = self.chessBoard.board
@@ -193,7 +193,7 @@ class ChessGameModel():
         return penalizer
 
     # Maximum Value is 24, used for early/ mid board evaluation
-    def _calculateGamePhase(self):
+    def _calculateGamePhase(self) -> int:
         totalPhaseWeight = 0
 
         board = self.chessBoard.board
@@ -206,7 +206,7 @@ class ChessGameModel():
 
 
     # Compute Move Priority
-    def _getMovePriority(self, cmd: MoveCommand):
+    def _getMovePriority(self, cmd: MoveCommand) -> int:
         board = self.chessBoard.board
 
         # 1. Promotions (High Priority)
