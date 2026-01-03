@@ -56,7 +56,6 @@ class ChessBoardViewModel():
                 self.takeOpponentTurn
             ))
 
-
     def takeOpponentTurn(self):
         # Opponent Takes Turn
         opponentCmd = self.chessGameModel.computeBestMove()
@@ -65,8 +64,6 @@ class ChessBoardViewModel():
             self.chessGameModel.movePiece(opponentCmd)
             # Communicate the command to FrontEnd
             self.communicatorProxy.signal_update_request(opponentCmd)
-        else:
-            print("White Wins")
 
 class Worker(QRunnable):
     def __init__(self, fn, *args, **kwargs):

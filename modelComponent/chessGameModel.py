@@ -34,27 +34,27 @@ class ChessGameModel():
     # Take Opponent Turn
     def computeBestMove(self) -> MoveCommand:
         commandList = self.chessBoard.allValidMoves()
-
         commandList.sort(key=lambda move: self._getMovePriority(move), reverse=True)
 
         alpha = float('-inf')
         beta = float('inf')
 
         bestScore = float('-inf')
-        returnCmd = None
+        bestMove = None
 
         for cmd in commandList:
             removedPiece = self.chessBoard.movePiece(cmd)
-            returnValue = (-1) * self._negamax(2 , (-1) * beta, (-1) * alpha)
-            print(cmd)
-            if returnValue > bestScore:
-                bestScore = returnValue
-                returnCmd = cmd
-
-            alpha = max(alpha, returnValue)
+            score = (-1) * self._negamax(2, (-1) * beta, (-1) * alpha)
             self.chessBoard.undoMove(cmd, removedPiece)
 
-        return returnCmd
+            print(cmd)
+            if score > bestScore:
+                bestScore = score
+                bestMove = cmd
+
+            alpha = max(alpha, score)
+
+        return bestMove
 
     # Compute Board Value - White is Positive/ Black is Negative
     def _computeBoardValue(self) -> int:
@@ -78,7 +78,10 @@ class ChessGameModel():
         returnValue -= self._pawnPenalizer(Player.WHITE, phaseWeight)
         returnValue += self._pawnPenalizer(Player.BLACK, phaseWeight)
 
-        return returnValue
+        if self.chessBoard.playerTurn == Player.WHITE:
+            return returnValue
+        else:
+            return (-1) * returnValue
 
     # MinMaxSearch -> General
     def _negamax(self, depth, alpha, beta) -> int:
@@ -90,7 +93,7 @@ class ChessGameModel():
 
             kingTuple = self.chessBoard.kingTuple
             if kingTuple in opponentAttackTargets:
-                return float('-inf')
+                return float('inf')
             else:
                 return 0
 
@@ -134,7 +137,7 @@ class ChessGameModel():
 
             kingTuple = self.chessBoard.kingTuple
             if kingTuple in opponentAttackTargets:
-                return float('-inf')
+                return float('inf')
             else:
                 return 0
 
