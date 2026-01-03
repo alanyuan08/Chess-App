@@ -90,16 +90,7 @@ class ChessGameModel():
         
         # No Valid Moves = Lose
         if len(validMoves) == 0:
-            opponentAttackTargets = self.chessBoard.allOpponentCaptureTargets()
-
-            kingTuple = self.chessBoard.kingTuple
-            if kingTuple in opponentAttackTargets:
-                if self.playerTurn == Player.WHITE:
-                    return float('-inf')
-                else:
-                    return float('inf')
-            else:
-                return 0
+            return self.resolveEndGame()
 
         # Termination Condition
         if depth == 0:
@@ -138,16 +129,7 @@ class ChessGameModel():
 
         # No Valid Moves = Lose
         if len(validMoves) == 0:
-            opponentAttackTargets = self.chessBoard.allOpponentCaptureTargets()
-
-            kingTuple = self.chessBoard.kingTuple
-            if kingTuple in opponentAttackTargets:
-                if self.playerTurn == Player.WHITE:
-                    return float('-inf')
-                else:
-                    return float('inf')
-            else:
-                return 0
+            return self.resolveEndGame()
 
         for cmd in self._allQuiesceneMoves(validMoves):
             removedPiece = self.chessBoard.movePiece(cmd)
@@ -160,6 +142,19 @@ class ChessGameModel():
                 alpha = score
 
         return alpha
+
+    # Resolve End Game -> Called when No Valid Moves
+    def resolveEndGame(self) -> int:
+        opponentAttackTargets = self.chessBoard.allOpponentCaptureTargets()
+
+        kingTuple = self.chessBoard.kingTuple
+        if kingTuple in opponentAttackTargets:
+            if self.playerTurn == Player.WHITE:
+                return float('-inf')
+            else:
+                return float('inf')
+        else:
+            return 0
 
     # Return all Capture Moves
     def _allQuiesceneMoves(self, validMoves) -> list[MoveCommand]:
