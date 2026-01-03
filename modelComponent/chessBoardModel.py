@@ -1,16 +1,15 @@
 # Enum 
 from appEnums import PieceType, Player, MoveCommandType
 
+# Model 
+from modelComponent.moveCommand import MoveCommand
+from modelComponent.chessPieceModel import ChessPieceModel
+
 # Factory
 from modelFactory.chessPieceFactory import ChessPieceFactory
 
-# Model
-from modelComponent.moveCommand import MoveCommand
-
-# Multi Process Pool
-import multiprocessing
-import copy
-import math
+# Normal
+from typing import Optional
 
 # Controller 
 class ChessBoardModel():
@@ -39,7 +38,6 @@ class ChessBoardModel():
         self.blackKingSquareRow = 7
         self.blackKingSquareCol = 4
 
-
     @staticmethod
     def opponent(player: Player):
         if player == Player.WHITE:
@@ -48,7 +46,7 @@ class ChessBoardModel():
             return Player.WHITE
 
     # Return all Valid moves for currentPlayer
-    def allValidMoves(self):
+    def allValidMoves(self) -> list[MoveCommand]:
         validMoves = []
 
         for row in range(0, 8):
@@ -58,13 +56,11 @@ class ChessBoardModel():
                         for cmd in self.board[row][col].possibleMoves(self):
                             validMoves.append(cmd)
 
-        validMoves.sort(key=lambda move: self._getMovePriority(move), reverse=True)
-
         return validMoves
 
     # Validate the Move
     def validateMove(self, initRow: int, initCol: int, targetRow: int, 
-        targetCol: int, player: Player):
+        targetCol: int, player: Player) -> MoveCommand:
         # It's not your turn to move
         if player != self.playerTurn:
             return None
@@ -82,8 +78,101 @@ class ChessBoardModel():
 
         return None
 
+    # Move Piece
+    def movePiece(self, cmd: MoveCommand) -> Optional[ChessPieceModel]:
+        # Set enPassant to Null - Reset this if the opponent does a double pawn move
+        self.whiteEnPassantColumn = None
+        self.blackEnPassantColumn = None
+
+        # Captured Piece 
+        removedPiece = None
+
+        match cmd.moveType:
+            # Queen Side Castle
+            case MoveCommandType.QUEENSIDECASTLE:
+                # Determine the row of the Castle 
+                row = 7 if self.playerTurn == Player.BLACK else 0
+
+                # Move the King 2 steps to the left
+                self._movePieceOnBoard(row, 4, row, 2)
+
+                # Move the Rook to the right of the king
+                self._movePieceOnBoard(row, 0, row, 3)
+
+                # Update Castle
+                if self.playerTurn == Player.BLACK:
+                    self.blackCastled = True
+                else:
+                    self.whiteCastled = True
+
+            # King Side Castle
+            case MoveCommandType.KINGSIDECASTLE:
+                # Determine the row of the Castle 
+                row = 7 if self.playerTurn == Player.BLACK else 0
+
+                # Move the King 2 steps to the left
+                self._movePieceOnBoard(row, 4, row, 6)
+
+                # Move the Rook to the right of the king
+                self._movePieceOnBoard(row, 7, row, 5)
+
+                # Update Castle
+                if self.playerTurn == Player.BLACK:
+                    self.blackCastled = True
+                else:
+                    self.whiteCastled = True
+
+            # Move Piece
+            case MoveCommandType.MOVE:
+                # Move Starting Piece to Capture Point
+                self._movePieceOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
+
+            case MoveCommandType.CAPTURE:
+                # Store the Removed Piece
+                removedPiece = self.board[cmd.endRow][cmd.endCol]
+                self.board[cmd.endRow][cmd.endCol] = None
+
+                # Move Starting Piece to Capture Point
+                self._movePieceOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
+
+            # Double Pawn Move
+            case MoveCommandType.PAWNOPENMOVE:
+                # Move the piece from start to end
+                self._movePieceOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
+
+                if self.playerTurn == Player.WHITE:
+                    self.whiteEnPassantColumn = cmd.endCol
+                else:
+                    self.blackEnPassantColumn = cmd.endCol
+
+            # Promote Pawn
+            case MoveCommandType.PROMOTE:
+                # Promote MAY be a capture or a move
+                removedPiece = self.board[cmd.endRow][cmd.endCol]
+
+                # Promote Piece Type is provided from above
+                self.board[cmd.endRow][cmd.endCol] = ChessPieceFactory.createChessPiece(
+                    PieceType.QUEEN, self.playerTurn, cmd.endRow, cmd.endCol)
+
+            # En Passant
+            case MoveCommandType.ENPASSANT:
+                # Store Removed Piece
+                removedPiece = self.board[cmd.startRow][cmd.endCol]
+
+                # Move the Pawn to the target
+                self._movePieceOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
+
+                # Remove En Passant Pawn
+                self.board[cmd.startRow][cmd.endCol] = None
+
+        # Swap the Player Turn
+        self.playerTurn = ChessBoardModel.opponent(self.playerTurn)
+
+        # Create a new copy of the removed Piece
+        return removedPiece
+
     # Undo Move - Used to for Pruning
-    def undoMove(self, cmd: MoveCommand, restorePiece):
+    def undoMove(self, cmd: MoveCommand, restorePiece: Optional[ChessPieceModel]) -> None:
         # Swap the Player Turn
         self.playerTurn = ChessBoardModel.opponent(self.playerTurn)
 
@@ -172,160 +261,8 @@ class ChessBoardModel():
                 else:
                     self.blackEnPassantColumn = None
 
-        return 
-
-    # Move Piece
-    def movePiece(self, cmd: MoveCommand):
-        # Set enPassant to Null - Reset this if the opponent does a double pawn move
-        self.whiteEnPassantColumn = None
-        self.blackEnPassantColumn = None
-
-        # Captured Piece 
-        removedPiece = None
-
-        match cmd.moveType:
-            # Queen Side Castle
-            case MoveCommandType.QUEENSIDECASTLE:
-                # Determine the row of the Castle 
-                row = 7 if self.playerTurn == Player.BLACK else 0
-
-                # Move the King 2 steps to the left
-                self._movePieceOnBoard(row, 4, row, 2)
-
-                # Move the Rook to the right of the king
-                self._movePieceOnBoard(row, 0, row, 3)
-
-                # Update Castle
-                if self.playerTurn == Player.BLACK:
-                    self.blackCastled = True
-                else:
-                    self.whiteCastled = True
-
-            # King Side Castle
-            case MoveCommandType.KINGSIDECASTLE:
-                # Determine the row of the Castle 
-                row = 7 if self.playerTurn == Player.BLACK else 0
-
-                # Move the King 2 steps to the left
-                self._movePieceOnBoard(row, 4, row, 6)
-
-                # Move the Rook to the right of the king
-                self._movePieceOnBoard(row, 7, row, 5)
-
-                # Update Castle
-                if self.playerTurn == Player.BLACK:
-                    self.blackCastled = True
-                else:
-                    self.whiteCastled = True
-
-            # Move Piece
-            case MoveCommandType.MOVE:
-                # Move Starting Piece to Capture Point
-                self._movePieceOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
-
-            case MoveCommandType.CAPTURE:
-                # Store the Removed Piece
-                removedPiece = self.board[cmd.endRow][cmd.endCol]
-                self.board[cmd.endRow][cmd.endCol] = None
-
-                # Move Starting Piece to Capture Point
-                self._movePieceOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
-
-            # Double Pawn Move
-            case MoveCommandType.PAWNOPENMOVE:
-                # Move the piece from start to end
-                self._movePieceOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
-
-                if self.playerTurn == Player.WHITE:
-                    self.whiteEnPassantColumn = cmd.endCol
-                else:
-                    self.blackEnPassantColumn = cmd.endCol
-
-            # Promote Pawn
-            case MoveCommandType.PROMOTE:
-                # Promote MAY be a capture or a move
-                removedPiece = self.board[cmd.endRow][cmd.endCol]
-
-                self.board[cmd.endRow][cmd.endCol] = ChessPieceFactory.createChessPiece(
-                    PieceType.QUEEN, self.playerTurn, cmd.endRow, cmd.endCol)
-
-            # En Passant
-            case MoveCommandType.ENPASSANT:
-                # Store Removed Piece
-                removedPiece = self.board[cmd.startRow][cmd.endCol]
-
-                # Move the Pawn to the target
-                self._movePieceOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
-
-                # Remove En Passant Pawn
-                self.board[cmd.startRow][cmd.endCol] = None
-
-        # Swap the Player Turn
-        self.playerTurn = ChessBoardModel.opponent(self.playerTurn)
-
-        # Create a new copy of the removed Piece
-        return removedPiece
-
-    # Validate King Safety for player after making move
-    def validateKingSafety(self, cmd: MoveCommand):
-        # This is explictly defined here to avoid confusion after the move
-        currentPlayer = self.playerTurn
-        removedPiece = self.movePiece(cmd)
-
-        returnValue = False
-        if currentPlayer == Player.BLACK:
-            kingPiece = self.board[self.blackKingSquareRow][self.blackKingSquareCol]
-            returnValue = kingPiece.evaluateKingSafety(self)
-
-        elif currentPlayer == Player.WHITE:
-            kingPiece = self.board[self.whiteKingSquareRow][self.whiteKingSquareCol]
-            returnValue = kingPiece.evaluateKingSafety(self)
-
-        self.undoMove(cmd, removedPiece)
-        return returnValue
-
-    # Compute Move Priority
-    def _getMovePriority(self, cmd: MoveCommand):
-        # 1. Promotions (High Priority)
-        if cmd.moveType == MoveCommandType.PROMOTE:
-            return 90000 # Treat as Queen value
-        
-        # 2. Captures (MVV-LVA)
-        if cmd.moveType in [MoveCommandType.CAPTURE, MoveCommandType.ENPASSANT]:
-            capturedPieceVal = 0
-            if cmd.moveType == MoveCommandType.ENPASSANT:
-                capturedPieceVal = self.board[cmd.startRow][cmd.endCol].pieceValue()
-            else:
-                capturedPieceVal = self.board[cmd.endRow][cmd.endCol].pieceValue()
-
-            startingPieceVal = self.board[cmd.startRow][cmd.startCol].pieceValue()  
-            
-            return (capturedPieceVal * 10) - startingPieceVal
-
-        # 3. Castling (Mid Priority)
-        if cmd.moveType in [MoveCommandType.KINGSIDECASTLE, MoveCommandType.QUEENSIDECASTLE]:
-            return 50
-
-        # 4. Standard Moves (Low Priority)
-        return 0
-
-    # This is used to determine castle eligability
-    def _allPlayerCaptureTargets(self, player: Player):
-        captureSquares = {}
-
-        for row in range(0, 8):
-            for col in range(0, 8):
-                targetPiece = self.board[row][col]
-                if targetPiece != None and targetPiece.player == player:
-
-                    captureTargets = targetPiece.captureTargets(self)
-                    for target in captureTargets:
-                        captureSquares[target] = True
-        
-        return captureSquares
-
     # Used for evaluating King Safety
-    def _updateKingSquare(self, kingRow: int, kingCol: int):
+    def _updateKingSquare(self, kingRow: int, kingCol: int) -> None:
         # Update the King Square
         if self.board[kingRow][kingCol].type == PieceType.KING:
             if self.board[kingRow][kingCol].player == Player.BLACK:
@@ -337,7 +274,7 @@ class ChessBoardModel():
                 self.whiteKingSquareCol = kingCol
 
     # Helper Method, Move Piece
-    def _movePieceOnBoard(self, startRow: int, startCol: int, endRow: int, endCol: int):
+    def _movePieceOnBoard(self, startRow: int, startCol: int, endRow: int, endCol: int) -> None:
         self.board[endRow][endCol] = self.board[startRow][startCol]
         self.board[endRow][endCol].row = endRow
         self.board[endRow][endCol].col = endCol
@@ -351,7 +288,7 @@ class ChessBoardModel():
 
     # Helper Method, Undo Move Piece
     def _undoMoveOnBoard(self, originalRow: int, originalCol: int, 
-        currentRow: int, currentCol: int):        
+        currentRow: int, currentCol: int) -> None:        
         self.board[originalRow][originalCol] = self.board[currentRow][currentCol] 
         self.board[originalRow][originalCol].row = originalRow
         self.board[originalRow][originalCol].col = originalCol
@@ -364,4 +301,105 @@ class ChessBoardModel():
 
         # Update the King Square
         self._updateKingSquare(originalRow, originalCol)
+
+    # Validate King Safety for player after making move
+    def validateKingSafety(self, cmd: MoveCommand) -> bool:
+        # This is explictly defined here to avoid confusion after the move
+        currentPlayer = self.playerTurn
+        removedPiece = self.movePiece(cmd)
+
+        returnValue = self._testKingSafety()
+        self.undoMove(cmd, removedPiece)
+        return returnValue
+
+    # Test King Safety
+    def _testKingSafety(self) -> bool:
+        row = self.whiteKingSquareRow
+        col = self.whiteKingSquareCol
+
+        # Retrieve King Piece
+        if self.playerTurn == Player.BLACK:
+            row = self.blackKingSquareRow
+            col = self.blackKingSquareCol
+
+        # Test for Opponent Knights
+        for dr, dc in [(2, 1), (1, 2), (-2, -1), (-1, -2), (-2, 1), (-1, 2), (2, -1), (1, -2)]:
+            newRow = row + dr
+            newCol = col + dc
+            if newRow >= 0 and newRow < 8 and newCol >= 0 and newCol < 8:
+                target = self.board[newRow][newCol] 
+                if target != None and target.type == PieceType.KNIGHT \
+                    and target.player != self.playerTurn:
+                    return False
+
+        # Test for Opponent Horizontals
+        horizontalCapture = [PieceType.ROOK, PieceType.QUEEN]
+        for dr, dc in [(-1, 0), (0, 1), (1, 0), (0, -1)]:
+            for i in range(1, 8):
+                newRow = row + dr * i
+                newCol = col + dc * i
+
+                if not (newRow >= 0 and newRow < 8 and newCol >= 0 and newCol < 8):
+                    break
+
+                target = self.board[newRow][newCol]
+                if target != None:
+                    if target.player != self.playerTurn:
+                        if i == 1 and target.type == PieceType.KING: 
+                            return False
+                        if target.type in horizontalCapture:
+                            return False
+                    break # Path Blocked
+
+        # Test for Diagonal Captures
+        diagonalCapture = [PieceType.BISHOP, PieceType.QUEEN]
+        for dr, dc in [(-1, 1), (1, 1), (1, -1), (-1, -1)]:
+            for i in range(1, 8):
+                newRow = row + dr * i
+                newCol = col + dc * i
+
+                if not (newRow >= 0 and newRow < 8 and newCol >= 0 and newCol < 8):
+                    break
+
+                target = self.board[newRow][newCol]
+                if target != None:
+                    if target.player != self.playerTurn:
+                        if i == 1 and target.type == PieceType.KING: 
+                            return False
+                        if target.type in diagonalCapture:
+                            return False
+                    break # Path Blocked
+
+        # Test for enemy pawns 
+        pawnRow = row - 1 
+        if self.playerTurn == Player.WHITE:
+            pawnRow = row + 1
+
+        if 0 <= pawnRow < 8:
+            for columnDirection in [-1, 1]:
+                newCol = col + columnDirection
+
+                if 0 <= newCol < 8:
+                    target = self.board[pawnRow][newCol]
+                    if target and target.type == PieceType.PAWN \
+                        and target.player != self.playerTurn:
+                        return False
+
+        return True
+
+    # This is used to determine castle eligability
+    def allOpponentCaptureTargets(self) -> set[tuple[str, int]]:
+        captureSquares = set()
+
+        opponent = ChessBoardModel.opponent(self.playerTurn)
+        for row in range(0, 8):
+            for col in range(0, 8):
+                targetPiece = self.board[row][col]
+                if targetPiece != None and targetPiece.player == opponent:
+
+                    captureTargets = targetPiece.captureTargets(self)
+                    for target in captureTargets:
+                        captureSquares.add(target)
+        
+        return captureSquares
 

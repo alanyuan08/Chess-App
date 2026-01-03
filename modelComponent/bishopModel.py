@@ -1,6 +1,7 @@
 # Import Model
 from modelComponent.moveCommand import MoveCommand
 from modelComponent.chessPieceModel import ChessPieceModel
+from modelComponent.chessBoardProtocal import ChessBoardProtocal
 
 # Enum
 from appEnums import Player, MoveCommandType, PieceType
@@ -26,13 +27,13 @@ class BishopModel(ChessPieceModel):
 	    [-20, -10, -10, -10, -10, -10, -10, -20]
 	]
 
-	def phaseWeight(self):
+	def phaseWeight(self) -> int:
 		return 1
 
-	def pieceValue(self):
+	def pieceValue(self) -> int:
 		return 300
 
-	def computedValue(self, chessBoard, phaseWeight):
+	def computedValue(self, chessBoard: ChessBoardProtocal, phaseWeight: int) -> int:
 		row = 0
 		if self.player == Player.BLACK:
 			row = self.row
@@ -42,7 +43,7 @@ class BishopModel(ChessPieceModel):
 		return self.pieceValue() + self.bishopValueTable[row][self.col]
 
 	# List all Possible Moves from Location
-	def possibleMoves(self, chessBoardModel):
+	def possibleMoves(self, chessboard: ChessBoardProtocal) -> list[MoveCommand]:
 		returnMoves = []
 
 		for dr, dc in [(-1, 1), (1, 1), (1, -1), (-1, -1)]:
@@ -53,23 +54,23 @@ class BishopModel(ChessPieceModel):
 				if not (newRow >= 0 and newRow < 8 and newCol >= 0 and newCol < 8):
 					break
 
-				if chessBoardModel.board[newRow][newCol] == None:
+				if chessboard.board[newRow][newCol] == None:
 					returnMoves.append(
 						MoveCommand(self.row, self.col, newRow, newCol, MoveCommandType.MOVE)
 					)
 
 				else:
-					if chessBoardModel.board[newRow][newCol].player != self.player:
+					if chessboard.board[newRow][newCol].player != self.player:
 						returnMoves.append(
 							MoveCommand(self.row, self.col, newRow, newCol, MoveCommandType.CAPTURE)
 						)
 					break
 
 		# Validate For King Safety
-		return [move for move in returnMoves if chessBoardModel.validateKingSafety(move)]
+		return [move for move in returnMoves if chessboard.validateKingSafety(move)]
 
 	# List of targets - Used to check for Castle / King Safety
-	def captureTargets(self, chessBoardModel):
+	def captureTargets(self, chessBoard: ChessBoardProtocal) -> list[tuple[int, int]]:
 		returnMoves = []
 
 		for dr, dc in [(-1, 1), (1, 1), (1, -1), (-1, -1)]:
@@ -80,11 +81,10 @@ class BishopModel(ChessPieceModel):
 				if not (newRow >= 0 and newRow < 8 and newCol >= 0 and newCol < 8):
 					break
 
-				if chessBoardModel.board[newRow][newCol] == None:
+				if chessBoard.board[newRow][newCol] == None:
 					returnMoves.append((newRow, newCol))
 				else: 
 					returnMoves.append((newRow, newCol))
 					break
 
 		return returnMoves
-

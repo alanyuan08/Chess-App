@@ -1,6 +1,7 @@
 # Import Model
 from modelComponent.moveCommand import MoveCommand
 from modelComponent.chessPieceModel import ChessPieceModel
+from modelComponent.chessBoardProtocal import ChessBoardProtocal
 
 # Enum
 from appEnums import Player, MoveCommandType, PieceType
@@ -40,13 +41,13 @@ class QueenModel(ChessPieceModel):
 	    [-20, -15, -10,  -5,  -5, -10, -15, -20]
 	]
 
-	def pieceValue(self):
+	def pieceValue(self) -> int:
 		return 900
 
-	def phaseWeight(self):
+	def phaseWeight(self) -> int:
 		return 4
 
-	def computedValue(self, chessBoard, phaseWeight):
+	def computedValue(self, chessBoard: ChessBoardProtocal, phaseWeight: int) -> int:
 		row = 0
 		if self.player == Player.BLACK:
 			row = self.row
@@ -61,7 +62,7 @@ class QueenModel(ChessPieceModel):
 		return self.pieceValue() + math.ceil(computedPhase / 24)
 
 	# List all Possible Moves from Location
-	def possibleMoves(self, chessBoardModel):
+	def possibleMoves(self, chessBoard: ChessBoardProtocal) -> list[MoveCommand]:
 		returnMoves = []
 
 		for dr, dc in [(-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1)]:
@@ -72,13 +73,13 @@ class QueenModel(ChessPieceModel):
 				if not (newRow >= 0 and newRow < 8 and newCol >= 0 and newCol < 8):
 					break
 
-				if chessBoardModel.board[newRow][newCol] == None:
+				if chessBoard.board[newRow][newCol] == None:
 					returnMoves.append(
 						MoveCommand(self.row, self.col, newRow, newCol, MoveCommandType.MOVE)
 					)
 
 				else:
-					if chessBoardModel.board[newRow][newCol].player != self.player:
+					if chessBoard.board[newRow][newCol].player != self.player:
 						returnMoves.append(
 							MoveCommand(self.row, self.col, newRow, newCol, MoveCommandType.CAPTURE)
 						)
@@ -86,10 +87,10 @@ class QueenModel(ChessPieceModel):
 					break
 
 		# Validate For King Safety
-		return [move for move in returnMoves if chessBoardModel.validateKingSafety(move)]
+		return [move for move in returnMoves if chessBoard.validateKingSafety(move)]
 
 	# List of targets - Used to check for Castle / King Safety
-	def captureTargets(self, chessBoardModel):
+	def captureTargets(self, chessBoard: ChessBoardProtocal) -> list[tuple[int, int]]:
 		returnMoves = []
 
 		for dr, dc in [(-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1)]:
@@ -100,7 +101,7 @@ class QueenModel(ChessPieceModel):
 				if not (newRow >= 0 and newRow < 8 and newCol >= 0 and newCol < 8):
 					break
 
-				if chessBoardModel.board[newRow][newCol] == None:
+				if chessBoard.board[newRow][newCol] == None:
 					returnMoves.append((newRow, newCol))
 
 				else:

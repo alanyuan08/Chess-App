@@ -3,10 +3,15 @@ from modelFactory.chessBoardFactory import ChessBoardFactory
 
 # Model
 from modelComponent.chessBoardModel import ChessBoardModel
+from modelComponent.moveCommand import MoveCommand
+
+# Factory
+from modelFactory.chessPieceFactory import ChessPieceFactory
 
 # Enum
 from appEnums import PieceType, Player, MoveCommandType
 
+# Normal
 import math
 
 # Controller 
@@ -18,8 +23,10 @@ class ChessGameModel():
         self.transpositionTable = {}
 
     # Take Opponent Turn
-    def computeBestMove(self):
+    def computeBestMove(self) -> MoveCommand:
         commandList = self.chessBoard.allValidMoves()
+
+        commandList.sort(key=lambda move: self._getMovePriority(move), reverse=True)
 
         alpha = float('-inf')
         beta = float('inf')
@@ -45,15 +52,17 @@ class ChessGameModel():
         returnValue = 0
 
         phaseWeight = self._calculateGamePhase()
+        board = self.chessBoard.board
         # Compute for Piece
         for row in range(0, 8):
             for col in range(0, 8):
-                if self.chessBoard.board[row][col] != None:
-                    if self.chessBoard.board[row][col].player == Player.WHITE:
-                        returnValue += self.chessBoard.board[row][col].computedValue(
+                gamePiece = board[row][col]
+                if gamePiece != None:
+                    if gamePiece.player == Player.WHITE:
+                        returnValue += gamePiece.computedValue(
                             self.chessBoard, phaseWeight)
                     else:
-                        returnValue -= self.chessBoard.board[row][col].computedValue(
+                        returnValue -= gamePiece.computedValue(
                             self.chessBoard, phaseWeight)
 
         # Compute for Double/ Isolated Pawns
@@ -68,8 +77,7 @@ class ChessGameModel():
         
         # No Valid Moves = Lose
         if len(validMoves) == 0:
-            opponent = ChessBoardModel.opponent(self.playerTurn)
-            opponentAttackTargets = self._allPlayerCaptureTargets(opponent)
+            opponentAttackTargets = self.chessBoard.allOpponentCaptureTargets()
             if self.playerTurn == Player.WHITE:
                 if (self.chessBoard.whiteKingSquareRow, self.chessBoard.whiteKingSquareCol) \
                     in opponentAttackTargets:
@@ -121,8 +129,7 @@ class ChessGameModel():
 
         # No Valid Moves = Lose
         if len(validMoves) == 0:
-            opponent = ChessBoardModel.opponent(self.playerTurn)
-            opponentAttackTargets = self.chessBoard._allPlayerCaptureTargets(opponent)
+            opponentAttackTargets = self.chessBoard.allOpponentCaptureTargets()
             if self.playerTurn == Player.WHITE:
                 if (self.chessBoard.whiteKingSquareRow, self.chessBoard.whiteKingSquareCol) \
                     in opponentAttackTargets:
@@ -164,9 +171,10 @@ class ChessGameModel():
     def _pawnPenalizer(self, player, phaseWeight):
         filePawnCount = [0 for _ in range(8)]
 
+        board = self.chessBoard.board
         for row in range(0, 8):
             for col in range(0, 8):
-                piece = self.chessBoard.board[row][col]
+                piece = board[row][col]
                 if piece != None and piece.type == PieceType.PAWN and piece.player == player:
                     filePawnCount[col] += 1
 
@@ -199,10 +207,40 @@ class ChessGameModel():
     # Maximum Value is 24, used for early/ mid board evaluation
     def _calculateGamePhase(self):
         totalPhaseWeight = 0
-        
+
+        board = self.chessBoard.board
         for row in range(0, 8):
             for col in range(0, 8):
-                if self.chessBoard.board[row][col] != None:
-                    totalPhaseWeight += self.chessBoard.board[row][col].phaseWeight()
+                if board[row][col] != None:
+                    totalPhaseWeight += board[row][col].phaseWeight()
 
         return totalPhaseWeight
+
+
+    # Compute Move Priority
+    def _getMovePriority(self, cmd: MoveCommand):
+        board = self.chessBoard.board
+
+        # 1. Promotions (High Priority)
+        if cmd.moveType == MoveCommandType.PROMOTE:
+            return 90000 # Treat as Queen value
+        
+        # 2. Captures (MVV-LVA)
+        if cmd.moveType in [MoveCommandType.CAPTURE, MoveCommandType.ENPASSANT]:
+            capturedPieceVal = 0
+            if cmd.moveType == MoveCommandType.ENPASSANT:
+                capturedPieceVal = board[cmd.startRow][cmd.endCol].pieceValue()
+            else:
+                capturedPieceVal = board[cmd.endRow][cmd.endCol].pieceValue()
+
+            startingPieceVal = board[cmd.startRow][cmd.startCol].pieceValue()  
+            
+            return (capturedPieceVal * 10) - startingPieceVal
+
+        # 3. Castling (Mid Priority)
+        if cmd.moveType in [MoveCommandType.KINGSIDECASTLE, MoveCommandType.QUEENSIDECASTLE]:
+            return 50
+
+        # 4. Standard Moves (Low Priority)
+        return 0
+

@@ -51,7 +51,9 @@ class ChessBoardView(QGraphicsPixmapItem):
 	def promotePiece(self, row: int, col: int):
 		for item in self.childItems():
 			if item.row == row and item.col == col:
-				item.setPixmap(QPixmap(ChessPieceView.returnQueenURL(item.player)))
+				item.setPixmap(
+					QPixmap(ChessPieceView.returnQueenURL(item.player))
+				)
 
 	def movePieceToLocation(self, startRow: int, startCol: int, endRow: int, endCol: int):
 		for item in self.childItems():
@@ -88,18 +90,12 @@ class ChessBoardView(QGraphicsPixmapItem):
 
 			# Queen Side Castle
 			case MoveCommandType.QUEENSIDECASTLE:
-				if cmd.startRow == 7:
-					self.movePieceToLocation(7, 0, 7, 3)
-					self.movePieceToLocation(7, 4, 7, 2)
-				else:
-					self.movePieceToLocation(0, 0, 0, 3)
-					self.movePieceToLocation(0, 4, 0, 2)
+				row = cmd.startRow
+				self.movePieceToLocation(row, 0, row, 3)
+				self.movePieceToLocation(row, 4, row, 2)
 
 			# King Side Castle
-			case MoveCommandType.KINGSIDECASTLE:				
-				if cmd.startRow == 7:
-					self.movePieceToLocation(7, 7, 7, 5)
-					self.movePieceToLocation(7, 4, 7, 6)
-				else:
-					self.movePieceToLocation(0, 7, 0, 5)
-					self.movePieceToLocation(0, 4, 0, 6)
+			case MoveCommandType.KINGSIDECASTLE:
+				row = cmd.startRow		
+				self.movePieceToLocation(row, 7, row, 5)
+				self.movePieceToLocation(row, 4, row, 6)

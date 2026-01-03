@@ -1,6 +1,7 @@
 # Import Model
 from modelComponent.moveCommand import MoveCommand
 from modelComponent.chessPieceModel import ChessPieceModel
+from modelComponent.chessBoardProtocal import ChessBoardProtocal
 
 # Enum
 from appEnums import Player, MoveCommandType, PieceType
@@ -39,15 +40,14 @@ class PawnModel(ChessPieceModel):
 	    [  0,   0,   0,   0,   0,   0,   0,   0]
 	]
 
-
 	# Pawn isn't part of Phase Weights
-	def phaseWeight(self):
+	def phaseWeight(self) -> int:
 		return 0
 
-	def pieceValue(self):
+	def pieceValue(self) -> int:
 		return 100
 
-	def computedValue(self, chessBoard, phaseWeight):
+	def computedValue(self, chessBoard: ChessBoardProtocal, phaseWeight: int) -> int:
 		row = 0
 		if self.player == Player.BLACK:
 			row = self.row
@@ -60,14 +60,7 @@ class PawnModel(ChessPieceModel):
 		computedPhase = earlyGame * phaseWeight + endGame * (24 - phaseWeight) 
 		return self.pieceValue() + math.ceil(computedPhase / 24)
 
-	def checkOpponentPawn(self, chessBoardModel, row: int, col: int):
-		rookPiece = chessBoardModel.board[row][col]
-		if rookPiece != None and rookPiece.type == PieceType.ROOK and rookPiece.player == self.player:
-			return True
-		else:
-			return False
-
-	def possibleMoves(self, chessBoardModel):
+	def possibleMoves(self, chessBoard: ChessBoardProtocal) -> list[MoveCommand]:
 		returnMoves = []
 
 		# Black Player - Pawn Moves Down
@@ -75,37 +68,37 @@ class PawnModel(ChessPieceModel):
 			# Promote
 			if self.row == 1:
 				if self.col > 0:
-					target = chessBoardModel.board[self.row-1][self.col-1]
+					target = chessBoard.board[self.row-1][self.col-1]
 					if target != None and target.player != self.player:
 						returnMoves.append(
 							MoveCommand(self.row, self.col, self.row-1, self.col-1, MoveCommandType.PROMOTE)
 						)
 
 				if self.col < 7:
-					target = chessBoardModel.board[self.row-1][self.col+1]
+					target = chessBoard.board[self.row-1][self.col+1]
 					if target != None and target.player != self.player:
 						returnMoves.append(
 							MoveCommand(self.row, self.col, self.row-1, self.col+1, MoveCommandType.PROMOTE)
 						)
 
-				if chessBoardModel.board[self.row-1][self.col] == None:
+				if chessBoard.board[self.row-1][self.col] == None:
 					returnMoves.append(
 						MoveCommand(self.row, self.col, self.row-1, self.col, MoveCommandType.PROMOTE)
 					)
 			elif self.row > 1:
 				# Double Pawn Move
 				if self.row == 6:
-					if chessBoardModel.board[self.row-1][self.col] == None and chessBoardModel.board[self.row-2][self.col] == None:
+					if chessBoard.board[self.row-1][self.col] == None and chessBoard.board[self.row-2][self.col] == None:
 						returnMoves.append(
 							MoveCommand(self.row, self.col, self.row-2, self.col, MoveCommandType.PAWNOPENMOVE)
 						)
 
 				# En Passant
 				if self.row == 3:
-					opponentEnPassantCol = chessBoardModel.whiteEnPassantColumn
+					opponentEnPassantCol = chessBoard.whiteEnPassantColumn
 					if opponentEnPassantCol == self.col-1 or opponentEnPassantCol == self.col+1:
 
-						opponentPawn = chessBoardModel.board[self.row][opponentEnPassantCol]
+						opponentPawn = chessBoard.board[self.row][opponentEnPassantCol]
 						if opponentPawn.player != self.player:
 							returnMoves.append(
 								MoveCommand(self.row, self.col, self.row-1, opponentEnPassantCol, MoveCommandType.ENPASSANT)
@@ -113,21 +106,21 @@ class PawnModel(ChessPieceModel):
 
 				# Normal
 				if self.col > 0:
-					target = chessBoardModel.board[self.row-1][self.col-1]
+					target = chessBoard.board[self.row-1][self.col-1]
 					if target != None and target.player != self.player:
 						returnMoves.append(
 							MoveCommand(self.row, self.col, self.row-1, self.col-1, MoveCommandType.CAPTURE)
 						)
 
 				if self.col < 7:
-					target = chessBoardModel.board[self.row-1][self.col+1]
+					target = chessBoard.board[self.row-1][self.col+1]
 					if target != None and target.player != self.player:
 						returnMoves.append(
 							MoveCommand(self.row, self.col, self.row-1, self.col+1, MoveCommandType.CAPTURE)
 						)
 
 				# Pawn Forward
-				if chessBoardModel.board[self.row-1][self.col] == None:
+				if chessBoard.board[self.row-1][self.col] == None:
 					returnMoves.append(
 						MoveCommand(self.row, self.col, self.row-1, self.col, MoveCommandType.MOVE)
 					)
@@ -137,20 +130,20 @@ class PawnModel(ChessPieceModel):
 			# Promote
 			if self.row == 6:
 				if self.col > 0:
-					target = chessBoardModel.board[self.row+1][self.col-1]
+					target = chessBoard.board[self.row+1][self.col-1]
 					if target != None and target.player != self.player:
 						returnMoves.append(
 							MoveCommand(self.row, self.col, self.row+1, self.col-1, MoveCommandType.PROMOTE)
 						)
 
 				if self.col < 7:
-					target = chessBoardModel.board[self.row+1][self.col+1]
+					target = chessBoard.board[self.row+1][self.col+1]
 					if target != None and target.player != self.player:
 						returnMoves.append(
 							MoveCommand(self.row, self.col, self.row+1, self.col+1, MoveCommandType.PROMOTE)
 						)
 
-				if chessBoardModel.board[self.row+1][self.col] == None:
+				if chessBoard.board[self.row+1][self.col] == None:
 					returnMoves.append(
 						MoveCommand(self.row, self.col, self.row+1, self.col, MoveCommandType.PROMOTE)
 					)
@@ -158,17 +151,17 @@ class PawnModel(ChessPieceModel):
 			elif self.row < 6:
 				# Double Pawn Move
 				if self.row == 1:
-					if chessBoardModel.board[self.row+1][self.col] == None and chessBoardModel.board[self.row+2][self.col] == None:
+					if chessBoard.board[self.row+1][self.col] == None and chessBoard.board[self.row+2][self.col] == None:
 						returnMoves.append(
 							MoveCommand(self.row, self.col, self.row+2, self.col, MoveCommandType.PAWNOPENMOVE)
 						)
 
 				# En passant
 				if self.row == 4:
-					opponentEnPassantCol = chessBoardModel.blackEnPassantColumn
+					opponentEnPassantCol = chessBoard.blackEnPassantColumn
 					if opponentEnPassantCol == self.col-1 or opponentEnPassantCol == self.col+1:
 
-						opponentPawn = chessBoardModel.board[self.row][opponentEnPassantCol]
+						opponentPawn = chessBoard.board[self.row][opponentEnPassantCol]
 						if opponentPawn.player != self.player:
 							returnMoves.append(
 								MoveCommand(self.row, self.col, self.row+1, opponentEnPassantCol, MoveCommandType.ENPASSANT)
@@ -176,29 +169,29 @@ class PawnModel(ChessPieceModel):
 
 				# Normal
 				if self.col > 0:
-					target = chessBoardModel.board[self.row+1][self.col-1]
+					target = chessBoard.board[self.row+1][self.col-1]
 					if target != None and target.player != self.player:
 						returnMoves.append(
 							MoveCommand(self.row, self.col, self.row+1, self.col-1, MoveCommandType.CAPTURE)
 						)
 
 				if self.col < 7:
-					target = chessBoardModel.board[self.row+1][self.col+1]
+					target = chessBoard.board[self.row+1][self.col+1]
 					if target != None and target.player != self.player:
 						returnMoves.append(
 							MoveCommand(self.row, self.col, self.row+1, self.col+1, MoveCommandType.CAPTURE)
 						)
 
 				# Pawn Forward
-				if chessBoardModel.board[self.row+1][self.col] == None:
+				if chessBoard.board[self.row+1][self.col] == None:
 					returnMoves.append(
 						MoveCommand(self.row, self.col, self.row+1, self.col, MoveCommandType.MOVE)
 					)
 
 		# Validate For King Safety
-		return [move for move in returnMoves if chessBoardModel.validateKingSafety(move)]
+		return [move for move in returnMoves if chessBoard.validateKingSafety(move)]
 
-	def captureTargets(self, chessBoardModel):
+	def captureTargets(self, chessBoard: ChessBoardProtocal) -> list[tuple[int, int]]:
 		returnMoves = []
 		if self.player == Player.BLACK:
 			if self.row > 0:

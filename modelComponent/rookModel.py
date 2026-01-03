@@ -1,6 +1,7 @@
 # Import Model
 from modelComponent.moveCommand import MoveCommand
 from modelComponent.chessPieceModel import ChessPieceModel
+from modelComponent.chessBoardProtocal import ChessBoardProtocal
 
 # Enum
 from appEnums import Player, MoveCommandType, PieceType
@@ -26,13 +27,13 @@ class RookModel(ChessPieceModel):
 	    [ 0,  0,  0,  5,  5,  0,  0,  0] 
 	]
 
-	def phaseWeight(self):
+	def phaseWeight(self) -> int:
 		return 2
 
-	def pieceValue(self):
+	def pieceValue(self) -> int:
 		return 500
 
-	def computedValue(self, chessBoard, phaseWeight):
+	def computedValue(self, chessBoard: ChessBoardProtocal, phaseWeight: int) -> int:
 		row = 0
 		if self.player == Player.BLACK:
 			row = self.row
@@ -42,7 +43,7 @@ class RookModel(ChessPieceModel):
 		return self.pieceValue() + self.rookValueTable[row][self.col]
 
 	# List all Possible Moves from Location
-	def possibleMoves(self, chessBoardModel):
+	def possibleMoves(self, chessBoard: ChessBoardProtocal) -> list[MoveCommand]:
 		returnMoves = []
 
 		for dr, dc in [(-1, 0), (0, 1), (1, 0), (0, -1)]:
@@ -53,12 +54,12 @@ class RookModel(ChessPieceModel):
 				if not (newRow >= 0 and newRow < 8 and newCol >= 0 and newCol < 8):
 					break
 
-				if chessBoardModel.board[newRow][newCol] == None:
+				if chessBoard.board[newRow][newCol] == None:
 					returnMoves.append(
 						MoveCommand(self.row, self.col, newRow, newCol, MoveCommandType.MOVE)
 					)
 				else:
-					if chessBoardModel.board[newRow][newCol].player != self.player:
+					if chessBoard.board[newRow][newCol].player != self.player:
 						returnMoves.append(
 							MoveCommand(self.row, self.col, newRow, newCol, MoveCommandType.CAPTURE)
 						)
@@ -66,10 +67,10 @@ class RookModel(ChessPieceModel):
 					break
 
 		# Validate For King Safety
-		return [move for move in returnMoves if chessBoardModel.validateKingSafety(move)]
+		return [move for move in returnMoves if chessBoard.validateKingSafety(move)]
 
 	# List of targets - Used to check for Castle / King Safety
-	def captureTargets(self, chessBoardModel):
+	def captureTargets(self, chessBoard: ChessBoardProtocal):
 		returnMoves = []
 
 		for dr, dc in [(-1, 0), (0, 1), (1, 0), (0, -1)]:
@@ -80,7 +81,7 @@ class RookModel(ChessPieceModel):
 				if not (newRow >= 0 and newRow < 8 and newCol >= 0 and newCol < 8):
 					break
 
-				if chessBoardModel.board[newRow][newCol] == None:
+				if chessBoard.board[newRow][newCol] == None:
 					returnMoves.append((newRow, newCol))
 	
 				else:
