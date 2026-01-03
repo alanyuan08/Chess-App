@@ -70,8 +70,8 @@ class ChessGameModel():
                             self.chessBoard, phaseWeight)
 
         # Compute for Double/ Isolated Pawns
-        returnValue += self._pawnPenalizer(Player.WHITE, phaseWeight)
-        returnValue -= self._pawnPenalizer(Player.BLACK, phaseWeight)
+        returnValue -= self._pawnPenalizer(Player.WHITE, phaseWeight)
+        returnValue += self._pawnPenalizer(Player.BLACK, phaseWeight)
 
         return returnValue
 
@@ -184,7 +184,7 @@ class ChessGameModel():
                     isIsolated = False
                     
                 if isIsolated:
-                    earlyGame  = 15
+                    earlyGame = 15
                     endGame = 25
                     computedPhase = earlyGame * phaseWeight + endGame * (24 - phaseWeight) 
                 

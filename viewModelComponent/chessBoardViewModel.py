@@ -32,7 +32,7 @@ class ChessBoardViewModel():
 
         if moveCommand != None:
             # Move for the Chess Model
-            self.chessGameModel.chessBoard.movePiece(moveCommand)
+            self.chessGameModel.movePiece(moveCommand)
             # Communicate the command to FrontEnd
             self.communicatorProxy.signal_update_request(moveCommand)
 
@@ -49,7 +49,7 @@ class ChessBoardViewModel():
         opponentCmd = self.chessGameModel.computeBestMove()
 
         if opponentCmd != None:
-            self.chessGameModel.chessBoard.movePiece(opponentCmd)
+            self.chessGameModel.movePiece(opponentCmd)
             # Communicate the command to FrontEnd
             self.communicatorProxy.signal_update_request(opponentCmd)
         else:
