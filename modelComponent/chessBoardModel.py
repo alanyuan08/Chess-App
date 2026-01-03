@@ -336,8 +336,8 @@ class ChessBoardModel():
             return (self.blackKingSquareRow, self.blackKingSquareCol)
 
     # Test King Safety
-    def _testKingSafety(self, player: Player) -> bool:
-        row, col = self.kingTuple(player)
+    def _testKingSafety(self, kingPlayer: Player) -> bool:
+        row, col = self.kingTuple(kingPlayer)
 
         # Test for Opponent Knights
         for dr, dc in [(2, 1), (1, 2), (-2, -1), (-1, -2), (-2, 1), (-1, 2), (2, -1), (1, -2)]:
@@ -346,7 +346,7 @@ class ChessBoardModel():
             if newRow >= 0 and newRow < 8 and newCol >= 0 and newCol < 8:
                 target = self.board[newRow][newCol] 
                 if target != None and target.type == PieceType.KNIGHT \
-                    and target.player != self.playerTurn:
+                    and target.player != kingPlayer:
                     return False
 
         # Test for Opponent Horizontals
@@ -361,7 +361,7 @@ class ChessBoardModel():
 
                 target = self.board[newRow][newCol]
                 if target != None:
-                    if target.player != player:
+                    if target.player != kingPlayer:
                         if i == 1 and target.type == PieceType.KING: 
                             return False
                         if target.type in horizontalCapture:
@@ -380,7 +380,7 @@ class ChessBoardModel():
 
                 target = self.board[newRow][newCol]
                 if target != None:
-                    if target.player != player:
+                    if target.player != kingPlayer:
                         if i == 1 and target.type == PieceType.KING: 
                             return False
                         if target.type in diagonalCapture:
@@ -389,7 +389,7 @@ class ChessBoardModel():
 
         # Test for enemy pawns 
         pawnRow = row - 1 
-        if player == Player.WHITE:
+        if kingPlayer == Player.WHITE:
             pawnRow = row + 1
 
         if 0 <= pawnRow < 8:
@@ -399,7 +399,7 @@ class ChessBoardModel():
                 if 0 <= newCol < 8:
                     target = self.board[pawnRow][newCol]
                     if target and target.type == PieceType.PAWN \
-                        and target.player != player:
+                        and target.player != kingPlayer:
                         return False
 
         return True

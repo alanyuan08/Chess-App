@@ -94,7 +94,10 @@ class ChessGameModel():
 
             kingTuple = self.chessBoard.kingTuple
             if kingTuple in opponentAttackTargets:
-                return float('inf')
+                if self.playerTurn == Player.WHITE:
+                    return float('-inf')
+                else:
+                    return float('inf')
             else:
                 return 0
 
@@ -139,7 +142,10 @@ class ChessGameModel():
 
             kingTuple = self.chessBoard.kingTuple
             if kingTuple in opponentAttackTargets:
-                return float('inf')
+                if self.playerTurn == Player.WHITE:
+                    return float('-inf')
+                else:
+                    return float('inf')
             else:
                 return 0
 
