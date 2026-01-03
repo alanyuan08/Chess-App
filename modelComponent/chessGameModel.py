@@ -44,7 +44,7 @@ class ChessGameModel():
 
         for cmd in commandList:
             removedPiece = self.chessBoard.movePiece(cmd)
-            score = (-1) * self._negamax(2, (-1) * beta, (-1) * alpha)
+            score = (-1) * self._negamax(3, (-1) * beta, (-1) * alpha)
             self.chessBoard.undoMove(cmd, removedPiece)
 
             print(cmd)
@@ -86,6 +86,7 @@ class ChessGameModel():
     # MinMaxSearch -> General
     def _negamax(self, depth, alpha, beta) -> int:
         validMoves = self.chessBoard.allValidMoves()
+        validMoves.sort(key=lambda move: self._getMovePriority(move), reverse=True)
         
         # No Valid Moves = Lose
         if len(validMoves) == 0:
@@ -130,6 +131,7 @@ class ChessGameModel():
             alpha = staticEval
 
         validMoves = self.chessBoard.allValidMoves()
+        validMoves.sort(key=lambda move: self._getMovePriority(move), reverse=True)
 
         # No Valid Moves = Lose
         if len(validMoves) == 0:

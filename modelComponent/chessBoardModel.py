@@ -324,20 +324,20 @@ class ChessBoardModel():
         currentPlayer = self.playerTurn
         removedPiece = self.movePiece(cmd)
 
-        returnValue = self._testKingSafety()
+        returnValue = self._testKingSafety(currentPlayer)
         self.undoMove(cmd, removedPiece)
         return returnValue
 
     # Retrieve King Tuple
-    def kingTuple(self) -> tuple[int, int]:
-        if self.playerTurn == Player.WHITE:
+    def kingTuple(self, player: Player) -> tuple[int, int]:
+        if player == Player.WHITE:
             return (self.whiteKingSquareRow, self.whiteKingSquareCol)
         else:
             return (self.blackKingSquareRow, self.blackKingSquareCol)
 
     # Test King Safety
-    def _testKingSafety(self) -> bool:
-        row, col = self.kingTuple()
+    def _testKingSafety(self, player: Player) -> bool:
+        row, col = self.kingTuple(player)
 
         # Test for Opponent Knights
         for dr, dc in [(2, 1), (1, 2), (-2, -1), (-1, -2), (-2, 1), (-1, 2), (2, -1), (1, -2)]:
@@ -361,7 +361,7 @@ class ChessBoardModel():
 
                 target = self.board[newRow][newCol]
                 if target != None:
-                    if target.player != self.playerTurn:
+                    if target.player != player:
                         if i == 1 and target.type == PieceType.KING: 
                             return False
                         if target.type in horizontalCapture:
@@ -380,7 +380,7 @@ class ChessBoardModel():
 
                 target = self.board[newRow][newCol]
                 if target != None:
-                    if target.player != self.playerTurn:
+                    if target.player != player:
                         if i == 1 and target.type == PieceType.KING: 
                             return False
                         if target.type in diagonalCapture:
@@ -389,7 +389,7 @@ class ChessBoardModel():
 
         # Test for enemy pawns 
         pawnRow = row - 1 
-        if self.playerTurn == Player.WHITE:
+        if player == Player.WHITE:
             pawnRow = row + 1
 
         if 0 <= pawnRow < 8:
@@ -399,7 +399,7 @@ class ChessBoardModel():
                 if 0 <= newCol < 8:
                     target = self.board[pawnRow][newCol]
                     if target and target.type == PieceType.PAWN \
-                        and target.player != self.playerTurn:
+                        and target.player != player:
                         return False
 
         return True
