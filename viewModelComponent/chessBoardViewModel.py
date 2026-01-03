@@ -24,12 +24,29 @@ class ChessBoardViewModel():
         # Compute Opponent Turn ThreadPool 
         self.threadpool = QThreadPool()
 
+        # White Moves First
+        if self.computerTurn():
+            worker = Worker(
+                self.takeOpponentTurn
+            )
+
+            # Execute
+            self.threadpool.start(worker)
+
+    def computerTurn(self):
+        gameModel = self.chessGameModel.chessBoard
+        if gameModel.playerTurn not in gameModel.humanPlayers:
+            return True
+        else:
+            return False
+
     def on_move_executed(self, initRow: int, initCol: int, targetRow: int, 
             targetCol: int, player: Player):
 
-        moveCommand = self.chessGameModel.chessBoard.validateMove(initRow, 
+        moveCommand = self.chessGameModel.validateMove(initRow, 
             initCol, targetRow, targetCol, player)
 
+        print(moveCommand)
         if moveCommand != None:
             # Move for the Chess Model
             self.chessGameModel.movePiece(moveCommand)

@@ -26,6 +26,11 @@ class ChessGameModel():
     def movePiece(self, cmd: MoveCommand):
         self.chessBoard.movePiece(cmd)
 
+    # Validate Move
+    def validateMove(self, initRow: int, initCol: int, targetRow: int, 
+        targetCol: int, player: Player) -> MoveCommand:
+        return self.chessBoard.validateMove(initRow, initCol, targetRow, targetCol, player)
+
     # Take Opponent Turn
     def computeBestMove(self) -> MoveCommand:
         commandList = self.chessBoard.allValidMoves()
@@ -40,7 +45,7 @@ class ChessGameModel():
 
         for cmd in commandList:
             removedPiece = self.chessBoard.movePiece(cmd)
-            returnValue = (-1) * self.negamax(2 , (-1) * beta, (-1) * alpha)
+            returnValue = (-1) * self._negamax(2 , (-1) * beta, (-1) * alpha)
             print(cmd)
             if returnValue > bestScore:
                 bestScore = returnValue
@@ -63,10 +68,10 @@ class ChessGameModel():
                 gamePiece = board[row][col]
                 if gamePiece != None:
                     if gamePiece.player == Player.WHITE:
-                        returnValue += gamePiece._computedValue(
+                        returnValue += gamePiece.computedValue(
                             self.chessBoard, phaseWeight)
                     else:
-                        returnValue -= gamePiece._computedValue(
+                        returnValue -= gamePiece.computedValue(
                             self.chessBoard, phaseWeight)
 
         # Compute for Double/ Isolated Pawns
@@ -91,7 +96,7 @@ class ChessGameModel():
 
         # Termination Condition
         if depth == 0:
-            return self.quiesceneSearch(alpha, beta)
+            return self._quiesceneSearch(alpha, beta)
         else:
             maxEval = float('-inf')
 
