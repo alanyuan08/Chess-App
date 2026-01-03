@@ -146,7 +146,7 @@ class ChessGameModel():
         return alpha
 
     # Return all Capture Moves
-    def _allQuiesceneMoves(self, validMoves) -> list[MoveCommand]
+    def _allQuiesceneMoves(self, validMoves) -> list[MoveCommand]:
         # QuiescenceMoves
         quiescenceMoveCmd = [MoveCommandType.PROMOTE, MoveCommandType.CAPTURE, \
             MoveCommandType.ENPASSANT]
