@@ -154,6 +154,9 @@ class ChessBoardModel():
                 self.board[cmd.endRow][cmd.endCol] = ChessPieceFactory.createChessPiece(
                     PieceType.QUEEN, self.playerTurn, cmd.endRow, cmd.endCol)
 
+                # Remove Pawn
+                self.board[cmd.startRow][cmd.startCol] = None
+
             # En Passant
             case MoveCommandType.ENPASSANT:
                 # Store Removed Piece

@@ -10,6 +10,7 @@ from PySide6.QtCore import QRunnable, QThreadPool, Slot
 
 # Enum
 from appEnums import PieceType, Player, MoveCommandType
+import random
 
 # Controller 
 class ChessBoardViewModel():
@@ -28,8 +29,25 @@ class ChessBoardViewModel():
         if self.computerTurn():
             # Execute
             self.threadpool.start(Worker(
-                self.takeOpponentTurn
+                self.stopGapWhiteOpening
             ))
+
+    # This is a stop-gap to introduce variance if white is going first
+    def stopGapWhiteOpening(self):
+        kingPawn = MoveCommand(1, 4, 3, 4, MoveCommandType.PAWNOPENMOVE)
+        queenPawn = MoveCommand(1, 3, 3, 3, MoveCommandType.PAWNOPENMOVE)
+
+        kingKnight = MoveCommand(0, 1, 2, 2, MoveCommandType.MOVE)
+        queenKnight = MoveCommand(0, 6, 2, 5, MoveCommandType.MOVE)
+
+        returnArray = [kingPawn, queenPawn, kingKnight, queenKnight]
+        result = random.choice([0, 1, 2, 3])
+
+        cmd =returnArray[result]
+
+        self.chessGameModel.movePiece(cmd)
+        # Communicate the command to FrontEnd
+        self.communicatorProxy.signal_update_request(cmd)
 
     def computerTurn(self):
         gameModel = self.chessGameModel.chessBoard
@@ -64,6 +82,8 @@ class ChessBoardViewModel():
             self.chessGameModel.movePiece(opponentCmd)
             # Communicate the command to FrontEnd
             self.communicatorProxy.signal_update_request(opponentCmd)
+        else:
+            raise ValueError("No move from opponent")
 
 class Worker(QRunnable):
     def __init__(self, fn, *args, **kwargs):
