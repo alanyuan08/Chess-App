@@ -43,15 +43,15 @@ class ChessBoardViewModel():
         returnArray = [kingPawn, queenPawn, kingKnight, queenKnight]
         result = random.choice([0, 1, 2, 3])
 
-        cmd =returnArray[result]
+        cmd = returnArray[result]
 
         self.chessGameModel.movePiece(cmd)
         # Communicate the command to FrontEnd
         self.communicatorProxy.signal_update_request(cmd)
 
     def computerTurn(self):
-        gameModel = self.chessGameModel.chessBoard
-        if gameModel.playerTurn not in gameModel.humanPlayers:
+        gameModel = self.chessGameModel
+        if gameModel.gamePlayerTurn not in gameModel.humanPlayers:
             return True
         else:
             return False
@@ -68,11 +68,11 @@ class ChessBoardViewModel():
             # Communicate the command to FrontEnd
             self.communicatorProxy.signal_update_request(moveCommand)
 
-        if self.computerTurn():
-            # Run the compute for the Opponent's Move
-            self.threadpool.start(Worker(
-                self.takeOpponentTurn
-            ))
+            if self.computerTurn():
+                # Run the compute for the Opponent's Move
+                self.threadpool.start(Worker(
+                    self.takeOpponentTurn
+                ))
 
     def takeOpponentTurn(self):
         # Opponent Takes Turn

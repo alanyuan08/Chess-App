@@ -22,13 +22,25 @@ class ChessGameModel():
         # Stores the Transposition Table
         self.transpositionTable = {}
 
+        # Set Human Player
+        self.humanPlayers = playersArray
+
+        # Set Game Turn 
+        self.gamePlayerTurn = Player.WHITE
+
     # Move Piece
     def movePiece(self, cmd: MoveCommand):
         self.chessBoard.movePiece(cmd)
 
+        self.gamePlayerTurn = ChessBoardModel.opponent(self.gamePlayerTurn)
+
     # Validate Move
     def validateMove(self, initRow: int, initCol: int, targetRow: int, 
         targetCol: int, player: Player) -> MoveCommand:
+        # It's not your turn to move
+        if player != self.gamePlayerTurn:
+            return None
+
         return self.chessBoard.validateMove(initRow, initCol, targetRow, targetCol, player)
 
     # Take Opponent Turn

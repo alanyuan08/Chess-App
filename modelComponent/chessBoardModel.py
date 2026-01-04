@@ -17,11 +17,8 @@ class ChessBoardModel():
         # Create the Chess Board
         self.board = [[None for _ in range(8)] for _ in range(8)]
 
-        # Init Player as White
+        # This is maintained for backtracking
         self.playerTurn = Player.WHITE
-
-        # Set Human Player
-        self.humanPlayers = []
 
         # En Passant Column - Set after pawn move, then cleared 
         self.whiteEnPassantColumn = None
@@ -61,10 +58,6 @@ class ChessBoardModel():
     # Validate the Move
     def validateMove(self, initRow: int, initCol: int, targetRow: int, 
         targetCol: int, player: Player) -> MoveCommand:
-        # It's not your turn to move
-        if player != self.playerTurn:
-            return None
-
         # Validate the Move Command is a Possible Move
         targetPiece = self.board[initRow][initCol]
         if targetPiece == None:
