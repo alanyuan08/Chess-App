@@ -21,8 +21,14 @@ class ChessBoardModel():
         self.playerTurn = Player.WHITE
 
         # En Passant Column - Set after pawn move, then cleared 
-        self.whiteEnPassantColumn = None
-        self.blackEnPassantColumn = None
+        self.enPassant = None
+
+        # Used to Check for King Safety
+        self.whiteKingSquareRow = 0
+        self.whiteKingSquareCol = 4
+
+        self.blackKingSquareRow = 7
+        self.blackKingSquareCol = 4
 
         # Use for Zobrist Hash
         self.whiteCanQueenSide = True
@@ -31,12 +37,8 @@ class ChessBoardModel():
         self.blackCanQueenSide = True
         self.blackCanKingSide = True
 
-        # Used to Check for King Safety
-        self.whiteKingSquareRow = 0
-        self.whiteKingSquareCol = 4
-
-        self.blackKingSquareRow = 7
-        self.blackKingSquareCol = 4
+        # Zobrist Hash
+        self.zobristHash = None
 
     @staticmethod
     def opponent(player: Player):
@@ -76,9 +78,8 @@ class ChessBoardModel():
 
     # Move Piece
     def movePiece(self, cmd: MoveCommand) -> Optional[ChessPieceModel]:
-        # Set enPassant to Null - Reset this if the opponent does a double pawn move
-        self.whiteEnPassantColumn = None
-        self.blackEnPassantColumn = None
+        # Set enPassant to Null
+        self.enPassant = None
 
         # Captured Piece 
         removedPiece = None
@@ -130,10 +131,7 @@ class ChessBoardModel():
                 # Move the piece from start to end
                 self._movePieceOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
 
-                if self.playerTurn == Player.WHITE:
-                    self.whiteEnPassantColumn = cmd.endCol
-                else:
-                    self.blackEnPassantColumn = cmd.endCol
+                self.enPassant = cmd.endCol
 
             # Promote Pawn
             case MoveCommandType.PROMOTE:
@@ -232,12 +230,6 @@ class ChessBoardModel():
                 # Store Removed Piece
                 self.board[cmd.startRow][cmd.endCol] = restorePiece
 
-                # Unset the En Passant Column
-                if self.playerTurn == Player.WHITE:
-                    self.whiteEnPassantColumn = None
-                else:
-                    self.blackEnPassantColumn = None
-
     # This is used to determine castle eligability
     def allOpponentCaptureTargets(self) -> set[tuple[int, int]]:
         captureSquares = set()
@@ -311,11 +303,14 @@ class ChessBoardModel():
 
     # Validate King Safety for player after making move
     def validateKingSafety(self, cmd: MoveCommand) -> bool:
-        currentPlayer = self.playerTurn        
+        prevEnPassant = self.enPassant
         removedPiece = self.movePiece(cmd)
 
-        returnValue = self._testKingSafety(currentPlayer)
+        returnValue = self._testKingSafety(self.playerTurn)
+
         self.undoMove(cmd, removedPiece)
+        self.enPassant = prevEnPassant
+        
         return returnValue
 
     # Update King Castle

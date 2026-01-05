@@ -95,7 +95,7 @@ class PawnModel(ChessPieceModel):
 
 				# En Passant
 				if self.row == 3:
-					opponentEnPassantCol = chessBoard.whiteEnPassantColumn
+					opponentEnPassantCol = chessBoard.enPassant
 					if opponentEnPassantCol == self.col-1 or opponentEnPassantCol == self.col+1:
 
 						opponentPawn = chessBoard.board[self.row][opponentEnPassantCol]
@@ -158,7 +158,7 @@ class PawnModel(ChessPieceModel):
 
 				# En passant
 				if self.row == 4:
-					opponentEnPassantCol = chessBoard.blackEnPassantColumn
+					opponentEnPassantCol = chessBoard.enPassant
 					if opponentEnPassantCol == self.col-1 or opponentEnPassantCol == self.col+1:
 
 						opponentPawn = chessBoard.board[self.row][opponentEnPassantCol]
