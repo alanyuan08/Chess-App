@@ -24,9 +24,12 @@ class ChessBoardModel():
         self.whiteEnPassantColumn = None
         self.blackEnPassantColumn = None
 
-        # Used to Keep Score for Castle
-        self.whiteCastled = False
-        self.blackCastled = False
+        # Use for Zobrist Hash
+        self.whiteCanQueenSide = True
+        self.whiteCanKingSide = True
+
+        self.blackCanQueenSide = True
+        self.blackCanKingSide = True
 
         # Used to Check for King Safety
         self.whiteKingSquareRow = 0
@@ -93,10 +96,7 @@ class ChessBoardModel():
                 self._movePieceOnBoard(row, 0, row, 3)
 
                 # Update Castle
-                if self.playerTurn == Player.BLACK:
-                    self.blackCastled = True
-                else:
-                    self.whiteCastled = True
+                self.updateKingCastleFlag(True)
 
             # King Side Castle
             case MoveCommandType.KINGSIDECASTLE:
@@ -110,10 +110,7 @@ class ChessBoardModel():
                 self._movePieceOnBoard(row, 7, row, 5)
 
                 # Update Castle
-                if self.playerTurn == Player.BLACK:
-                    self.blackCastled = True
-                else:
-                    self.whiteCastled = True
+                self.updateKingCastleFlag(True)
 
             # Move Piece
             case MoveCommandType.MOVE:
@@ -178,34 +175,28 @@ class ChessBoardModel():
                 # Determine the row of the Castle 
                 row = 7 if self.playerTurn == Player.BLACK else 0
 
-                # Move the King 2 steps to the left
-                self._undoMoveOnBoard(row, 4, row, 2)
-
                 # Move the Rook to the right of the king
                 self._undoMoveOnBoard(row, 0, row, 3)
 
+                # Move the King 2 steps to the left
+                self._undoMoveOnBoard(row, 4, row, 2)
+
                 # Update Castle
-                if self.playerTurn == Player.BLACK:
-                    self.blackCastled = False
-                else:
-                    self.whiteCastled = False
+                self.updateKingCastleFlag(False)
 
             # King Side Castle
             case MoveCommandType.KINGSIDECASTLE:
                  # Determine the row of the Castle 
                 row = 7 if self.playerTurn == Player.BLACK else 0
 
-                # Move the King 2 steps to the left
-                self._undoMoveOnBoard(row, 4, row, 6)
-
                 # Move the Rook to the right of the king
                 self._undoMoveOnBoard(row, 7, row, 5)
 
+                # Move the King 2 steps to the left
+                self._undoMoveOnBoard(row, 4, row, 6)
+
                 # Update Castle
-                if self.playerTurn == Player.BLACK:
-                    self.blackCastled = False
-                else:
-                    self.whiteCastled = False
+                self.updateKingCastleFlag(False)
 
             # Move Piece
             case MoveCommandType.MOVE:
@@ -263,17 +254,31 @@ class ChessBoardModel():
         
         return captureSquares
 
-    # Used for evaluating King Safety
-    def _updateKingSquare(self, kingRow: int, kingCol: int) -> None:
-        # Update the King Square
-        if self.board[kingRow][kingCol].type == PieceType.KING:
-            if self.board[kingRow][kingCol].player == Player.BLACK:
-                self.blackKingSquareRow = kingRow
-                self.blackKingSquareCol = kingCol
+    # Used for evaluating Castling Rights
+    def _updateKing(self, startRow: int, startCol: int) -> None:
+        kingPiece = self.board[startRow][startCol]
 
-            elif self.board[kingRow][kingCol].player == Player.WHITE:
-                self.whiteKingSquareRow = kingRow
-                self.whiteKingSquareCol = kingCol
+        # Update the King Square
+        if kingPiece.type == PieceType.KING:
+            if kingPiece.player == Player.BLACK:
+                self.blackKingSquareRow = startRow
+                self.blackKingSquareCol = startCol
+
+                if kingPiece.canQueenSideCastle(self):
+                    self.blackCanQueenSide = True
+
+                if kingPiece.canKingSideCastle(self):
+                    self.blackCanKingSide = True
+
+            else:
+                self.whiteKingSquareRow = startRow
+                self.whiteKingSquareCol = startCol
+
+                if kingPiece.canQueenSideCastle(self):
+                    self.whiteCanQueenSide = True
+
+                if kingPiece.canKingSideCastle(self):
+                    self.whiteCanKingSide = True
 
     # Helper Method, Move Piece
     def _movePieceOnBoard(self, startRow: int, startCol: int, endRow: int, endCol: int) -> None:
@@ -285,8 +290,8 @@ class ChessBoardModel():
         # Remove the Init Piece
         self.board[startRow][startCol] = None
 
-        # Update the King Square
-        self._updateKingSquare(endRow, endCol)
+        # Update King Square
+        self._updateKing(endRow, endCol)
 
     # Helper Method, Undo Move Piece
     def _undoMoveOnBoard(self, originalRow: int, originalCol: int, 
@@ -302,7 +307,7 @@ class ChessBoardModel():
         self.board[currentRow][currentCol] = None
 
         # Update the King Square
-        self._updateKingSquare(originalRow, originalCol)
+        self._updateKing(originalRow, originalCol)
 
     # Validate King Safety for player after making move
     def validateKingSafety(self, cmd: MoveCommand) -> bool:
@@ -312,6 +317,11 @@ class ChessBoardModel():
         returnValue = self._testKingSafety(currentPlayer)
         self.undoMove(cmd, removedPiece)
         return returnValue
+
+    # Update King Castle
+    def updateKingCastleFlag(self, castled: bool):
+        kingRow, kingCol = self.kingTuple(self.playerTurn)
+        self.board[kingRow][kingCol].updateCastle(castled)
 
     # Retrieve King Tuple
     def kingTuple(self, player: Player) -> tuple[int, int]:

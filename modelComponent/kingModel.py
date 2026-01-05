@@ -18,6 +18,8 @@ class KingModel(ChessPieceModel):
 		self.type = PieceType.KING
 		self.moves = 0
 
+		self.castled = False
+
 	# King Value Table White
 	kingValueTableEarlyGame = [
 	    [-50, -40, -40, -50, -50, -40, -40, -50],
@@ -41,6 +43,10 @@ class KingModel(ChessPieceModel):
 	    [-50, -30, -30, -30, -30, -30, -30, -50] 
 	]
 
+	# Update Castle
+	def updateCastle(self, castled: bool):
+		self.castled = castled
+
 	# King is not part of phase calculations
 	def phaseWeight(self) -> int:
 		return 0
@@ -52,20 +58,15 @@ class KingModel(ChessPieceModel):
 		returnScore = self.pieceValue()
 
 		# Castle Bonus
-		if self.player == Player.WHITE and chessBoard.whiteCastled:
-			returnScore += 100
-		if self.player == Player.BLACK and chessBoard.blackCastled:
-			returnScore += 100
-
-		# Reduction for cannot Castle
-		if self.moves > 0:
-			returnScore -= 60
+		if self.castled:
+			returnScore += 90
 		else:
-			if self._checkRook(chessBoard, self.row, 0):
+			if self.canQueenSideCastle(chessBoard):
 				returnScore -= 30
-			elif self._checkRook(chessBoard, self.row, 7):
+			elif self.canKingSideCastle(chessBoard):
 				returnScore -= 30
 
+		# Value Table Bonus
 		row = 0
 		if self.player == Player.BLACK:
 			row = self.row
@@ -101,7 +102,7 @@ class KingModel(ChessPieceModel):
 
 		if (self.row, self.col) not in opponentAttackTargets:
 			# Queen Side Castle
-			if self.moves == 0 and self._checkRook(chessBoard, self.row, 0):
+			if self.canQueenSideCastle(chessBoard):
 				if all(chessBoard.board[self.row][i] == None for i in [1, 2, 3]):
 					if (self.row, 2) not in opponentAttackTargets and (self.row, 3) not in opponentAttackTargets:
 						returnMoves.append(
@@ -109,7 +110,7 @@ class KingModel(ChessPieceModel):
 						)
 
 			# King Side Castle
-			if self.moves == 0 and self._checkRook(chessBoard, self.row, 7):
+			if self.canKingSideCastle(chessBoard):
 				if all(chessBoard.board[self.row][i] == None for i in [5, 6]):
 					if (self.row, 5) not in opponentAttackTargets and (self.row, 6) not in opponentAttackTargets:
 						returnMoves.append(
@@ -129,6 +130,18 @@ class KingModel(ChessPieceModel):
 				returnMoves.append((newRow, newCol))
 
 		return returnMoves
+
+	def canQueenSideCastle(self, chessBoard: ChessBoardProtocal) -> bool:
+		if self.moves == 0 and self._checkRook(chessBoard, self.row, 0):
+			return True
+		else:
+			return False
+
+	def canKingSideCastle(self, chessBoard: ChessBoardProtocal) -> bool:
+		if self.moves == 0 and self._checkRook(chessBoard, self.row, 7):
+			return True
+		else:
+			return False
 
 	def _checkRook(self, chessBoard: ChessBoardProtocal, row: int, col: int) -> bool:
 		rookPiece = chessBoard.board[row][col]
