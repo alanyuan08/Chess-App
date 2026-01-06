@@ -296,12 +296,13 @@ class ChessBoardZobrist():
                 ChessBoardZobrist.addOrRemoveQueen(chessBoard, cmd.endRow, cmd.endCol)
 
                 # Promote MAY be a capture or a move
-                if chessBoard.board[cmd.endRow][cmd.endCol]:
+                if restorePiece:
                     pieceType = ChessBoardZobrist.pieceType(restorePiece)
                     ChessBoardZobrist.restorePiece(chessBoard, cmd.endRow, cmd.endCol, pieceType)
 
                 # Restore Pawn
-                newPawn = ChessPieceFactory.createChessPiece(PieceType.PAWN, cmd.startRow, cmd.startCol)
+                newPawn = ChessPieceFactory.createChessPiece(
+                    PieceType.PAWN, chessBoard.playerTurn, cmd.startRow, cmd.startCol)
                 pawnType = ChessBoardZobrist.pieceType(newPawn)
                 ChessBoardZobrist.restorePiece(chessBoard, cmd.startRow, cmd.startCol, pawnType)
 
