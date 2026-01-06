@@ -39,7 +39,7 @@ class ChessBoardModel():
         self.blackCanKingSide = True
 
         # Zobrist Hash
-        self.zobristHash = None
+        self.zobristHash = ChessBoardZobrist.computeInitValue(self)
 
     @staticmethod
     def opponent(player: Player):
@@ -78,12 +78,17 @@ class ChessBoardModel():
         return None
 
     # Move Piece
-    def movePiece(self, cmd: MoveCommand) -> Union[Optional[ChessPieceModel], int]:
+    def movePiece(self, cmd: MoveCommand) -> Union[Optional[ChessPieceModel], int, int]:
+        # Store for Undo
+        removedPiece = None
+        prevEnPassant = self.enPassant
+        prevCastleIndex = ChessBoardZobrist.castleIndex(self)
+
         # Set enPassant to Null
         self.enPassant = None
 
-        # Captured Piece 
-        removedPiece = None
+        # Update ZobristHash
+        ChessBoardZobrist.forwardUpdate(self, cmd, prevEnPassant)
 
         match cmd.moveType:
             # Queen Side Castle
@@ -100,6 +105,9 @@ class ChessBoardModel():
                 # Update Castle
                 self.updateKingCastleFlag(True)
 
+                # Forward Castle
+                ChessBoardZobrist.forwardCastle(self, prevCastleIndex)
+
             # King Side Castle
             case MoveCommandType.KINGSIDECASTLE:
                 # Determine the row of the Castle 
@@ -113,6 +121,9 @@ class ChessBoardModel():
 
                 # Update Castle
                 self.updateKingCastleFlag(True)
+
+                # Forward Castle
+                ChessBoardZobrist.forwardCastle(self, prevCastleIndex)
 
             # Move Piece
             case MoveCommandType.MOVE:
@@ -161,13 +172,16 @@ class ChessBoardModel():
         self.playerTurn = ChessBoardModel.opponent(self.playerTurn)
 
         # Create a new copy of the removed Piece
-        return removedPiece, self.enPassant
+        return removedPiece, self.enPassant, prevCastleIndex
 
     # Undo Move - Used to for Pruning
-    def undoMove(self, cmd: MoveCommand, 
-        restorePiece: Optional[ChessPieceModel], prevEnPassant: int) -> None:
+    def undoMove(self, cmd: MoveCommand, restorePiece: Optional[ChessPieceModel], 
+        prevEnPassant: int, prevCastleIndex: int) -> None:
         # Swap the Player Turn
         self.playerTurn = ChessBoardModel.opponent(self.playerTurn)
+
+        # Undo ZobristHash
+        ChessBoardZobrist.backwardUpdate(self, cmd, restorePiece, prevEnPassant)
 
         match cmd.moveType:
             # Queen Side Castle (Undo)
@@ -184,6 +198,9 @@ class ChessBoardModel():
                 # Update Castle
                 self.updateKingCastleFlag(False)
 
+                # Backward Castle
+                ChessBoardZobrist.backwardCastle(self, prevCastleIndex)
+
             # King Side Castle
             case MoveCommandType.KINGSIDECASTLE:
                  # Determine the row of the Castle 
@@ -197,6 +214,9 @@ class ChessBoardModel():
 
                 # Update Castle
                 self.updateKingCastleFlag(False)
+
+                # Backward Castle
+                ChessBoardZobrist.backwardCastle(self, prevCastleIndex)
 
             # Move Piece
             case MoveCommandType.MOVE:
@@ -307,9 +327,10 @@ class ChessBoardModel():
 
     # Validate King Safety for player after making move
     def validateKingSafety(self, cmd: MoveCommand) -> bool:
-        removedPiece, prevEnPassant = self.movePiece(cmd)
-        returnValue = self._testKingSafety(self.playerTurn)
-        self.undoMove(cmd, removedPiece, prevEnPassant)
+        testPlayerTurn = self.playerTurn
+        removedPiece, prevEnPassant, prevCastleIndex = self.movePiece(cmd)
+        returnValue = self._testKingSafety(testPlayerTurn)
+        self.undoMove(cmd, removedPiece, prevEnPassant, prevCastleIndex)
         return returnValue
 
     # Update King Castle

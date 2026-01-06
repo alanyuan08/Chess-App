@@ -55,9 +55,9 @@ class ChessGameModel():
         bestMove = None
 
         for cmd in commandList:
-            removedPiece, prevEnPassant = self.chessBoard.movePiece(cmd)
+            removedPiece, prevEnPassant, prevCastleIndex = self.chessBoard.movePiece(cmd)
             score = (-1) * self._negamax(3, (-1) * beta, (-1) * alpha)
-            self.chessBoard.undoMove(cmd, removedPiece, prevEnPassant)
+            self.chessBoard.undoMove(cmd, removedPiece, prevEnPassant, prevCastleIndex)
 
             print(cmd)
             if score > bestScore:
@@ -111,9 +111,9 @@ class ChessGameModel():
             maxEval = float('-inf')
 
             for cmd in validMoves:
-                removedPiece, prevEnPassant = self.chessBoard.movePiece(cmd)
+                removedPiece, prevEnPassant, prevCastleIndex = self.chessBoard.movePiece(cmd)
                 score = (-1) * self._negamax(depth - 1, (-1) * beta, (-1) * alpha)
-                self.chessBoard.undoMove(cmd, removedPiece, prevEnPassant)
+                self.chessBoard.undoMove(cmd, removedPiece, prevEnPassant, prevCastleIndex)
 
                 maxEval = max(maxEval, score)
                 alpha = max(alpha, score)
@@ -144,9 +144,9 @@ class ChessGameModel():
             return self.resolveEndGame()
 
         for cmd in self._allQuiesceneMoves(validMoves):
-            removedPiece, prevEnPassant = self.chessBoard.movePiece(cmd)
+            removedPiece, prevEnPassant, prevCastleIndex = self.chessBoard.movePiece(cmd)
             score = (-1) * self._quiesceneSearch((-1) * beta, (-1) * alpha, depth + 1)
-            self.chessBoard.undoMove(cmd, removedPiece, prevEnPassant)
+            self.chessBoard.undoMove(cmd, removedPiece, prevEnPassant, prevCastleIndex)
 
             if score >= beta:
                 return beta

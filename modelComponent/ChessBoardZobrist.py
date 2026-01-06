@@ -10,6 +10,9 @@ from modelComponent.moveCommand import MoveCommand
 from modelComponent.chessPieceModel import ChessPieceModel
 from modelComponent.chessBoardProtocal import ChessBoardProtocal
 
+# Factory
+from modelFactory.chessPieceFactory import ChessPieceFactory
+
 # Standard Piece Map: 6 pieces * 2 colours = 12 total
 # We use indices 0-5 for White (P, N, B, R, Q, K) and 6-11 for Black
 PIECE_TYPES = 12
@@ -31,7 +34,34 @@ class ChessBoardZobrist():
     EN_PASSANT = [secrets.randbits(64) for _ in range(8)]
 
     @staticmethod
-    def pieceIndex(chessPiece: ChessPieceModel):
+    def computeInitValue(chessBoard: ChessBoardProtocal) -> int:
+        h = 0
+        # Pieces
+        for row in range(0, 8):
+            for col in range(0, 8):
+                chessPiece = chessBoard.board[row][col]
+
+                sq = row * 8 + col
+                if chessPiece:
+                    p_idx = ChessBoardZobrist.pieceType(chessPiece)
+                    h ^= ChessBoardZobrist.TABLE[p_idx][sq]
+        
+        # Side to move
+        if chessBoard.playerTurn == Player.BLACK:
+            h ^= ChessBoardZobrist.BlACK_TO_MOVE
+            
+        # Castling
+        castleIndex = ChessBoardZobrist.castleIndex(chessBoard)
+        h ^= ChessBoardZobrist.CASTLING[castleIndex]
+
+        # En Passant
+        if chessBoard.enPassant:
+            h ^= ChessBoardZobrist.EN_PASSANT[enPassantCol]
+
+        return h
+
+    @staticmethod
+    def pieceType(chessPiece: ChessPieceModel):
         returnValue = 0
         match chessPiece.type:
             case PieceType.KING:
@@ -71,35 +101,6 @@ class ChessBoardZobrist():
         return returnIndex
 
     @staticmethod
-    def computeInitValue(chessBoard: ChessBoardProtocal):
-        h = 0
-        # Pieces
-        for row in range(0, 8):
-            for col in range(0, 8):
-                chessPiece = chessBoard.board[row][col]
-
-                sq = row * 8 + col
-                if chessPiece:
-                    p_idx = ChessBoardZobrist.pieceIndex(chessPiece)
-                    h ^= ChessBoardZobrist.TABLE[p_idx][sq]
-        
-        # Side to move
-        if chessBoard.playerTurn == Player.BLACK:
-            h ^= ChessBoardZobrist.BlACK_TO_MOVE
-            
-        # Castling
-        castleIndex = ChessBoardZobrist.castleIndex(chessBoard)
-        h ^= ChessBoardZobrist.CASTLING[castleIndex]
-
-        # En Passant - 8 is No En Passant
-        enPassantCol = 8
-
-        if self.enPassant:
-            h ^= ChessBoardZobrist.EN_PASSANT[enPassantCol]
-        
-        return h
-
-    @staticmethod
     def undoMovePiece(chessBoard: ChessBoardProtocal, 
         initRow: int, initCol: int, finalRow: int, finalCol: int):
 
@@ -112,22 +113,27 @@ class ChessBoardZobrist():
         # XOR InitRow / InitCol
         startSq = initRow * 8 + initCol
         startPiece = chessBoard.board[initRow][initCol]
-        startIndex = ChessBoardZobrist.pieceIndex(startPiece)
-        chessBoard.zobristHash ^= ChessBoardZobrist.TABLE[startIndex][startSq]
+        startType = ChessBoardZobrist.pieceType(startPiece)
+        chessBoard.zobristHash ^= ChessBoardZobrist.TABLE[startType][startSq]
 
         # XOR finalRow / finalCol
         endSq = finalRow * 8 + finalCol
-        endPiece = chessBoard.board[finalRow][finalCol]
-        endIndex = ChessBoardZobrist.pieceIndex(endPiece)
-        chessBoard.zobristHash ^= ChessBoardZobrist.TABLE[endIndex][endSq]
+        chessBoard.zobristHash ^= ChessBoardZobrist.TABLE[startType][endSq]
 
     @staticmethod
-    def addOrRemovePiece(chessBoard: ChessBoardProtocal, row: int, col: int):
+    def removePiece(chessBoard: ChessBoardProtocal, initRow: int, initCol: int):
         # XOR int / col
         startSq = initRow * 8 + initCol
         startPiece = chessBoard.board[initRow][initCol]
-        startIndex = ChessBoardZobrist.pieceIndex(startPiece)
-        chessBoard.zobristHash ^= ChessBoardZobrist.TABLE[startIndex][startSq]
+        startType = ChessBoardZobrist.pieceType(startPiece)
+        chessBoard.zobristHash ^= ChessBoardZobrist.TABLE[startType][startSq]
+
+    @staticmethod
+    def restorePiece(chessBoard: ChessBoardProtocal, 
+        initRow: int, initCol: int, restorePieceType: int):
+        # XOR int / col
+        startSq = initRow * 8 + initCol
+        chessBoard.zobristHash ^= ChessBoardZobrist.TABLE[restorePieceType][startSq]
 
     @staticmethod
     def addOrRemoveQueen(chessBoard: ChessBoardProtocal, row: int, col: int):
@@ -141,89 +147,29 @@ class ChessBoardZobrist():
         chessBoard.zobristHash ^= ChessBoardZobrist.TABLE[queenIndex][endSq]
 
     @staticmethod
-    def forwardUpdate(chessBoard: ChessBoardProtocal, 
-        cmd: MoveCommand, prevCastleIndex: int, prevEnPassant: int):
-        # Forward Turn
-        chessBoard.zobristHash ^= ChessBoardZobrist.BlACK_TO_MOVE
-
-        # Remove Prev EnPassant
-
-        match cmd.moveType:
-            # Queen Side Castle
-            case MoveCommandType.QUEENSIDECASTLE:
-                # Determine the row of the Castle 
-                row = 7 if chessBoard.playerTurn == Player.BLACK else 0
-
-                # Move the King 2 steps to the left
-                ChessBoardZobrist.undoMovePiece(chessBoard, row, 4, row, 2)
-
-                # Move the Rook to the right of the king
-                ChessBoardZobrist.undoMovePiece(chessBoard, row, 0, row, 3)
-
-            # King Side Castle
-            case MoveCommandType.KINGSIDECASTLE:
-                # Determine the row of the Castle 
-                row = 7 if chessBoard.playerTurn == Player.BLACK else 0
-
-                # Move the King 2 steps to the left
-                ChessBoardZobrist.undoMovePiece(chessBoard, row, 4, row, 6)
-
-                # Move the Rook to the right of the king
-                ChessBoardZobrist.undoMovePiece(chessBoard, row, 7, row, 5)
-
-            # Move Piece
-            case MoveCommandType.MOVE:
-                # Move Starting Piece to Capture Point
-                ChessBoardZobrist.undoMovePiece(
-                    chessBoard, cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
-
-            case MoveCommandType.CAPTURE:
-                # Remove the Previous Piece
-                ChessBoardZobrist.addOrRemovePiece(chessBoard, cmd.endRow, cmd.endCol)
-
-                # Move Starting Piece to Capture Point
-                ChessBoardZobrist.undoMovePiece(
-                    chessBoard, cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
-
-            # Double Pawn Move
-            case MoveCommandType.PAWNOPENMOVE:
-                # Move the piece from start to end
-                ChessBoardZobrist.undoMovePiece(
-                    chessBoard, cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
-
-                ChessBoardZobrist.chessBoard ^= ChessBoardZobrist.en_passant[cmd.startCol]
-
-            # Promote Pawn
-            case MoveCommandType.PROMOTE:
-                # Promote MAY be a capture or a move
-                if chessBoard.board[cmd.endRow][cmd.endCol]:
-                    ChessBoardZobrist.addOrRemovePiece(chessBoard, cmd.endRow, cmd.endCol)
-
-                # Promote Piece Type is provided from above
-                ChessBoardZobrist.addOrRemoveQueen(chessBoard, cmd.endRow, cmd.endCol)
-
-                # Remove Pawn
-                ChessBoardZobrist.addOrRemovePiece(chessBoard, cmd.startRow, cmd.startCol)
-
-            # En Passant
-            case MoveCommandType.ENPASSANT:
-                # Remove En Passant Pawn
-                ChessBoardZobrist.addOrRemovePiece(chessBoard, cmd.startRow, cmd.endCol)
-
-                # Move the Pawn to the target
-                ChessBoardZobrist.addOrRemovePiece(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
-
+    def forwardCastle(chessBoard: ChessBoardProtocal, prevCastleIndex: int):
         # Unset Previous Castle Zobrist
-        chessBoard.zobristHash ^= ChessBoardZobrist.CASTLING[prevIndex]
+        chessBoard.zobristHash ^= ChessBoardZobrist.CASTLING[prevCastleIndex]
 
         # Compute new Zobrist
         castleIndex = ChessBoardZobrist.castleIndex(chessBoard)
         chessBoard.zobristHash ^= ChessBoardZobrist.CASTLING[castleIndex]
 
     @staticmethod
-    def backwardUpdate(chessBoard: ChessBoardProtocal, cmd: MoveCommand, prevIndex: int):
-        # Rollback Turn
-        chessBoard.zobristHash ^= ChessBoardZobrist.BlACK_TO_MOVE
+    def backwardCastle(chessBoard: ChessBoardProtocal, prevCastleIndex: int):
+        # Unset Current Castle Zobrist
+        castleIndex = ChessBoardZobrist.castleIndex(chessBoard)
+        chessBoard.zobristHash ^= ChessBoardZobrist.CASTLING[castleIndex]
+
+        # Set to Previous Castle Zobrist
+        chessBoard.zobristHash ^= ChessBoardZobrist.CASTLING[prevCastleIndex]
+
+    @staticmethod
+    def forwardUpdate(chessBoard: ChessBoardProtocal, cmd: MoveCommand, prevEnPassant: int):
+
+        # Remove Previous EnPassant
+        if prevEnPassant:
+            chessBoard.zobristHash ^= ChessBoardZobrist.EN_PASSANT[prevEnPassant]
 
         match cmd.moveType:
             # Queen Side Castle
@@ -256,7 +202,7 @@ class ChessBoardZobrist():
 
             case MoveCommandType.CAPTURE:
                 # Remove the Previous Piece
-                ChessBoardZobrist.addOrRemovePiece(chessBoard, cmd.endRow, cmd.endCol)
+                ChessBoardZobrist.removePiece(chessBoard, cmd.endRow, cmd.endCol)
 
                 # Move Starting Piece to Capture Point
                 ChessBoardZobrist.movePiece(
@@ -268,31 +214,107 @@ class ChessBoardZobrist():
                 ChessBoardZobrist.movePiece(
                     chessBoard, cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
 
-                ChessBoardZobrist.chessBoard ^= ChessBoardZobrist.en_passant[cmd.startCol]
+                chessBoard.zobristHash ^= ChessBoardZobrist.EN_PASSANT[cmd.startCol]
 
             # Promote Pawn
             case MoveCommandType.PROMOTE:
                 # Promote MAY be a capture or a move
                 if chessBoard.board[cmd.endRow][cmd.endCol]:
-                    ChessBoardZobrist.addOrRemovePiece(chessBoard, cmd.endRow, cmd.endCol)
+                    ChessBoardZobrist.removePiece(chessBoard, cmd.endRow, cmd.endCol)
 
                 # Promote Piece Type is provided from above
                 ChessBoardZobrist.addOrRemoveQueen(chessBoard, cmd.endRow, cmd.endCol)
 
-                # Remove Pawn
-                ChessBoardZobrist.addOrRemovePiece(chessBoard, cmd.startRow, cmd.startCol)
+                ChessBoardZobrist.removePiece(chessBoard, cmd.startRow, cmd.startCol)
 
             # En Passant
             case MoveCommandType.ENPASSANT:
                 # Remove En Passant Pawn
-                ChessBoardZobrist.addOrRemovePiece(chessBoard, cmd.startRow, cmd.endCol)
+                ChessBoardZobrist.removePiece(chessBoard, cmd.startRow, cmd.endCol)
 
                 # Move the Pawn to the target
-                ChessBoardZobrist.addOrRemovePiece(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
+                ChessBoardZobrist.movePiece(chessBoard, cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
 
-        # Unset Current Zobrist Hash
-        castleIndex = ChessBoardZobrist.castleIndex(chessBoard)
-        chessBoard.zobristHash ^= ChessBoardZobrist.CASTLING[castleIndex]
+        # Forward Turn
+        chessBoard.zobristHash ^= ChessBoardZobrist.BlACK_TO_MOVE
 
-        # Set to Previous Zobrit
-        chessBoard.zobristHash ^= ChessBoardZobrist.CASTLING[prevIndex]
+    @staticmethod
+    def backwardUpdate(chessBoard: ChessBoardProtocal, 
+        cmd: MoveCommand, restorePiece: Optional[ChessPieceModel], prevEnPassant: int):
+        # Rollback Turn
+        chessBoard.zobristHash ^= ChessBoardZobrist.BlACK_TO_MOVE
+
+        match cmd.moveType:
+            # Queen Side Castle
+            case MoveCommandType.QUEENSIDECASTLE:
+                # Determine the row of the Castle 
+                row = 7 if chessBoard.playerTurn == Player.BLACK else 0
+
+                # Move the King 2 steps to the left
+                ChessBoardZobrist.undoMovePiece(chessBoard, row, 4, row, 2)
+
+                # Move the Rook to the right of the king
+                ChessBoardZobrist.undoMovePiece(chessBoard, row, 0, row, 3)
+
+            # King Side Castle
+            case MoveCommandType.KINGSIDECASTLE:
+                # Determine the row of the Castle 
+                row = 7 if chessBoard.playerTurn == Player.BLACK else 0
+
+                # Move the King 2 steps to the left
+                ChessBoardZobrist.undoMovePiece(chessBoard, row, 4, row, 6)
+
+                # Move the Rook to the right of the king
+                ChessBoardZobrist.undoMovePiece(chessBoard, row, 7, row, 5)
+
+            # Move Piece
+            case MoveCommandType.MOVE:
+                # Move Starting Piece to Capture Point
+                ChessBoardZobrist.undoMovePiece(
+                    chessBoard, cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
+
+            case MoveCommandType.CAPTURE:
+                # Remove the Previous Piece
+                pieceType = ChessBoardZobrist.pieceType(restorePiece)
+                ChessBoardZobrist.restorePiece(chessBoard, cmd.endRow, cmd.endCol, pieceType)
+
+                # Move Starting Piece to Capture Point
+                ChessBoardZobrist.undoMovePiece(
+                    chessBoard, cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
+
+            # Double Pawn Move
+            case MoveCommandType.PAWNOPENMOVE:
+                # Move the piece from start to end
+                ChessBoardZobrist.undoMovePiece(
+                    chessBoard, cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
+
+                chessBoard.zobristHash ^= ChessBoardZobrist.EN_PASSANT[cmd.startCol]
+
+            # Promote Pawn
+            case MoveCommandType.PROMOTE:
+                # Promote Piece Type is provided from above
+                ChessBoardZobrist.addOrRemoveQueen(chessBoard, cmd.endRow, cmd.endCol)
+
+                # Promote MAY be a capture or a move
+                if chessBoard.board[cmd.endRow][cmd.endCol]:
+                    pieceType = ChessBoardZobrist.pieceType(restorePiece)
+                    ChessBoardZobrist.restorePiece(chessBoard, cmd.endRow, cmd.endCol, pieceType)
+
+                # Restore Pawn
+                newPawn = ChessPieceFactory.createChessPiece(PieceType.PAWN, cmd.startRow, cmd.startCol)
+                pawnType = ChessBoardZobrist.pieceType(newPawn)
+                ChessBoardZobrist.restorePiece(chessBoard, cmd.startRow, cmd.startCol, pawnType)
+
+            # En Passant
+            case MoveCommandType.ENPASSANT:
+                # Remove En Passant Pawn
+                ChessBoardZobrist.undoMovePiece(chessBoard, cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
+
+                # Move the Pawn to the target
+                pieceType = ChessBoardZobrist.pieceType(restorePiece)
+                ChessBoardZobrist.restorePiece(chessBoard, cmd.startRow, cmd.endCol, pieceType)
+
+        # Set to Previous EnPassant
+        if prevEnPassant:
+            chessBoard.zobristHash ^= ChessBoardZobrist.EN_PASSANT[prevEnPassant]
+        
