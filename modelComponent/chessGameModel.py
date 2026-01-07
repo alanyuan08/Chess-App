@@ -56,7 +56,7 @@ class ChessGameModel():
 
         for cmd in commandList:
             removedPiece, prevEnPassant, prevCastleIndex = self.chessBoard.movePiece(cmd)
-            score = (-1) * self._negamax(3, (-1) * beta, (-1) * alpha)
+            score = (-1) * self._negamax(4, (-1) * beta, (-1) * alpha)
             self.chessBoard.undoMove(cmd, removedPiece, prevEnPassant, prevCastleIndex)
 
             print(cmd)
