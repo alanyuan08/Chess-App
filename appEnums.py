@@ -21,3 +21,7 @@ class MoveCommandType(Enum):
     PAWNOPENMOVE = 6
     PROMOTE = 7
  
+class TTFlag(Enum):
+    EXACT = 1
+    ALPHA = 2
+    BETA = 3

@@ -4,22 +4,25 @@ from modelFactory.chessBoardFactory import ChessBoardFactory
 # Model
 from modelComponent.chessBoardModel import ChessBoardModel
 from modelComponent.moveCommand import MoveCommand
+from modelComponent.ttEntry import TTEntry
 
 # Factory
 from modelFactory.chessPieceFactory import ChessPieceFactory
 
 # Enum
-from appEnums import PieceType, Player, MoveCommandType
+from appEnums import PieceType, Player, MoveCommandType, TTFlag
 
 # Normal
 import math
+import copy
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Controller 
 class ChessGameModel():
     def __init__(self, playersArray):
         self.chessBoard = ChessBoardFactory.createChessBoard(playersArray)
 
-        # Stores the Transposition Table
+        # Stores the Transposition Table -> (value, depth, flag, cmd
         self.transpositionTable = {}
 
         # Set Human Player
@@ -43,37 +46,71 @@ class ChessGameModel():
 
         return self.chessBoard.validateMove(initRow, initCol, targetRow, targetCol, player)
 
-    # Take Opponent Turn
+    def checkTable(self, entrykey, searchDepth, alpha, beta):
+        if entrykey in self.transpositionTable:
+            entry = self.transpositionTable[entrykey]
+
+            # 3. Check if the stored information is deep enough to be useful (pruning check)
+            if entry.depth >= searchDepth:
+                # Check the flag to determine if we can cut off the search
+                if entry.flag == TTFlag.EXACT:
+                    return entry.value
+                if entry.flag == TTFlag.BETA and entry.value >= beta:
+                    # We found a move that is too good; we can prune this branch
+                    return entry.value
+                if entry.flag == TTFlag.ALPHA and entry.value <= alpha:
+                    # All moves here were too bad; we can prune this branch
+                    return entry.value
+        
+        # 5. Hash miss, no useful data found for this search
+        return None 
+
+    def storeHash(self, key: str, maxEval: int, depth: int, flag: TTFlag):
+        self.transpositionTable[key] = TTEntry(key, maxEval, depth, flag)
+
     def computeBestMove(self) -> MoveCommand:
         commandList = self.chessBoard.allValidMoves()
-        commandList.sort(key=lambda move: self._getMovePriority(move), reverse=True)
-
-        alpha = float('-inf')
-        beta = float('inf')
+        commandList.sort(key=lambda move: self._getMovePriority(self.chessBoard, move), reverse=True)
 
         bestScore = float('-inf')
         bestMove = None
 
-        for cmd in commandList:
-            removedPiece, prevEnPassant, prevCastleIndex = self.chessBoard.movePiece(cmd)
-            score = (-1) * self._negamax(3, (-1) * beta, (-1) * alpha)
-            self.chessBoard.undoMove(cmd, removedPiece, prevEnPassant, prevCastleIndex)
+        # Use ThreadPoolExecutor for concurrent search
+        with ThreadPoolExecutor() as executor:
+            # Create a board clone for each thread to avoid state conflicts
+            future_to_cmd = {
+                executor.submit(self._search_task, copy.deepcopy(self.chessBoard), cmd): cmd 
+                for cmd in commandList
+            }
 
-            print(cmd)
-            if score > bestScore:
-                bestScore = score
-                bestMove = cmd
+            for future in as_completed(future_to_cmd):
+                cmd = future_to_cmd[future]
+                try:
+                    score = future.result()
+                    print(f"Move: {cmd} | Score: {score}")
 
-            alpha = max(alpha, score)
+                    if score > bestScore:
+                        bestScore = score
+                        bestMove = cmd
+                except Exception as exc:
+                    print(f"Move {cmd} generated an exception: {exc}")
 
         return bestMove
 
+    def _search_task(self, testBoard: ChessBoardModel, cmd: MoveCommand):
+        """Worker function for individual threads."""
+        removedPiece, prevEnPassant, prevCastleIndex = testBoard.movePiece(cmd)
+        # Perform negamax on the thread-local board copy
+        # Threads automatically share self.tt_table
+        score = (-1) * self._negamax(testBoard, 5, float('-inf'), float('inf'))
+        return score
+
     # Compute Board Value - White is Positive/ Black is Negative
-    def _computeBoardValue(self) -> int:
+    def _computeBoardValue(self, testBoard: ChessBoardModel) -> int:
         returnValue = 0
 
-        phaseWeight = self._calculateGamePhase()
-        board = self.chessBoard.board
+        phaseWeight = self._calculateGamePhase(testBoard)
+        board = testBoard.board
         # Compute for Piece
         for row in range(0, 8):
             for col in range(0, 8):
@@ -87,45 +124,61 @@ class ChessGameModel():
                             self.chessBoard, phaseWeight)
 
         # Compute for Double/ Isolated Pawns
-        returnValue -= self._pawnPenalizer(Player.WHITE, phaseWeight)
-        returnValue += self._pawnPenalizer(Player.BLACK, phaseWeight)
+        returnValue -= self._pawnPenalizer(testBoard, Player.WHITE, phaseWeight)
+        returnValue += self._pawnPenalizer(testBoard, Player.BLACK, phaseWeight)
 
-        if self.chessBoard.playerTurn == Player.WHITE:
+        if testBoard.playerTurn == Player.WHITE:
             return returnValue
         else:
             return (-1) * returnValue
 
     # MinMaxSearch -> General
-    def _negamax(self, depth, alpha, beta) -> int:
-        validMoves = self.chessBoard.allValidMoves()
-        validMoves.sort(key=lambda move: self._getMovePriority(move), reverse=True)
+    def _negamax(self, testBoard: ChessBoardModel, depth: int, alpha: int, beta: int) -> int:
+        # TT Table 
+        tt_result = self.checkTable(testBoard.zobristHash, depth, alpha, beta)
+        if isinstance(tt_result, int):
+            return tt_result
+
+        validMoves = testBoard.allValidMoves()
+        validMoves.sort(key=lambda move: self._getMovePriority(testBoard, move), reverse=True)
         
         # No Valid Moves = Lose
         if len(validMoves) == 0:
-            return self.resolveEndGame()
+            return self.resolveEndGame(testBoard)
+
+        alphaOriginal = alpha  # Save the original alpha value
 
         # Termination Condition
         if depth == 0:
-            return self._quiesceneSearch(alpha, beta)
+            return self._quiesceneSearch(testBoard, alpha, beta)
         else:
             maxEval = float('-inf')
 
             for cmd in validMoves:
-                removedPiece, prevEnPassant, prevCastleIndex = self.chessBoard.movePiece(cmd)
-                score = (-1) * self._negamax(depth - 1, (-1) * beta, (-1) * alpha)
-                self.chessBoard.undoMove(cmd, removedPiece, prevEnPassant, prevCastleIndex)
+                removedPiece, prevEnPassant, prevCastleIndex = testBoard.movePiece(cmd)
+                score = (-1) * self._negamax(testBoard, depth - 1, (-1) * beta, (-1) * alpha)
+                testBoard.undoMove(cmd, removedPiece, prevEnPassant, prevCastleIndex)
 
                 maxEval = max(maxEval, score)
                 alpha = max(alpha, score)
                 
                 if alpha >= beta:
                     break
-                    
+            
+            # At the end, determine the flag
+            if maxEval <= alphaOriginal:
+                flag = TTFlag.ALPHA 
+            elif maxEval >= beta:
+                flag = TTFlag.BETA
+            else:
+                flag = TTFlag.EXACT
+
+            self.storeHash(testBoard.zobristHash, maxEval, depth, flag)
             return maxEval
 
     # MinMaxSearch -> General
-    def _quiesceneSearch(self, alpha, beta, depth = 0) -> int:
-        staticEval = self._computeBoardValue()
+    def _quiesceneSearch(self, testBoard: ChessBoardModel, alpha, beta, depth = 0) -> int:
+        staticEval = self._computeBoardValue(testBoard)
 
         if depth >= 10:
             return staticEval
@@ -136,17 +189,17 @@ class ChessGameModel():
         if staticEval > alpha:
             alpha = staticEval
 
-        validMoves = self.chessBoard.allValidMoves()
-        validMoves.sort(key=lambda move: self._getMovePriority(move), reverse=True)
+        validMoves = testBoard.allValidMoves()
+        validMoves.sort(key=lambda move: self._getMovePriority(testBoard, move), reverse=True)
 
         # No Valid Moves = Lose
         if len(validMoves) == 0:
-            return self.resolveEndGame()
+            return self.resolveEndGame(testBoard)
 
         for cmd in self._allQuiesceneMoves(validMoves):
-            removedPiece, prevEnPassant, prevCastleIndex = self.chessBoard.movePiece(cmd)
-            score = (-1) * self._quiesceneSearch((-1) * beta, (-1) * alpha, depth + 1)
-            self.chessBoard.undoMove(cmd, removedPiece, prevEnPassant, prevCastleIndex)
+            removedPiece, prevEnPassant, prevCastleIndex = testBoard.movePiece(cmd)
+            score = (-1) * self._quiesceneSearch(testBoard, (-1) * beta, (-1) * alpha, depth + 1)
+            testBoard.undoMove(cmd, removedPiece, prevEnPassant, prevCastleIndex)
 
             if score >= beta:
                 return beta
@@ -156,12 +209,12 @@ class ChessGameModel():
         return alpha
 
     # Resolve End Game -> Called when No Valid Moves
-    def resolveEndGame(self) -> int:
-        opponentAttackTargets = self.chessBoard.allOpponentCaptureTargets()
+    def resolveEndGame(self, testBoard: ChessBoardModel) -> int:
+        opponentAttackTargets = testBoard.allOpponentCaptureTargets()
 
-        kingTuple = self.chessBoard.kingTuple
+        kingTuple = testBoard.kingTuple(testBoard.playerTurn)
         if kingTuple in opponentAttackTargets:
-            if self.playerTurn == Player.WHITE:
+            if testBoard.playerTurn == Player.WHITE:
                 return float('-inf')
             else:
                 return float('inf')
@@ -179,10 +232,10 @@ class ChessGameModel():
         ))
 
     # Compute Pawn Penalizer for Isolated / Double Pawn
-    def _pawnPenalizer(self, player, phaseWeight) -> int:
+    def _pawnPenalizer(self, testBoard: ChessBoardModel, player, phaseWeight) -> int:
         filePawnCount = [0 for _ in range(8)]
 
-        board = self.chessBoard.board
+        board = testBoard.board
         for row in range(0, 8):
             for col in range(0, 8):
                 piece = board[row][col]
@@ -216,10 +269,10 @@ class ChessGameModel():
         return penalizer
 
     # Maximum Value is 24, used for early/ mid board evaluation
-    def _calculateGamePhase(self) -> int:
+    def _calculateGamePhase(self, testBoard: ChessBoardModel) -> int:
         totalPhaseWeight = 0
 
-        board = self.chessBoard.board
+        board = testBoard.board
         for row in range(0, 8):
             for col in range(0, 8):
                 if board[row][col] != None:
@@ -229,8 +282,8 @@ class ChessGameModel():
 
 
     # Compute Move Priority
-    def _getMovePriority(self, cmd: MoveCommand) -> int:
-        board = self.chessBoard.board
+    def _getMovePriority(self, testBoard: ChessBoardModel, cmd: MoveCommand) -> int:
+        board = testBoard.board
 
         # 1. Promotions (High Priority)
         if cmd.moveType == MoveCommandType.PROMOTE:
