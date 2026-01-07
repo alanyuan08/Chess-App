@@ -136,7 +136,7 @@ class ChessBoardZobrist():
         chessBoard.zobristHash ^= ChessBoardZobrist.TABLE[restorePieceType][startSq]
 
     @staticmethod
-    def addOrRemoveQueen(chessBoard: ChessBoardProtocal, row: int, col: int):
+    def addQueen(chessBoard: ChessBoardProtocal, row: int, col: int):
         queenIndex = 0
         if chessBoard.playerTurn == Player.WHITE:
             queenIndex = 1
@@ -214,7 +214,7 @@ class ChessBoardZobrist():
                 ChessBoardZobrist.movePiece(
                     chessBoard, cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
 
-                chessBoard.zobristHash ^= ChessBoardZobrist.EN_PASSANT[cmd.startCol]
+                chessBoard.zobristHash ^= ChessBoardZobrist.EN_PASSANT[cmd.endCol]
 
             # Promote Pawn
             case MoveCommandType.PROMOTE:
@@ -223,7 +223,7 @@ class ChessBoardZobrist():
                     ChessBoardZobrist.removePiece(chessBoard, cmd.endRow, cmd.endCol)
 
                 # Promote Piece Type is provided from above
-                ChessBoardZobrist.addOrRemoveQueen(chessBoard, cmd.endRow, cmd.endCol)
+                ChessBoardZobrist.addQueen(chessBoard, cmd.endRow, cmd.endCol)
 
                 ChessBoardZobrist.removePiece(chessBoard, cmd.startRow, cmd.startCol)
 
@@ -274,13 +274,13 @@ class ChessBoardZobrist():
                     chessBoard, cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
 
             case MoveCommandType.CAPTURE:
-                # Remove the Previous Piece
-                pieceType = ChessBoardZobrist.pieceType(restorePiece)
-                ChessBoardZobrist.restorePiece(chessBoard, cmd.endRow, cmd.endCol, pieceType)
-
                 # Move Starting Piece to Capture Point
                 ChessBoardZobrist.undoMovePiece(
                     chessBoard, cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
+
+                # Remove the Previous Piece
+                pieceType = ChessBoardZobrist.pieceType(restorePiece)
+                ChessBoardZobrist.restorePiece(chessBoard, cmd.endRow, cmd.endCol, pieceType)
 
             # Double Pawn Move
             case MoveCommandType.PAWNOPENMOVE:
@@ -288,12 +288,10 @@ class ChessBoardZobrist():
                 ChessBoardZobrist.undoMovePiece(
                     chessBoard, cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
 
-                chessBoard.zobristHash ^= ChessBoardZobrist.EN_PASSANT[cmd.startCol]
-
             # Promote Pawn
             case MoveCommandType.PROMOTE:
-                # Promote Piece Type is provided from above
-                ChessBoardZobrist.addOrRemoveQueen(chessBoard, cmd.endRow, cmd.endCol)
+                # Remove Queen
+                ChessBoardZobrist.removePiece(chessBoard, cmd.endRow, cmd.endCol)
 
                 # Promote MAY be a capture or a move
                 if restorePiece:
