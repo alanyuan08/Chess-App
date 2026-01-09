@@ -75,7 +75,7 @@ class ChessGameModel():
             with concurrent.futures.ProcessPoolExecutor(max_workers=multiprocessing.cpu_count() - 1) as executor:
                 # Note: You need to pass all necessary board state parameters to the worker function
                 futures = [
-                    executor.submit(self.chessBoard._negamax_worker, cmd, alpha, beta, 3) 
+                    executor.submit(self.chessBoard._negamax_worker, cmd, alpha, beta, 4) 
                     for cmd in remaining_moves
                 ]
                 
@@ -84,8 +84,6 @@ class ChessGameModel():
                     if score > bestScore:
                         bestScore = score
                         bestMove = move
-                        # In a true YBWC, we'd update alpha and potentially cancel running jobs 
-                        # that can no longer reach the new alpha/beta window.
 
         return bestMove
 
