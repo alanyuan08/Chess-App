@@ -86,7 +86,7 @@ class ChessBoardModel():
 
         # No Valid Moves = Lose
         if len(validMoves) == 0:
-            score = self.resolveEndGame(ply)
+            return self.resolveEndGame(ply)
 
         # Termination Condition
         if depth == 0:
