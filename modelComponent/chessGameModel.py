@@ -56,7 +56,7 @@ class ChessGameModel():
             return None
 
         with multiprocessing.Manager() as manager:
-            # --- STEP 1: Search the First (PV) Move Sequentially ---
+            # Compute the most optimal search move
             cmd1 = commandList[0]
             removedPiece, prevEnPassant, prevCastleIndex = self.chessBoard.movePiece(cmd1)
             # Search the first move normally to get a strong alpha value quickly
@@ -68,12 +68,10 @@ class ChessGameModel():
                 bestMove = cmd1
                 alpha = max(alpha, score) # Establish the strong alpha
 
-            # --- STEP 2: Parallelize the Remaining ("Younger Brother") Moves ---
-            # We now have a tight alpha. Pass this tight window to workers.
+            # Younger Brother Parallel Searcb
             remaining_moves = commandList[1:]
             
             with concurrent.futures.ProcessPoolExecutor(max_workers=multiprocessing.cpu_count() - 1) as executor:
-                # Note: You need to pass all necessary board state parameters to the worker function
                 futures = [
                     executor.submit(self.chessBoard._negamax_worker, cmd, alpha, beta, 4) 
                     for cmd in remaining_moves
