@@ -143,12 +143,12 @@ class ChessBoardModel():
     def resolveEndGame(self) -> int:
         opponentAttackTargets = self.allOpponentCaptureTargets()
 
-        kingTuple = self.kingTuple
+        kingTuple = self.kingTuple(self.playerTurn)
         if kingTuple in opponentAttackTargets:
             if self.playerTurn == Player.WHITE:
-                return float('-inf')
+                return 1000000
             else:
-                return float('inf')
+                return -1000000
         else:
             return 0
 
