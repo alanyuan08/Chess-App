@@ -27,7 +27,7 @@ class ChessBoardViewModel():
 
         # White Moves First
         if self.computerTurn():
-            # Execute
+            # Run the compute for the Opponent's Move
             self.threadpool.start(Worker(
                 self.stopGapWhiteOpening
             ))

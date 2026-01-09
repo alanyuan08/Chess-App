@@ -145,12 +145,10 @@ class ChessBoardModel():
 
         kingTuple = self.kingTuple(self.playerTurn)
         if kingTuple in opponentAttackTargets:
-            if self.playerTurn == Player.WHITE:
-                return 1000000
-            else:
-                return -1000000
-        else:
-            return 0
+            return -1000000 
+        
+        # Otherwise, it is a Stalemate (Draw)
+        return 0
 
     # Return all Capture Moves
     def _allQuiesceneMoves(self, validMoves: list[MoveCommand]) -> list[MoveCommand]:
