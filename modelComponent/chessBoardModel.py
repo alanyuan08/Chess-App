@@ -80,13 +80,13 @@ class ChessBoardModel():
             return (-1) * returnValue
 
     # MinMaxSearch -> General
-    def _negamax(self, depth: int, alpha: int, beta: int) -> int:
+    def _negamax(self, depth: int, alpha: int, beta: int, ply: int = 0) -> int:
         validMoves = self.allValidMoves()
         validMoves.sort(key=lambda move: self._getMovePriority(move), reverse=True)
 
         # No Valid Moves = Lose
         if len(validMoves) == 0:
-            return self.resolveEndGame()
+            score = self.resolveEndGame(ply)
 
         # Termination Condition
         if depth == 0:
@@ -96,7 +96,7 @@ class ChessBoardModel():
 
             for cmd in validMoves:
                 removedPiece, prevEnPassant, prevCastleIndex = self.movePiece(cmd)
-                score = (-1) * self._negamax(depth - 1, (-1) * beta, (-1) * alpha)
+                score = (-1) * self._negamax(depth - 1, (-1) * beta, (-1) * alpha, ply + 1)
                 self.undoMove(cmd, removedPiece, prevEnPassant, prevCastleIndex)
 
                 maxEval = max(maxEval, score)
@@ -107,12 +107,21 @@ class ChessBoardModel():
 
             return maxEval
 
+
+    # Resolve End Game -> Called when No Valid Moves
+    def resolveEndGame(self, ply: int) -> int:
+        opponentAttackTargets = self.allOpponentCaptureTargets()
+
+        kingTuple = self.kingTuple(self.playerTurn)
+        if kingTuple in opponentAttackTargets:
+            return -1000000 + ply 
+        
+        # Otherwise, it is a Stalemate (Draw)
+        return 0
+
     # MinMaxSearch -> General
     def _quiesceneSearch(self, alpha: int, beta: int, depth: int = 0) -> int:
         staticEval = self._computeBoardValue()
-
-        if depth >= 10:
-            return staticEval
 
         if staticEval >= beta:
             return beta
@@ -120,12 +129,11 @@ class ChessBoardModel():
         if staticEval > alpha:
             alpha = staticEval
 
+        if depth >= 10:
+            return staticEval
+
         validMoves = self.allValidMoves()
         validMoves.sort(key=lambda move: self._getMovePriority(move), reverse=True)
-
-        # No Valid Moves = Lose
-        if len(validMoves) == 0:
-            return self.resolveEndGame()
 
         for cmd in self._allQuiesceneMoves(validMoves):
             removedPiece, prevEnPassant, prevCastleIndex = self.movePiece(cmd)
@@ -138,17 +146,6 @@ class ChessBoardModel():
                 alpha = score
 
         return alpha
-
-    # Resolve End Game -> Called when No Valid Moves
-    def resolveEndGame(self) -> int:
-        opponentAttackTargets = self.allOpponentCaptureTargets()
-
-        kingTuple = self.kingTuple(self.playerTurn)
-        if kingTuple in opponentAttackTargets:
-            return -1000000 
-        
-        # Otherwise, it is a Stalemate (Draw)
-        return 0
 
     # Return all Capture Moves
     def _allQuiesceneMoves(self, validMoves: list[MoveCommand]) -> list[MoveCommand]:
