@@ -11,6 +11,10 @@ from modelFactory.chessPieceFactory import ChessPieceFactory
 # Enum
 from appEnums import PieceType, Player, MoveCommandType
 
+# Multi Process
+import multiprocessing
+import concurrent.futures
+
 # Controller 
 class ChessGameModel():
     def __init__(self, playersArray):
@@ -48,17 +52,40 @@ class ChessGameModel():
         bestScore = float('-inf')
         bestMove = None
 
-        for cmd in commandList:
-            removedPiece, prevEnPassant, prevCastleIndex = self.chessBoard.movePiece(cmd)
-            score = (-1) * self.chessBoard._negamax(3, (-1) * beta, (-1) * alpha)
-            self.chessBoard.undoMove(cmd, removedPiece, prevEnPassant, prevCastleIndex)
+        if len(commandList) == 0:
+            return None
 
-            print(cmd)
+        with multiprocessing.Manager() as manager:
+            # --- STEP 1: Search the First (PV) Move Sequentially ---
+            cmd1 = commandList[0]
+            removedPiece, prevEnPassant, prevCastleIndex = self.chessBoard.movePiece(cmd1)
+            # Search the first move normally to get a strong alpha value quickly
+            score = (-1) * self.chessBoard._negamax(4, (-1) * beta, (-1) * alpha) 
+            self.chessBoard.undoMove(cmd1, removedPiece, prevEnPassant, prevCastleIndex)
+
             if score > bestScore:
                 bestScore = score
-                bestMove = cmd
+                bestMove = cmd1
+                alpha = max(alpha, score) # Establish the strong alpha
 
-            alpha = max(alpha, score)
+            # --- STEP 2: Parallelize the Remaining ("Younger Brother") Moves ---
+            # We now have a tight alpha. Pass this tight window to workers.
+            remaining_moves = commandList[1:]
+            
+            with concurrent.futures.ProcessPoolExecutor(max_workers=multiprocessing.cpu_count() - 1) as executor:
+                # Note: You need to pass all necessary board state parameters to the worker function
+                futures = [
+                    executor.submit(self.chessBoard._negamax_worker, cmd, alpha, beta, 3) 
+                    for cmd in remaining_moves
+                ]
+                
+                for future in concurrent.futures.as_completed(futures):
+                    move, score = future.result()
+                    if score > bestScore:
+                        bestScore = score
+                        bestMove = move
+                        # In a true YBWC, we'd update alpha and potentially cancel running jobs 
+                        # that can no longer reach the new alpha/beta window.
 
         return bestMove
 

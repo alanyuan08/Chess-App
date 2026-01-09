@@ -12,6 +12,7 @@ from modelFactory.chessPieceFactory import ChessPieceFactory
 # Standard
 import math
 from typing import Optional, Union
+import copy
 
 # Controller 
 class ChessBoardModel():
@@ -41,6 +42,16 @@ class ChessBoardModel():
 
         # Zobrist Hash
         self.zobristHash = ChessBoardZobrist.computeInitValue(self)
+
+    # This worker runs in a separate process
+    def _negamax_worker(self, move_to_search, current_alpha, current_beta, depth):
+        newBoard = copy.deepcopy(self)
+        removedPiece, prevEnPassant, prevCastleIndex = newBoard.movePiece(move_to_search)
+        
+        # We search with the narrow window established by the PV move
+        score = (-1) * newBoard._negamax(depth - 1, (-1) * current_beta, (-1) * current_alpha)
+                
+        return move_to_search, score
 
     # Compute Board Value - White is Positive/ Black is Negative
     def _computeBoardValue(self) -> int:
@@ -72,7 +83,7 @@ class ChessBoardModel():
     def _negamax(self, depth: int, alpha: int, beta: int) -> int:
         validMoves = self.allValidMoves()
         validMoves.sort(key=lambda move: self._getMovePriority(move), reverse=True)
-        
+
         # No Valid Moves = Lose
         if len(validMoves) == 0:
             return self.resolveEndGame()
@@ -93,7 +104,7 @@ class ChessBoardModel():
                 
                 if alpha >= beta:
                     break
-                    
+
             return maxEval
 
     # MinMaxSearch -> General
