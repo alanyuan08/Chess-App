@@ -8,11 +8,13 @@ class CommunicatorProxy(QObject):
 	# Item -> Controller
 	move_request = Signal(int, int, int, int, Player)
 
-	def signal_move_request(self, initRow, initCol, newRow, newCol, player):
+	def signal_move_request(self, initRow: int, initCol: int, 
+		newRow: int, newCol: int, player: Player):
 		self.move_request.emit(initRow, initCol, newRow, newCol, player)
 
 	# Controller -> Item
-	update_request = Signal(MoveCommand)
+	update_request = Signal(MoveCommand, Player)
 
-	def signal_update_request(self, moveCommand: MoveCommand):
-		self.update_request.emit(moveCommand)
+	def signal_update_request(self, moveCommand: MoveCommand, 
+		newPlayerTurn: Player):
+		self.update_request.emit(moveCommand, newPlayerTurn)

@@ -47,7 +47,8 @@ class ChessBoardViewModel():
 
         self.chessGameModel.movePiece(cmd)
         # Communicate the command to FrontEnd
-        self.communicatorProxy.signal_update_request(cmd)
+        self.communicatorProxy.signal_update_request(cmd,
+            self.chessGameModel.gamePlayerTurn)
 
     def computerTurn(self):
         gameModel = self.chessGameModel
@@ -66,7 +67,8 @@ class ChessBoardViewModel():
             # Move for the Chess Model
             self.chessGameModel.movePiece(moveCommand)
             # Communicate the command to FrontEnd
-            self.communicatorProxy.signal_update_request(moveCommand)
+            self.communicatorProxy.signal_update_request(moveCommand,
+                self.chessGameModel.gamePlayerTurn)
 
             if self.computerTurn():
                 # Run the compute for the Opponent's Move
@@ -81,7 +83,8 @@ class ChessBoardViewModel():
         if opponentCmd != None:
             self.chessGameModel.movePiece(opponentCmd)
             # Communicate the command to FrontEnd
-            self.communicatorProxy.signal_update_request(opponentCmd)
+            self.communicatorProxy.signal_update_request(opponentCmd, 
+                self.chessGameModel.gamePlayerTurn)
         else:
             raise ValueError("No move from opponent")
 

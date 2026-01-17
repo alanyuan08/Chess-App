@@ -14,14 +14,12 @@ from viewModelComponent.chessBoardViewModel import ChessBoardViewModel
 from modelComponent.chessGameModel import ChessGameModel
 
 if __name__ == '__main__':
-	sys.setrecursionlimit(3000)
-
 	app = QApplication(sys.argv)
 
 	# Init Scene + View
-	scene = QGraphicsScene(0, 0, 720, 720)
+	scene = QGraphicsScene(0, 0, 720, 840)
 	view = QGraphicsView(scene)
-	view.setFixedSize(720, 720)
+	view.setFixedSize(720, 840)
 
 	# Create Chess Game Moded / ChessBoard/ Chess Piece Model Components
 	chessGameModel = ChessGameModel([Player.BLACK])
