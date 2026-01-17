@@ -44,7 +44,7 @@ class ChessBoardView(QGraphicsPixmapItem):
 		# Setup Player Sidebars
 		if len(chessGameModel.humanPlayers) == 2:
 			PlayerInfo(Player.WHITE, "Player 1", self)
-			PlayerInfo(Player.BLACK, "Player 1", self)
+			PlayerInfo(Player.BLACK, "Player 2", self)
 
 		elif len(chessGameModel.humanPlayers) == 0:
 			PlayerInfo(Player.WHITE, "Computer 1", self)
