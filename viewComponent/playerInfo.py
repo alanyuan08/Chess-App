@@ -53,3 +53,14 @@ class PlayerInfo(QGraphicsPixmapItem):
 			"<h1 style='color: white;'>" + newText + "</h1>"
 		)
 
+	def updateWinLoss(self, playerLose: bool):
+		newText = self.playerName + " | "
+		if playerLose:
+			newText += "Player Lose"
+		else:
+			newText += "Player Win"
+
+		self.textItem.setHtml(
+			"<h1 style='color: white;'>" + newText + "</h1>"
+		)
+

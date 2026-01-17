@@ -95,6 +95,14 @@ class ChessBoardView(QGraphicsPixmapItem):
 				else:
 					item.updateTurn(False)
 
+	def updateWinLoss(self, playerLose: Player):
+		for item in self.childItems():
+			if isinstance(item, PlayerInfo):
+				if item.player == playerLose:
+					item.updateTurn(True)
+				else:
+					item.updateTurn(False)
+
 	# The backend is responsible for checking game logic
 	def updatePosition(self, cmd: MoveCommand, playerTurn: Player):
 		self.setPlayerInfoTurn(playerTurn)

@@ -20,6 +20,7 @@ class ChessBoardViewModel():
         # Backend ChessBoard Game
         self.chessGameModel = chessBoardModel
         self.communicatorProxy.update_request.connect(chessBoardView.updatePosition)
+        self.communicatorProxy.player_lose.connect(chessBoardView.updateWinLoss)
         chessBoardView.connectViewModel(self)
 
         # Compute Opponent Turn ThreadPool 
@@ -86,7 +87,8 @@ class ChessBoardViewModel():
             self.communicatorProxy.signal_update_request(opponentCmd, 
                 self.chessGameModel.gamePlayerTurn)
         else:
-            raise ValueError("No move from opponent")
+            self.communicatorProxy.signal_player_lose( 
+                self.chessGameModel.gamePlayerTurn)
 
 class Worker(QRunnable):
     def __init__(self, fn, *args, **kwargs):
