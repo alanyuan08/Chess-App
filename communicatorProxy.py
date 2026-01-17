@@ -19,7 +19,7 @@ class CommunicatorProxy(QObject):
 		newPlayerTurn: Player):
 		self.update_request.emit(moveCommand, newPlayerTurn)
 
-	# Controller -> Item
+	# Controller -> Win / Loss
 	player_lose = Signal(Player)
 
 	def signal_player_lose(self, playerLose: Player):

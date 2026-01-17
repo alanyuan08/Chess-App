@@ -26,11 +26,18 @@ class ChessGameModel():
         # Set Game Turn 
         self.gamePlayerTurn = Player.WHITE
 
+        # Set Player Lose
+        self.playerLose = None
+
     # Move Piece
     def movePiece(self, cmd: MoveCommand):
         self.chessBoard.movePiece(cmd)
 
         self.gamePlayerTurn = ChessBoardModel.opponent(self.gamePlayerTurn)
+
+        # Set Player Loss
+        if len(self.chessBoard.allValidMoves()) == 0:
+            self.playerLose = self.gamePlayerTurn
 
     # Validate Move
     def validateMove(self, initRow: int, initCol: int, targetRow: int, 

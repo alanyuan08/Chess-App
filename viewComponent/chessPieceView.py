@@ -47,7 +47,6 @@ class ChessPieceView(QGraphicsPixmapItem):
 
 	@staticmethod
 	def returnImageURL(player: Player, chessModel: ChessPieceModel):
-
 		url = "img/"
 		match player:
 			case Player.WHITE:
@@ -73,7 +72,6 @@ class ChessPieceView(QGraphicsPixmapItem):
 
 	@staticmethod
 	def returnQueenURL(player: Player):
-
 		url = "img/"
 		match player:
 			case Player.WHITE:

@@ -16,6 +16,8 @@ from modelComponent.chessGameModel import ChessGameModel
 if __name__ == '__main__':
 	app = QApplication(sys.argv)
 
+	# Init Color Selection
+
 	# ChessBoard View
 	scene = QGraphicsScene(0, 0, 720, 840)
 	view = QGraphicsView(scene)

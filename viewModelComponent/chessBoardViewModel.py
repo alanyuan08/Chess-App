@@ -71,24 +71,30 @@ class ChessBoardViewModel():
             self.communicatorProxy.signal_update_request(moveCommand,
                 self.chessGameModel.gamePlayerTurn)
 
-            if self.computerTurn():
-                # Run the compute for the Opponent's Move
-                self.threadpool.start(Worker(
-                    self.takeOpponentTurn
-                ))
+            # Update Win / Loss
+            if self.chessGameModel.playerLose != None:
+                self.communicatorProxy.signal_player_lose(
+                    self.chessGameModel.playerLose)
+            else:
+                if self.computerTurn():
+                    # Run the compute for the Opponent's Move
+                    self.threadpool.start(Worker(
+                        self.takeOpponentTurn
+                    ))
 
     def takeOpponentTurn(self):
         # Opponent Takes Turn
         opponentCmd = self.chessGameModel.computeBestMove()
 
-        if opponentCmd != None:
-            self.chessGameModel.movePiece(opponentCmd)
-            # Communicate the command to FrontEnd
-            self.communicatorProxy.signal_update_request(opponentCmd, 
-                self.chessGameModel.gamePlayerTurn)
-        else:
-            self.communicatorProxy.signal_player_lose( 
-                self.chessGameModel.gamePlayerTurn)
+        self.chessGameModel.movePiece(opponentCmd)
+        # Communicate the command to FrontEnd
+        self.communicatorProxy.signal_update_request(opponentCmd, 
+            self.chessGameModel.gamePlayerTurn)
+
+        # Update Win / Loss
+        if self.chessGameModel.playerLose != None:
+            self.communicatorProxy.signal_player_lose(
+                self.chessGameModel.playerLose)
 
 class Worker(QRunnable):
     def __init__(self, fn, *args, **kwargs):

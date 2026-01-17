@@ -1,11 +1,7 @@
-from PySide6.QtCore import Signal, QObject
-from PySide6.QtWidgets import QWidget, QGraphicsScene, QGraphicsView, \
-	QApplication, QGraphicsItem, QGraphicsPixmapItem,QGraphicsTextItem, QGraphicsSceneMouseEvent
-from PySide6.QtGui import QPixmap
-import sys
+from PySide6.QtWidgets import QGraphicsPixmapItem, QGraphicsTextItem
 
 # Import Enums
-from appEnums import PieceType, Player, MoveCommandType
+from appEnums import PieceType, Player
 
 # Import Model
 from modelComponent.chessPieceModel import ChessPieceModel
@@ -15,8 +11,6 @@ from modelComponent.moveCommand import MoveCommand
 # Import View
 from viewComponent.chessPieceView import ChessPieceView
 
-# Import ViewModel
-from viewModelComponent.chessBoardViewModel import ChessBoardViewModel
 
 # QGraphics for ChessBoard
 class PlayerInfo(QGraphicsPixmapItem):
@@ -53,9 +47,9 @@ class PlayerInfo(QGraphicsPixmapItem):
 			"<h1 style='color: white;'>" + newText + "</h1>"
 		)
 
-	def updateWinLoss(self, playerLose: bool):
+	def playerLoss(self, playerLoss: bool):
 		newText = self.playerName + " | "
-		if playerLose:
+		if playerLoss:
 			newText += "Player Lose"
 		else:
 			newText += "Player Win"
