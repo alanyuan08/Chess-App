@@ -32,7 +32,6 @@ class ChessGameModel():
     # Move Piece
     def movePiece(self, cmd: MoveCommand):
         self.chessBoard.movePiece(cmd)
-
         self.gamePlayerTurn = ChessBoardModel.opponent(self.gamePlayerTurn)
 
         # Set Player Loss

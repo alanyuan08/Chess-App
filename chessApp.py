@@ -16,7 +16,15 @@ from modelComponent.chessGameModel import ChessGameModel
 if __name__ == '__main__':
 	app = QApplication(sys.argv)
 
-	# Init Color Selection
+	humanPlayer = [Player.BLACK, Player.WHITE]
+
+	# Set Human Player
+	if len(sys.argv) > 1:
+	    match(sys.argv[1]):
+	    	case "white":
+	    		humanPlayer = [Player.WHITE]
+	    	case "black":
+	    		humanPlayer = [Player.BLACK]
 
 	# ChessBoard View
 	scene = QGraphicsScene(0, 0, 720, 840)
@@ -24,7 +32,7 @@ if __name__ == '__main__':
 	view.setFixedSize(720, 840)
 
 	# Create Chess Game Moded / ChessBoard/ Chess Piece Model Components
-	chessGameModel = ChessGameModel([Player.BLACK])
+	chessGameModel = ChessGameModel(humanPlayer)
 
 	# Create View Components
 	chessBoardView = ChessBoardView(scene, chessGameModel)

@@ -96,6 +96,7 @@ class ChessBoardViewModel():
             self.communicatorProxy.signal_player_lose(
                 self.chessGameModel.playerLose)
 
+
 class Worker(QRunnable):
     def __init__(self, fn, *args, **kwargs):
         super().__init__()
