@@ -20,11 +20,17 @@ class ChessBoardViewModel():
         # Backend ChessBoard Game
         self.chessGameModel = chessBoardModel
         self.communicatorProxy.update_request.connect(chessBoardView.updatePosition)
-        self.communicatorProxy.player_lose.connect(chessBoardView.updateWinLoss)
+        self.communicatorProxy.game_state.connect(chessBoardView.updateGameState)
         chessBoardView.connectViewModel(self)
 
         # Compute Opponent Turn ThreadPool 
         self.threadpool = QThreadPool()
+
+        # Init Game State
+        self.communicatorProxy.signal_game_state(
+            self.chessGameModel.gameState, 
+            self.chessGameModel.gamePlayerTurn
+        )
 
         # White Moves First
         if self.computerTurn():
@@ -48,8 +54,13 @@ class ChessBoardViewModel():
 
         self.chessGameModel.movePiece(cmd)
         # Communicate the command to FrontEnd
-        self.communicatorProxy.signal_update_request(cmd,
-            self.chessGameModel.gamePlayerTurn)
+        self.communicatorProxy.signal_update_request(cmd)
+
+        # Update Game State
+        self.communicatorProxy.signal_game_state(
+            self.chessGameModel.gameState, 
+            self.chessGameModel.gamePlayerTurn
+        )
 
     def computerTurn(self):
         gameModel = self.chessGameModel
@@ -68,19 +79,19 @@ class ChessBoardViewModel():
             # Move for the Chess Model
             self.chessGameModel.movePiece(moveCommand)
             # Communicate the command to FrontEnd
-            self.communicatorProxy.signal_update_request(moveCommand,
-                self.chessGameModel.gamePlayerTurn)
+            self.communicatorProxy.signal_update_request(moveCommand)
 
-            # Update Win / Loss
-            if self.chessGameModel.playerLose != None:
-                self.communicatorProxy.signal_player_lose(
-                    self.chessGameModel.playerLose)
-            else:
-                if self.computerTurn():
-                    # Run the compute for the Opponent's Move
-                    self.threadpool.start(Worker(
-                        self.takeOpponentTurn
-                    ))
+            # Update Game State
+            self.communicatorProxy.signal_game_state(
+                self.chessGameModel.gameState, 
+                self.chessGameModel.gamePlayerTurn
+            )
+
+            # Run the compute for the Opponent's Move
+            if self.computerTurn():
+                self.threadpool.start(Worker(
+                    self.takeOpponentTurn
+                ))
 
     def takeOpponentTurn(self):
         # Opponent Takes Turn
@@ -88,13 +99,13 @@ class ChessBoardViewModel():
 
         self.chessGameModel.movePiece(opponentCmd)
         # Communicate the command to FrontEnd
-        self.communicatorProxy.signal_update_request(opponentCmd, 
-            self.chessGameModel.gamePlayerTurn)
+        self.communicatorProxy.signal_update_request(opponentCmd)
 
-        # Update Win / Loss
-        if self.chessGameModel.playerLose != None:
-            self.communicatorProxy.signal_player_lose(
-                self.chessGameModel.playerLose)
+        # Update Game State
+        self.communicatorProxy.signal_game_state(
+            self.chessGameModel.gameState, 
+            self.chessGameModel.gamePlayerTurn
+        )
 
 
 class Worker(QRunnable):

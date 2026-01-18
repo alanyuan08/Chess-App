@@ -1,5 +1,5 @@
 from PySide6.QtCore import Signal, QObject
-from appEnums import Player
+from appEnums import Player, GameState
 
 # Models
 from modelComponent.moveCommand import MoveCommand
@@ -13,14 +13,13 @@ class CommunicatorProxy(QObject):
 		self.move_request.emit(initRow, initCol, newRow, newCol, player)
 
 	# Controller -> Item
-	update_request = Signal(MoveCommand, Player)
+	update_request = Signal(MoveCommand)
 
-	def signal_update_request(self, moveCommand: MoveCommand, 
-		newPlayerTurn: Player):
-		self.update_request.emit(moveCommand, newPlayerTurn)
+	def signal_update_request(self, moveCommand: MoveCommand):
+		self.update_request.emit(moveCommand)
 
-	# Controller -> Win / Loss
-	player_lose = Signal(Player)
+	# Controller -> Game state
+	game_state = Signal(GameState, Player)
 
-	def signal_player_lose(self, playerLose: Player):
-		self.player_lose.emit(playerLose)
+	def signal_game_state(self, gameState: GameState, playerTurn: Player):
+		self.game_state.emit(gameState, playerTurn)

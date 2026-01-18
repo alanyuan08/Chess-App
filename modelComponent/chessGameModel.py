@@ -9,7 +9,7 @@ from modelComponent.moveCommand import MoveCommand
 from modelFactory.chessPieceFactory import ChessPieceFactory
 
 # Enum
-from appEnums import PieceType, Player, MoveCommandType
+from appEnums import PieceType, Player, MoveCommandType, GameState
 
 # Multi Process
 import multiprocessing
@@ -27,7 +27,10 @@ class ChessGameModel():
         self.gamePlayerTurn = Player.WHITE
 
         # Set Player Lose
-        self.playerLose = None
+        self.gameState = GameState.PLAYING
+
+        # Previous Move
+        self.previousMoves = []
 
     # Move Piece
     def movePiece(self, cmd: MoveCommand):
@@ -36,7 +39,12 @@ class ChessGameModel():
 
         # Set Player Loss
         if len(self.chessBoard.allValidMoves()) == 0:
-            self.playerLose = self.gamePlayerTurn
+            if self.gamePlayerTurn == Player.WHITE:
+                self.gameState = GameState.BLACKWIN
+            else:
+                self.gameState = GameState.WHITE
+
+        # Compute Draw
 
     # Validate Move
     def validateMove(self, initRow: int, initCol: int, targetRow: int, 

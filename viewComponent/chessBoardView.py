@@ -87,26 +87,13 @@ class ChessBoardView(QGraphicsPixmapItem):
 					yCoordinate = (7 - item.row) * 90
 					item.setPos(xCoordinate, yCoordinate)
 
-	def setPlayerInfoTurn(self, newPlayerTurn: Player):
+	def updateGameState(self, gameState: GameState, playerTurn: Player):
 		for item in self.childItems():
 			if isinstance(item, PlayerInfo):
-				if item.player == newPlayerTurn:
-					item.updateTurn(True)
-				else:
-					item.updateTurn(False)
-
-	def updateWinLoss(self, playerLoss: Player):
-		for item in self.childItems():
-			if isinstance(item, PlayerInfo):
-				if item.player == playerLoss:
-					item.playerLoss(True)
-				else:
-					item.playerLoss(False)
+				item.updateGameState(gameState, playerTurn)
 
 	# The backend is responsible for checking game logic
-	def updatePosition(self, cmd: MoveCommand, playerTurn: Player):
-		self.setPlayerInfoTurn(playerTurn)
-
+	def updatePosition(self, cmd: MoveCommand):
 		match cmd.moveType:
 			# Move Piece
 			case MoveCommandType.CAPTURE:

@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import QGraphicsPixmapItem, QGraphicsTextItem
 
 # Import Enums
-from appEnums import PieceType, Player
+from appEnums import PieceType, Player, GameState
 
 # Import Model
 from modelComponent.chessPieceModel import ChessPieceModel
@@ -29,30 +29,22 @@ class PlayerInfo(QGraphicsPixmapItem):
 		else:
 			self.setPos(0 + padding, -60 + padding)
 
-		newText = self.playerName + " | "
-		if self.playerTurn:
-			newText += "Player Turn"
-		self.textItem.setHtml(
-				"<h1 style='color: white;'>" + newText + "</h1>"
-			)
-
-	def updateTurn(self, playerTurn: bool):
-		self.playerTurn = playerTurn
-
-		newText = self.playerName + " | "
-		if self.playerTurn:
-			newText += "Player Turn"
-
-		self.textItem.setHtml(
-			"<h1 style='color: white;'>" + newText + "</h1>"
-		)
-
-	def playerLoss(self, playerLoss: bool):
-		newText = self.playerName + " | "
-		if playerLoss:
-			newText += "Player Lose"
+	def updateGameState(self, gameState: GameState, playerTurn: Player):
+		if playerTurn == self.player:
+			self.playerTurn = True
 		else:
+			self.playerTurn = False
+
+		newText = self.playerName + " | "
+
+		if gameState == GameState.PLAYING:
+			if self.playerTurn:
+				newText += "Active Turn"
+		elif (self.player == Player.WHITE and gameState == GameState.WHITEWIN) or \
+			(self.player == Player.BLACK and gameState == GameState.BLACKWIN):
 			newText += "Player Win"
+		elif GameState.DRAW:
+			newText += "Draw"
 
 		self.textItem.setHtml(
 			"<h1 style='color: white;'>" + newText + "</h1>"

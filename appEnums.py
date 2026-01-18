@@ -12,6 +12,12 @@ class Player(Enum):
 	WHITE = 1
 	BLACK = 2
 
+class GameState(Enum):
+	PLAYING = 1
+	BLACKWIN = 2
+	WHITEWIN = 3
+	DRAW = 4
+
 class MoveCommandType(Enum):
     MOVE = 1
     QUEENSIDECASTLE = 2
