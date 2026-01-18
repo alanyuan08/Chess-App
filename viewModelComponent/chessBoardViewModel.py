@@ -36,31 +36,8 @@ class ChessBoardViewModel():
         if self.computerTurn():
             # Run the compute for the Opponent's Move
             self.threadpool.start(Worker(
-                self.stopGapWhiteOpening
+                self.takeOpponentTurn
             ))
-
-    # This is a stop-gap to introduce variance if white is going first
-    def stopGapWhiteOpening(self):
-        kingPawn = MoveCommand(1, 4, 3, 4, MoveCommandType.PAWNOPENMOVE)
-        queenPawn = MoveCommand(1, 3, 3, 3, MoveCommandType.PAWNOPENMOVE)
-
-        kingKnight = MoveCommand(0, 1, 2, 2, MoveCommandType.MOVE)
-        queenKnight = MoveCommand(0, 6, 2, 5, MoveCommandType.MOVE)
-
-        returnArray = [kingPawn, queenPawn, kingKnight, queenKnight]
-        result = random.choice([0, 1, 2, 3])
-
-        cmd = returnArray[result]
-
-        self.chessGameModel.movePiece(cmd)
-        # Communicate the command to FrontEnd
-        self.communicatorProxy.signal_update_request(cmd)
-
-        # Update Game State
-        self.communicatorProxy.signal_game_state(
-            self.chessGameModel.gameState, 
-            self.chessGameModel.gamePlayerTurn
-        )
 
     def computerTurn(self):
         gameModel = self.chessGameModel
@@ -76,8 +53,9 @@ class ChessBoardViewModel():
             initCol, targetRow, targetCol, player)
 
         if moveCommand != None:
-            # Move for the Chess Model
+            # Move the Chess Piece
             self.chessGameModel.movePiece(moveCommand)
+
             # Communicate the command to FrontEnd
             self.communicatorProxy.signal_update_request(moveCommand)
 
@@ -94,10 +72,12 @@ class ChessBoardViewModel():
                 ))
 
     def takeOpponentTurn(self):
-        # Opponent Takes Turn
+        # Compute Opponent Move
         opponentCmd = self.chessGameModel.computeBestMove()
 
+        # Move the Chess Piece
         self.chessGameModel.movePiece(opponentCmd)
+
         # Communicate the command to FrontEnd
         self.communicatorProxy.signal_update_request(opponentCmd)
 

@@ -5,7 +5,6 @@ from appEnums import PieceType, Player, MoveCommandType
 from modelComponent.moveCommand import MoveCommand
 from modelComponent.chessPieceModel import ChessPieceModel
 from modelComponent.chessBoardZobrist import ChessBoardZobrist
-from modelComponent.openingMoveBook import OpeningMovebook, rootCmd
 
 # Factory
 from modelFactory.chessPieceFactory import ChessPieceFactory
@@ -44,18 +43,15 @@ class ChessBoardModel():
         # Zobrist Hash
         self.zobristHash = ChessBoardZobrist.computeInitValue(self)
 
-        # Opening HandBook
-        self.openingCmd = rootCmd
-
     # This worker runs in a separate process
-    def _negamax_worker(self, move_to_search, current_alpha, current_beta, depth):
+    def _negamax_worker(self, cmd: MoveCommand, currAlpha: int, currBeta: int, depth: int) -> (MoveCommand, int):
         newBoard = copy.deepcopy(self)
-        removedPiece, prevEnPassant, prevCastleIndex = newBoard.movePiece(move_to_search)
+        removedPiece, prevEnPassant, prevCastleIndex = newBoard.movePiece(cmd)
         
         # We search with the narrow window established by the PV move
-        score = (-1) * newBoard._negamax(depth - 1, (-1) * current_beta, (-1) * current_alpha)
+        score = (-1) * newBoard._negamax(depth - 1, (-1) * currBeta, (-1) * currAlpha)
                 
-        return move_to_search, score
+        return cmd, score
 
     # Compute Board Value - White is Positive/ Black is Negative
     def _computeBoardValue(self) -> int:

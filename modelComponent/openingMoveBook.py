@@ -3,6 +3,9 @@ import random
 # Model 
 from modelComponent.moveCommand import MoveCommand
 
+# Enum
+from appEnums import MoveCommandType
+
 # Controller 
 class OpeningMovebook():
 	def __init__(self, cmd: MoveCommand = None):
@@ -14,15 +17,22 @@ class OpeningMovebook():
 
 	# Add Subsequent Cmd
 	def addSubsequentCmd(self, cmd: MoveCommand):
-		self.subsequentCmd.append(cmd)
+		self.subsequentCmd.append(
+			OpeningMovebook(cmd)
+		)
 		
-	# Random Subsequent Cmd
-	def randomSubsequentCmd(self, cmd: MoveCommand):
+	# HandBook has Subsequent Move
+	def hasSubsequentCmd(self) -> bool:
 		if len(self.subsequentCmd) > 0:
-			newNode = random.choice(self.subsequentCmd)
-
+			return True
 		else:
-			return None
+			return False
+
+	# Random Subsequent Cmd
+	def randomSubsequentCmd(self):
+		subsequentCmd = random.choice(self.subsequentCmd)
+
+		return subsequentCmd.cmd
 
 	# Step Forward
 	def stepForward(self, cmd: MoveCommand):
@@ -30,7 +40,17 @@ class OpeningMovebook():
 			if subsequentCmd.cmd == cmd:
 				return subsequentCmd
 
-		return None
-
 # Root
-rootCmd = OpeningMovebook()
+rootCmd = OpeningMovebook()	
+rootCmd.addSubsequentCmd(
+	MoveCommand(1, 4, 3, 4, MoveCommandType.PAWNOPENMOVE)
+)
+rootCmd.addSubsequentCmd(
+	MoveCommand(1, 3, 3, 3, MoveCommandType.PAWNOPENMOVE)
+)
+rootCmd.addSubsequentCmd(
+	MoveCommand(0, 1, 2, 2, MoveCommandType.MOVE)
+)
+rootCmd.addSubsequentCmd(
+	MoveCommand(0, 6, 2, 5, MoveCommandType.MOVE)
+)
