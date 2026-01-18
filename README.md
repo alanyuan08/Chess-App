@@ -14,6 +14,11 @@ Finally, the algorithm  uses the Younger Brother Parallel Search such that it fi
 
 The Board Evaluation is handcrafted based on heuristics provided online.
 
+# Running the App
+
+Playing as [black|white]
+- python3 chessApp.py [black|white]
+
 # Improvements
 
 - The AI currently does not have a opening hand book and uses a stop-gap function to play one of four moves

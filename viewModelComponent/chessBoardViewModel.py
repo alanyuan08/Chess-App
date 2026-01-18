@@ -107,7 +107,6 @@ class ChessBoardViewModel():
             self.chessGameModel.gamePlayerTurn
         )
 
-
 class Worker(QRunnable):
     def __init__(self, fn, *args, **kwargs):
         super().__init__()

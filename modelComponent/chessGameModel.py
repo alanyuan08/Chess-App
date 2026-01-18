@@ -23,14 +23,11 @@ class ChessGameModel():
         # Set Human Player
         self.humanPlayers = playersArray
 
-        # Set Game Turn 
+        # Game Turn - Chess Board Turn may be different due to backtracking
         self.gamePlayerTurn = Player.WHITE
 
         # Set Player Lose
         self.gameState = GameState.PLAYING
-
-        # Previous Move
-        self.previousMoves = []
 
     # Move Piece
     def movePiece(self, cmd: MoveCommand):
@@ -43,8 +40,6 @@ class ChessGameModel():
                 self.gameState = GameState.BLACKWIN
             else:
                 self.gameState = GameState.WHITE
-
-        # Compute Draw
 
     # Validate Move
     def validateMove(self, initRow: int, initCol: int, targetRow: int, 
