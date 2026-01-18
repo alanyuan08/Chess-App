@@ -17,7 +17,7 @@ The Board Evaluation is handcrafted based on heuristics provided online.
 # Running the App
 
 Playing as [black|white]
-- python3 chessApp.py [black|white]
+- python chessApp.py [black|white]
 
 # Improvements
 
