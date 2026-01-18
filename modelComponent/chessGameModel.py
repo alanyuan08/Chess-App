@@ -39,7 +39,7 @@ class ChessGameModel():
             if self.gamePlayerTurn == Player.WHITE:
                 self.gameState = GameState.BLACKWIN
             else:
-                self.gameState = GameState.WHITE
+                self.gameState = GameState.WHITEWIN
 
     # Validate Move
     def validateMove(self, initRow: int, initCol: int, targetRow: int, 
@@ -77,7 +77,7 @@ class ChessGameModel():
                 bestMove = cmd1
                 alpha = max(alpha, score) # Establish the strong alpha
 
-            # Younger Brother Parallel Searcb
+            # Younger Brother Parallel Search
             remaining_moves = commandList[1:]
             
             with concurrent.futures.ProcessPoolExecutor(max_workers=multiprocessing.cpu_count() - 1) as executor:

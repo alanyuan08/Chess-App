@@ -5,6 +5,7 @@ from appEnums import PieceType, Player, MoveCommandType
 from modelComponent.moveCommand import MoveCommand
 from modelComponent.chessPieceModel import ChessPieceModel
 from modelComponent.chessBoardZobrist import ChessBoardZobrist
+from modelComponent.openingMoveBook import OpeningMovebook, rootCmd
 
 # Factory
 from modelFactory.chessPieceFactory import ChessPieceFactory
@@ -42,6 +43,9 @@ class ChessBoardModel():
 
         # Zobrist Hash
         self.zobristHash = ChessBoardZobrist.computeInitValue(self)
+
+        # Opening HandBook
+        self.openingCmd = rootCmd
 
     # This worker runs in a separate process
     def _negamax_worker(self, move_to_search, current_alpha, current_beta, depth):
@@ -106,7 +110,6 @@ class ChessBoardModel():
                     break
 
             return maxEval
-
 
     # Resolve End Game -> Called when No Valid Moves
     def resolveEndGame(self, ply: int) -> int:

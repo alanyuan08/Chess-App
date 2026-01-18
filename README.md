@@ -23,7 +23,6 @@ Playing as [black|white]
 
 - The AI currently does not have a opening hand book and uses a stop-gap function to play one of four moves
 - The AI does not have an endgame table and is suspectible to draws if there isn't sufficient material 
-- The UI is restrictve and doesn't common features such as timers, player selection, promotion selection etc. 
 
 
 # Playing Level
