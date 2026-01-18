@@ -30,7 +30,7 @@ class ChessGameModel():
         # Set Player Lose
         self.gameState = GameState.PLAYING
 
-        # Opening HandBook
+        # Opening Handbook - Node Represents Current Move
         self.openingHandBook = rootCmd
 
     # Move Piece
