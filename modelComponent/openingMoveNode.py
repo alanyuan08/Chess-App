@@ -148,6 +148,7 @@ OpeningMoveCmd.addSequence([
 # Sicilian Defense
 OpeningMoveCmd.addSequence([
 	MoveCommand(1, 3, 3, 3, MoveCommandType.PAWNOPENMOVE),
-	MoveCommand(6, 2, 4, 2, MoveCommandType.PAWNOPENMOVE)
+	MoveCommand(6, 3, 4, 3, MoveCommandType.PAWNOPENMOVE),
+	MoveCommand(1, 2, 3, 2, MoveCommandType.PAWNOPENMOVE)
 ])
 
