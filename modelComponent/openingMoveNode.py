@@ -142,3 +142,12 @@ OpeningMoveCmd.addSequence([
 	MoveCommand(6, 4, 4, 4, MoveCommandType.PAWNOPENMOVE),
 	MoveCommand(0, 1, 2, 2, MoveCommandType.MOVE)
 ])
+
+# -- D4 Pawn Moves
+
+# Sicilian Defense
+OpeningMoveCmd.addSequence([
+	MoveCommand(1, 3, 3, 3, MoveCommandType.PAWNOPENMOVE),
+	MoveCommand(6, 2, 4, 2, MoveCommandType.PAWNOPENMOVE)
+])
+
