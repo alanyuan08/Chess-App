@@ -117,7 +117,7 @@ OpeningMoveCmd.addSequence([
 # Alekhine's Defense
 OpeningMoveCmd.addSequence([
 	MoveCommand(1, 4, 3, 4, MoveCommandType.PAWNOPENMOVE),
-	MoveCommand(7, 6, 5, 5, MoveCommandType.PAWNOPENMOVE)
+	MoveCommand(7, 6, 5, 5, MoveCommandType.MOVE)
 ])
 
 # King's Gambit
@@ -164,8 +164,8 @@ OpeningMoveCmd.addSequence([
 # King's Indian Defense
 OpeningMoveCmd.addSequence([
 	MoveCommand(1, 3, 3, 3, MoveCommandType.PAWNOPENMOVE),
-	MoveCommand(7, 3, 4, 3, MoveCommandType.PAWNOPENMOVE),
+	MoveCommand(7, 6, 5, 5, MoveCommandType.MOVE),
 	MoveCommand(1, 2, 3, 2, MoveCommandType.PAWNOPENMOVE),
-	MoveCommand(6, 2, 5, 2, MoveCommandType.PAWNOPENMOVE)
+	MoveCommand(6, 6, 5, 6, MoveCommandType.PAWNOPENMOVE)
 ])
 
