@@ -165,7 +165,105 @@ OpeningMoveCmd.addSequence([
 OpeningMoveCmd.addSequence([
 	MoveCommand(1, 3, 3, 3, MoveCommandType.PAWNOPENMOVE),
 	MoveCommand(7, 6, 5, 5, MoveCommandType.MOVE),
+	MoveCommand(1, 2, 3, 2, MoveCommandType.MOVE),
+	MoveCommand(6, 6, 5, 6, MoveCommandType.MOVE)
+])
+	
+# Nimzo-Indian Defense
+OpeningMoveCmd.addSequence([
+	MoveCommand(1, 3, 3, 3, MoveCommandType.PAWNOPENMOVE),
+	MoveCommand(7, 6, 5, 5, MoveCommandType.MOVE),
 	MoveCommand(1, 2, 3, 2, MoveCommandType.PAWNOPENMOVE),
-	MoveCommand(6, 6, 5, 6, MoveCommandType.PAWNOPENMOVE)
+	MoveCommand(6, 4, 5, 4, MoveCommandType.MOVE),
+	MoveCommand(0, 1, 2, 2, MoveCommandType.MOVE),
+	MoveCommand(7, 5, 3, 1, MoveCommandType.MOVE)
 ])
 
+# Queen's Indian Defense
+OpeningMoveCmd.addSequence([
+	MoveCommand(1, 3, 3, 3, MoveCommandType.PAWNOPENMOVE),
+	MoveCommand(7, 6, 5, 5, MoveCommandType.MOVE),
+	MoveCommand(1, 2, 3, 2, MoveCommandType.PAWNOPENMOVE),
+	MoveCommand(6, 4, 5, 4, MoveCommandType.MOVE),
+	MoveCommand(0, 6, 2, 5, MoveCommandType.MOVE),
+	MoveCommand(6, 1, 5, 1, MoveCommandType.MOVE)
+])
+
+# Catalan Opening
+OpeningMoveCmd.addSequence([
+	MoveCommand(1, 3, 3, 3, MoveCommandType.PAWNOPENMOVE),
+	MoveCommand(7, 6, 5, 5, MoveCommandType.MOVE),
+	MoveCommand(1, 2, 3, 2, MoveCommandType.PAWNOPENMOVE),
+	MoveCommand(6, 4, 5, 4, MoveCommandType.MOVE),
+	MoveCommand(1, 6, 2, 6, MoveCommandType.MOVE)
+])
+
+# Bogo-Indian Defense
+OpeningMoveCmd.addSequence([
+	MoveCommand(1, 3, 3, 3, MoveCommandType.PAWNOPENMOVE),
+	MoveCommand(7, 6, 5, 5, MoveCommandType.MOVE),
+	MoveCommand(1, 2, 3, 2, MoveCommandType.PAWNOPENMOVE),
+	MoveCommand(6, 4, 5, 4, MoveCommandType.MOVE),
+	MoveCommand(0, 6, 2, 5, MoveCommandType.MOVE),
+	MoveCommand(7, 5, 3, 1, MoveCommandType.MOVE),
+])
+
+# Grünfeld Defense
+OpeningMoveCmd.addSequence([
+	MoveCommand(1, 3, 3, 3, MoveCommandType.PAWNOPENMOVE),
+	MoveCommand(7, 6, 5, 5, MoveCommandType.MOVE),
+	MoveCommand(1, 2, 3, 2, MoveCommandType.PAWNOPENMOVE),
+	MoveCommand(6, 6, 5, 6, MoveCommandType.MOVE),	
+	MoveCommand(0, 1, 2, 2, MoveCommandType.MOVE),
+	MoveCommand(6, 3, 4, 3, MoveCommandType.PAWNOPENMOVE)
+])
+
+# Dutch Defense
+OpeningMoveCmd.addSequence([
+	MoveCommand(1, 3, 3, 3, MoveCommandType.PAWNOPENMOVE),
+	MoveCommand(6, 5, 4, 5, MoveCommandType.PAWNOPENMOVE)
+])
+
+# Trompowsky Attack
+OpeningMoveCmd.addSequence([
+	MoveCommand(1, 3, 3, 3, MoveCommandType.PAWNOPENMOVE),
+	MoveCommand(7, 6, 5, 5, MoveCommandType.MOVE),
+	MoveCommand(0, 2, 4, 6, MoveCommandType.MOVE)
+])
+
+# Benko Gambit
+OpeningMoveCmd.addSequence([
+	MoveCommand(1, 3, 3, 3, MoveCommandType.PAWNOPENMOVE),
+	MoveCommand(7, 6, 5, 5, MoveCommandType.MOVE),
+	MoveCommand(1, 2, 3, 2, MoveCommandType.PAWNOPENMOVE),
+	MoveCommand(6, 2, 4, 2, MoveCommandType.PAWNOPENMOVE),
+	MoveCommand(3, 3, 4, 3, MoveCommandType.MOVE),
+	MoveCommand(6, 1, 4, 1, MoveCommandType.PAWNOPENMOVE)
+])
+
+# London System
+OpeningMoveCmd.addSequence([
+	MoveCommand(1, 3, 3, 3, MoveCommandType.PAWNOPENMOVE),
+	MoveCommand(6, 3, 4, 3, MoveCommandType.PAWNOPENMOVE),
+	MoveCommand(0, 6, 2, 5, MoveCommandType.MOVE),
+	MoveCommand(7, 6, 5, 5, MoveCommandType.MOVE),
+	MoveCommand(0, 2, 3, 5, MoveCommandType.MOVE)
+])
+
+# Benoni Defense: Modern Variation
+OpeningMoveCmd.addSequence([
+	MoveCommand(1, 3, 3, 3, MoveCommandType.PAWNOPENMOVE),
+	MoveCommand(7, 6, 5, 5, MoveCommandType.MOVE),
+	MoveCommand(1, 2, 3, 2, MoveCommandType.PAWNOPENMOVE),
+	MoveCommand(6, 2, 4, 2, MoveCommandType.PAWNOPENMOVE),
+	MoveCommand(3, 3, 4, 3, MoveCommandType.MOVE),
+	MoveCommand(6, 4, 5, 4, MoveCommandType.MOVE),
+	MoveCommand(0, 1, 2, 2, MoveCommandType.MOVE),
+	MoveCommand(5, 4, 4, 3, MoveCommandType.CAPTURE),
+	MoveCommand(3, 2, 4, 3, MoveCommandType.CAPTURE)
+])
+
+# King's Indian
+OpeningMoveCmd.addSequence([
+	MoveCommand(0, 6, 2, 5, MoveCommandType.MOVE)
+])
