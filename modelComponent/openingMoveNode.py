@@ -267,3 +267,8 @@ OpeningMoveCmd.addSequence([
 OpeningMoveCmd.addSequence([
 	MoveCommand(0, 6, 2, 5, MoveCommandType.MOVE)
 ])
+
+# English Opening
+OpeningMoveCmd.addSequence([
+	MoveCommand(1, 2, 3, 2, MoveCommandType.PAWNOPENMOVE)
+])
