@@ -4,7 +4,7 @@ from modelFactory.chessBoardFactory import ChessBoardFactory
 # Model
 from modelComponent.chessBoardModel import ChessBoardModel
 from modelComponent.moveCommand import MoveCommand
-from modelComponent.openingMoveBook import OpeningMovebook, rootCmd
+from modelComponent.openingMoveNode import OpeningMoveCmd
 
 # Factory
 from modelFactory.chessPieceFactory import ChessPieceFactory
@@ -31,15 +31,15 @@ class ChessGameModel():
         self.gameState = GameState.PLAYING
 
         # Opening Handbook - Node Represents Current Move
-        self.openingHandBook = rootCmd
+        self.currOpeningMove = OpeningMoveCmd
 
     # Move Piece
     def movePiece(self, cmd: MoveCommand):
         # Move the Chess Piece
         self.chessBoard.movePiece(cmd)
 
-        if self.openingHandBook:
-            self.openingHandBook = self.openingHandBook.stepForward(cmd)
+        if self.currOpeningMove:
+            self.currOpeningMove = self.currOpeningMove.stepForward(cmd)
 
         self.gamePlayerTurn = ChessBoardModel.opponent(self.gamePlayerTurn)
 
@@ -61,8 +61,8 @@ class ChessGameModel():
 
     # Take Opponent Turn
     def computeBestMove(self) -> MoveCommand:
-        if self.openingHandBook and self.openingHandBook.hasSubsequentCmd():
-            return self.openingHandBook.randomSubsequentCmd()
+        if self.currOpeningMove and self.currOpeningMove.hasSubsequentCmd():
+            return self.currOpeningMove.randomSubsequentCmd()
 
         commandList = self.chessBoard.allValidMoves()
         commandList.sort(key=lambda move: self.chessBoard._getMovePriority(move), reverse=True)
