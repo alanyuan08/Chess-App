@@ -145,10 +145,19 @@ OpeningMoveCmd.addSequence([
 
 # -- D4 Pawn Moves
 
-# Sicilian Defense
+# Queen's Gambit - Accepted
 OpeningMoveCmd.addSequence([
 	MoveCommand(1, 3, 3, 3, MoveCommandType.PAWNOPENMOVE),
 	MoveCommand(6, 3, 4, 3, MoveCommandType.PAWNOPENMOVE),
-	MoveCommand(1, 2, 3, 2, MoveCommandType.PAWNOPENMOVE)
+	MoveCommand(1, 2, 3, 2, MoveCommandType.PAWNOPENMOVE),
+	MoveCommand(4, 3, 3, 2, MoveCommandType.CAPTURE),
+])
+
+# Slav Defense
+OpeningMoveCmd.addSequence([
+	MoveCommand(1, 3, 3, 3, MoveCommandType.PAWNOPENMOVE),
+	MoveCommand(6, 3, 4, 3, MoveCommandType.PAWNOPENMOVE),
+	MoveCommand(1, 2, 3, 2, MoveCommandType.PAWNOPENMOVE),
+	MoveCommand(6, 2, 5, 2, MoveCommandType.PAWNOPENMOVE)
 ])
 
