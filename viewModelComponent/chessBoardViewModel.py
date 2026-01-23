@@ -19,15 +19,15 @@ class ChessBoardViewModel():
 
         # Backend ChessBoard Game
         self.chessGameModel = chessBoardModel
-        self.communicatorProxy.update_request.connect(chessBoardView.updatePosition)
-        self.communicatorProxy.game_state.connect(chessBoardView.updateGameState)
+        self.communicatorProxy.updateRequest.connect(chessBoardView.updatePosition)
+        self.communicatorProxy.updateGameState.connect(chessBoardView.updateGameState)
         chessBoardView.connectViewModel(self)
 
         # Compute Opponent Turn ThreadPool 
         self.threadpool = QThreadPool()
 
         # Init Game State
-        self.communicatorProxy.signal_game_state(
+        self.communicatorProxy.signalUpdateGameState(
             self.chessGameModel.gameState, 
             self.chessGameModel.gamePlayerTurn
         )
@@ -46,7 +46,7 @@ class ChessBoardViewModel():
         else:
             return False
 
-    def on_move_executed(self, initRow: int, initCol: int, targetRow: int, 
+    def onMoveExecuted(self, initRow: int, initCol: int, targetRow: int, 
             targetCol: int, player: Player):
 
         moveCommand = self.chessGameModel.validateMove(initRow, 
@@ -57,10 +57,10 @@ class ChessBoardViewModel():
             self.chessGameModel.movePiece(moveCommand)
 
             # Communicate the command to FrontEnd
-            self.communicatorProxy.signal_update_request(moveCommand)
+            self.communicatorProxy.signalUpdateRequest(moveCommand)
 
             # Update Game State
-            self.communicatorProxy.signal_game_state(
+            self.communicatorProxy.signalUpdateGameState(
                 self.chessGameModel.gameState, 
                 self.chessGameModel.gamePlayerTurn
             )
@@ -79,10 +79,10 @@ class ChessBoardViewModel():
         self.chessGameModel.movePiece(opponentCmd)
 
         # Communicate the command to FrontEnd
-        self.communicatorProxy.signal_update_request(opponentCmd)
+        self.communicatorProxy.signalUpdateRequest(opponentCmd)
 
         # Update Game State
-        self.communicatorProxy.signal_game_state(
+        self.communicatorProxy.signalUpdateGameState(
             self.chessGameModel.gameState, 
             self.chessGameModel.gamePlayerTurn
         )

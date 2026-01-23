@@ -6,20 +6,20 @@ from modelComponent.moveCommand import MoveCommand
 		
 class CommunicatorProxy(QObject):
 	# Item -> Controller
-	move_request = Signal(int, int, int, int, Player)
+	moveRequest = Signal(int, int, int, int, Player)
 
-	def signal_move_request(self, initRow: int, initCol: int, 
+	def signalMoveRequest(self, initRow: int, initCol: int, 
 		newRow: int, newCol: int, player: Player):
-		self.move_request.emit(initRow, initCol, newRow, newCol, player)
+		self.moveRequest.emit(initRow, initCol, newRow, newCol, player)
 
 	# Controller -> Item
-	update_request = Signal(MoveCommand)
+	updateRequest = Signal(MoveCommand)
 
-	def signal_update_request(self, moveCommand: MoveCommand):
-		self.update_request.emit(moveCommand)
+	def signalUpdateRequest(self, moveCommand: MoveCommand):
+		self.updateRequest.emit(moveCommand)
 
 	# Controller -> Game state
-	game_state = Signal(GameState, Player)
+	updateGameState = Signal(GameState, Player)
 
-	def signal_game_state(self, gameState: GameState, playerTurn: Player):
-		self.game_state.emit(gameState, playerTurn)
+	def signalUpdateGameState(self, gameState: GameState, playerTurn: Player):
+		self.updateGameState.emit(gameState, playerTurn)

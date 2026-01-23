@@ -43,7 +43,7 @@ class ChessPieceView(QGraphicsPixmapItem):
 
 	def connectViewModel(self, viewModel: ChessBoardViewModel):
 		self.communicatorProxy = CommunicatorProxy()
-		self.communicatorProxy.move_request.connect(viewModel.on_move_executed)
+		self.communicatorProxy.moveRequest.connect(viewModel.onMoveExecuted)
 
 	@staticmethod
 	def returnImageURL(player: Player, chessModel: ChessPieceModel):
@@ -88,7 +88,7 @@ class ChessPieceView(QGraphicsPixmapItem):
 		computedCol = int((self.pos().x() + 45) / 90)
 
 		if not (computedCol < 0 or computedCol > 7 or computedRow < 0 or computedRow > 7):
-			self.communicatorProxy.signal_move_request(self.row, self.col, computedRow, computedCol, self.player)
+			self.communicatorProxy.signalMoveRequest(self.row, self.col, computedRow, computedCol, self.player)
 
 		# This is used to capture the move intention, the controller moves the object
 		xCoordinate = self.col * 90
