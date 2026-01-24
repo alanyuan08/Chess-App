@@ -44,7 +44,7 @@ class ChessBoardModel():
         self.zobristHash = ChessBoardZobrist.computeInitValue(self)
 
     # This worker runs in a separate process
-    def _negamax_worker(self, cmd: MoveCommand, currAlpha: int, currBeta: int, depth: int) -> (MoveCommand, int):
+    def _negamaxWorker(self, cmd: MoveCommand, currAlpha: int, currBeta: int, depth: int) -> (MoveCommand, int):
         newBoard = copy.deepcopy(self)
         removedPiece, prevEnPassant, prevCastleIndex = newBoard.movePiece(cmd)
         

@@ -10,10 +10,10 @@ from viewComponent.chessBoardView import ChessBoardView
 # Import ViewModel
 from viewModelComponent.chessBoardViewModel import ChessBoardViewModel
 
-# Import Model
-from modelComponent.chessGameModel import ChessGameModel
-
 if __name__ == '__main__':
+	# Import Model
+	from modelFactory.chessGameFactory import ChessGameFactory
+
 	app = QApplication(sys.argv)
 
 	humanPlayer = [Player.BLACK, Player.WHITE]
@@ -32,7 +32,7 @@ if __name__ == '__main__':
 	view.setFixedSize(720, 840)
 
 	# Create Chess Game Moded / ChessBoard/ Chess Piece Model Components
-	chessGameModel = ChessGameModel(humanPlayer)
+	chessGameModel = ChessGameFactory.createChessGame(humanPlayer)
 
 	# Create View Components
 	chessBoardView = ChessBoardView(scene, chessGameModel)

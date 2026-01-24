@@ -31,7 +31,7 @@ class OpeningMoveNode():
 			traverseNode = target
 
 	# Find TraverseNode
-	def findTraverseNode(self, cmd: MoveCommand):
+	def findTraverseNode(self, cmd: MoveCommand) -> Optional[OpeningMoveNode]:
 		for cmdNode in self.subsequentNodes:
 			if cmd == cmdNode.cmd:
 				return cmdNode
@@ -39,13 +39,13 @@ class OpeningMoveNode():
 		return None
 
 	# Random Subsequent Cmd
-	def randomSubsequentCmd(self):
+	def randomSubsequentCmd(self) -> MoveCommand:
 		subsequentCmd = random.choice(self.subsequentNodes)
 
 		return subsequentCmd.cmd
 
 	# Step Forward
-	def stepForward(self, cmd: MoveCommand):
+	def stepForward(self, cmd: MoveCommand) -> Optional[OpeningMoveNode]:
 		for cmdNode in self.subsequentNodes:
 			if cmd == cmdNode.cmd:
 				return cmdNode
@@ -53,7 +53,7 @@ class OpeningMoveNode():
 		return None
 
 	# Random Subsequent Cmd
-	def hasSubsequentCmd(self):
+	def hasSubsequentCmd(self) -> bool:
 		if len(self.subsequentNodes) > 0:
 			return True
 		else:

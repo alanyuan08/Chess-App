@@ -4,7 +4,7 @@ from modelFactory.chessBoardFactory import ChessBoardFactory
 # Model
 from modelComponent.chessBoardModel import ChessBoardModel
 from modelComponent.moveCommand import MoveCommand
-from modelComponent.openingMoveNode import OpeningMoveCmd
+from modelComponent.openingMoveProtocal import OpeningMoveNodeProtocal
 
 # Factory
 from modelFactory.chessPieceFactory import ChessPieceFactory
@@ -18,11 +18,12 @@ import concurrent.futures
 
 # Controller 
 class ChessGameModel():
-    def __init__(self, playersArray):
-        self.chessBoard = ChessBoardFactory.createChessBoard(playersArray)
+    def __init__(self, humanPlayers: list[Player], chessBoard: list[list[ChessBoardModel]], 
+        openingHandBook: OpeningMoveNodeProtocal):
+        self.chessBoard = chessBoard
 
         # Set Human Player
-        self.humanPlayers = playersArray
+        self.humanPlayers = humanPlayers
 
         # Game Turn - Chess Board Turn may be different due to backtracking
         self.gamePlayerTurn = Player.WHITE
@@ -31,7 +32,7 @@ class ChessGameModel():
         self.gameState = GameState.PLAYING
 
         # Opening Handbook - Node Represents Current Move
-        self.currOpeningMove = OpeningMoveCmd
+        self.currOpeningMove = openingHandBook
 
     # Move Piece
     def movePiece(self, cmd: MoveCommand):
@@ -76,33 +77,32 @@ class ChessGameModel():
         if len(commandList) == 0:
             return None
 
-        with multiprocessing.Manager() as manager:
-            # Compute the most optimal search move
-            cmd1 = commandList[0]
-            removedPiece, prevEnPassant, prevCastleIndex = self.chessBoard.movePiece(cmd1)
-            # Search the first move normally to get a strong alpha value quickly
-            score = (-1) * self.chessBoard._negamax(4, (-1) * beta, (-1) * alpha) 
-            self.chessBoard.undoMove(cmd1, removedPiece, prevEnPassant, prevCastleIndex)
+        # Compute the most optimal search move
+        cmd1 = commandList[0]
+        removedPiece, prevEnPassant, prevCastleIndex = self.chessBoard.movePiece(cmd1)
+        # Search the first move normally to get a strong alpha value quickly
+        score = (-1) * self.chessBoard._negamax(4, (-1) * beta, (-1) * alpha) 
+        self.chessBoard.undoMove(cmd1, removedPiece, prevEnPassant, prevCastleIndex)
 
-            if score > bestScore:
-                bestScore = score
-                bestMove = cmd1
-                alpha = max(alpha, score) # Establish the strong alpha
+        if score > bestScore:
+            bestScore = score
+            bestMove = cmd1
+            alpha = max(alpha, score) # Establish the strong alpha
 
-            # Younger Brother Parallel Search
-            remaining_moves = commandList[1:]
+        # Younger Brother Parallel Search
+        remaining_moves = commandList[1:]
+        
+        with concurrent.futures.ProcessPoolExecutor(max_workers=multiprocessing.cpu_count() - 1) as executor:
+            futures = [
+                executor.submit(self.chessBoard._negamaxWorker, cmd, alpha, beta, 4) 
+                for cmd in remaining_moves
+            ]
             
-            with concurrent.futures.ProcessPoolExecutor(max_workers=multiprocessing.cpu_count() - 1) as executor:
-                futures = [
-                    executor.submit(self.chessBoard._negamax_worker, cmd, alpha, beta, 4) 
-                    for cmd in remaining_moves
-                ]
-                
-                for future in concurrent.futures.as_completed(futures):
-                    move, score = future.result()
-                    if score > bestScore:
-                        bestScore = score
-                        bestMove = move
+            for future in concurrent.futures.as_completed(futures):
+                move, score = future.result()
+                if score > bestScore:
+                    bestScore = score
+                    bestMove = move
 
         return bestMove
 
