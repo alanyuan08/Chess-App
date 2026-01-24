@@ -45,11 +45,10 @@ class ChessBoardModel():
 
     # This worker runs in a separate process
     def _negamaxWorker(self, cmd: MoveCommand, currAlpha: int, currBeta: int, depth: int) -> (MoveCommand, int):
-        newBoard = copy.deepcopy(self)
-        removedPiece, prevEnPassant, prevCastleIndex = newBoard.movePiece(cmd)
+        removedPiece, prevEnPassant, prevCastleIndex = self.movePiece(cmd)
         
         # We search with the narrow window established by the PV move
-        score = (-1) * newBoard._negamax(depth - 1, (-1) * currBeta, (-1) * currAlpha)
+        score = (-1) * self._negamax(depth - 1, (-1) * currBeta, (-1) * currAlpha)
                 
         return cmd, score
 
