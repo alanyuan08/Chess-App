@@ -12,7 +12,6 @@ from modelFactory.chessPieceFactory import ChessPieceFactory
 # Standard
 import math
 from typing import Optional, Union
-import copy
 
 # Controller 
 class ChessBoardModel():
@@ -45,7 +44,7 @@ class ChessBoardModel():
 
     # This worker runs in a separate process
     def _negamaxWorker(self, cmd: MoveCommand, currAlpha: int, currBeta: int, depth: int) -> (MoveCommand, int):
-        removedPiece, prevEnPassant, prevCastleIndex = self.movePiece(cmd)
+        removedPiece, prevEnPassant = self.movePiece(cmd)
         
         # We search with the narrow window established by the PV move
         score = (-1) * self._negamax(depth - 1, (-1) * currBeta, (-1) * currAlpha)
@@ -94,9 +93,14 @@ class ChessBoardModel():
             maxEval = float('-inf')
 
             for cmd in validMoves:
-                removedPiece, prevEnPassant, prevCastleIndex = self.movePiece(cmd)
+                prevzobristHash = self.zobristHash
+
+                removedPiece, prevEnPassant = self.movePiece(cmd)
                 score = (-1) * self._negamax(depth - 1, (-1) * beta, (-1) * alpha, ply + 1)
-                self.undoMove(cmd, removedPiece, prevEnPassant, prevCastleIndex)
+                self.undoMove(cmd, removedPiece, prevEnPassant)
+
+                if prevzobristHash != self.zobristHash:
+                    print(cmd)
 
                 maxEval = max(maxEval, score)
                 alpha = max(alpha, score)
@@ -134,9 +138,9 @@ class ChessBoardModel():
         validMoves.sort(key=lambda move: self._getMovePriority(move), reverse=True)
 
         for cmd in self._allQuiesceneMoves(validMoves):
-            removedPiece, prevEnPassant, prevCastleIndex = self.movePiece(cmd)
+            removedPiece, prevEnPassant = self.movePiece(cmd)
             score = (-1) * self._quiesceneSearch((-1) * beta, (-1) * alpha, depth + 1)
-            self.undoMove(cmd, removedPiece, prevEnPassant, prevCastleIndex)
+            self.undoMove(cmd, removedPiece, prevEnPassant)
 
             if score >= beta:
                 return beta
@@ -266,11 +270,11 @@ class ChessBoardModel():
         return None
 
     # Move Piece
-    def movePiece(self, cmd: MoveCommand) -> Union[Optional[ChessPieceModel], int, int]:
+    def movePiece(self, cmd: MoveCommand) -> Union[Optional[ChessPieceModel], int]:
         # Store for Undo
         removedPiece = None
-        prevEnPassant = self.enPassant
         prevCastleIndex = ChessBoardZobrist.castleIndex(self)
+        prevEnPassant = self.enPassant
 
         # Set enPassant to Null
         self.enPassant = None
@@ -293,9 +297,6 @@ class ChessBoardModel():
                 # Update Castle
                 self.updateKingCastleFlag(True)
 
-                # Forward Castle
-                ChessBoardZobrist.forwardCastle(self, prevCastleIndex)
-
             # King Side Castle
             case MoveCommandType.KINGSIDECASTLE:
                 # Determine the row of the Castle 
@@ -309,9 +310,6 @@ class ChessBoardModel():
 
                 # Update Castle
                 self.updateKingCastleFlag(True)
-
-                # Forward Castle
-                ChessBoardZobrist.forwardCastle(self, prevCastleIndex)
 
             # Move Piece
             case MoveCommandType.MOVE:
@@ -359,14 +357,19 @@ class ChessBoardModel():
         # Swap the Player Turn
         self.playerTurn = ChessBoardModel.opponent(self.playerTurn)
 
+        # Update Zobrist Castle to Curr Castle Index
+        currCastleIndex = ChessBoardZobrist.castleIndex(self)
+
+        ChessBoardZobrist.forwardCastle(self, prevCastleIndex)
+
         # Create a new copy of the removed Piece
-        return removedPiece, self.enPassant, prevCastleIndex
+        return removedPiece, self.enPassant
 
     # Undo Move - Used to for Pruning
-    def undoMove(self, cmd: MoveCommand, restorePiece: Optional[ChessPieceModel], 
-        prevEnPassant: int, prevCastleIndex: int) -> None:
+    def undoMove(self, cmd: MoveCommand, restorePiece: Optional[ChessPieceModel], prevEnPassant: int) -> None:
         # Swap the Player Turn
         self.playerTurn = ChessBoardModel.opponent(self.playerTurn)
+        prevCastleIndex = ChessBoardZobrist.castleIndex(self)
 
         # Undo ZobristHash
         ChessBoardZobrist.backwardUpdate(self, cmd, restorePiece, prevEnPassant)
@@ -386,9 +389,6 @@ class ChessBoardModel():
                 # Update Castle
                 self.updateKingCastleFlag(False)
 
-                # Backward Castle
-                ChessBoardZobrist.backwardCastle(self, prevCastleIndex)
-
             # King Side Castle
             case MoveCommandType.KINGSIDECASTLE:
                  # Determine the row of the Castle 
@@ -402,9 +402,6 @@ class ChessBoardModel():
 
                 # Update Castle
                 self.updateKingCastleFlag(False)
-
-                # Backward Castle
-                ChessBoardZobrist.backwardCastle(self, prevCastleIndex)
 
             # Move Piece
             case MoveCommandType.MOVE:
@@ -443,6 +440,9 @@ class ChessBoardModel():
         # Set En Passant to previous State
         self.enPassant = prevEnPassant
 
+        # Update Zobrist Castle
+        ChessBoardZobrist.forwardCastle(self, prevCastleIndex)
+
     # This is used to determine castle eligability
     def allOpponentCaptureTargets(self) -> set[tuple[int, int]]:
         captureSquares = set()
@@ -460,29 +460,38 @@ class ChessBoardModel():
         return captureSquares
 
     # Used for evaluating Castling Rights
-    def _updateKing(self, startRow: int, startCol: int) -> None:
-        kingPiece = self.board[startRow][startCol]
+    def _updateKingCastle(self, startRow: int, startCol: int) -> None:
+        movePiece = self.board[startRow][startCol]
 
         # Update the King Square
-        if kingPiece.type == PieceType.KING:
-            if kingPiece.player == Player.BLACK:
+        if movePiece.type == PieceType.KING:
+            if movePiece.player == Player.BLACK:
                 self.blackKingSquareRow = startRow
                 self.blackKingSquareCol = startCol
-
-                self.blackCanQueenSide = \
-                    kingPiece.canQueenSideCastle(self)
-                self.blackCanKingSide = \
-                    kingPiece.canKingSideCastle(self)
 
             else:
                 self.whiteKingSquareRow = startRow
                 self.whiteKingSquareCol = startCol
 
-                self.whiteCanQueenSide = \
-                    kingPiece.canQueenSideCastle(self)
+        # Recompute Castle Condition 
+        if movePiece.player == Player.BLACK:
+            kingPiece = \
+                self.board[self.blackKingSquareRow][self.blackKingSquareCol]
 
-                self.whiteCanKingSide = \
-                    kingPiece.canKingSideCastle(self)
+            self.blackCanQueenSide = \
+                kingPiece.canQueenSideCastle(self)
+            self.blackCanKingSide = \
+                kingPiece.canKingSideCastle(self)
+
+        else:
+            kingPiece = \
+                self.board[self.whiteKingSquareRow][self.whiteKingSquareCol]
+
+            self.whiteCanQueenSide = \
+                kingPiece.canQueenSideCastle(self)
+
+            self.whiteCanKingSide = \
+                kingPiece.canKingSideCastle(self)
 
     # Helper Method, Move Piece
     def _movePieceOnBoard(self, startRow: int, startCol: int, endRow: int, endCol: int) -> None:
@@ -494,8 +503,8 @@ class ChessBoardModel():
         # Remove the Init Piece
         self.board[startRow][startCol] = None
 
-        # Update King Square
-        self._updateKing(endRow, endCol)
+        # Update King Square and Castle Conditions
+        self._updateKingCastle(endRow, endCol)
 
     # Helper Method, Undo Move Piece
     def _undoMoveOnBoard(self, originalRow: int, originalCol: int, 
@@ -510,15 +519,15 @@ class ChessBoardModel():
         # Remove the Final Piece
         self.board[currentRow][currentCol] = None
 
-        # Update the King Square
-        self._updateKing(originalRow, originalCol)
+        # Update King Square and Castle Conditions
+        self._updateKingCastle(originalRow, originalCol)
 
     # Validate King Safety for player after making move
     def validateKingSafety(self, cmd: MoveCommand) -> bool:
         testPlayerTurn = self.playerTurn
-        removedPiece, prevEnPassant, prevCastleIndex = self.movePiece(cmd)
+        removedPiece, prevEnPassant = self.movePiece(cmd)
         returnValue = self._testKingSafety(testPlayerTurn)
-        self.undoMove(cmd, removedPiece, prevEnPassant, prevCastleIndex)
+        self.undoMove(cmd, removedPiece, prevEnPassant)
         return returnValue
 
     # Update King Castle

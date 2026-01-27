@@ -5,6 +5,7 @@ from modelFactory.chessBoardFactory import ChessBoardFactory
 from modelComponent.chessBoardModel import ChessBoardModel
 from modelComponent.moveCommand import MoveCommand
 from modelComponent.openingMoveProtocal import OpeningMoveNodeProtocal
+from modelComponent.chessBoardZobrist import ChessBoardZobrist
 
 # Factory
 from modelFactory.chessPieceFactory import ChessPieceFactory
@@ -79,10 +80,10 @@ class ChessGameModel():
 
         # Compute the most optimal search move
         cmd1 = commandList[0]
-        removedPiece, prevEnPassant, prevCastleIndex = self.chessBoard.movePiece(cmd1)
+        removedPiece, prevEnPassant = self.chessBoard.movePiece(cmd1)
         # Search the first move normally to get a strong alpha value quickly
         score = (-1) * self.chessBoard._negamax(4, (-1) * beta, (-1) * alpha) 
-        self.chessBoard.undoMove(cmd1, removedPiece, prevEnPassant, prevCastleIndex)
+        self.chessBoard.undoMove(cmd1, removedPiece, prevEnPassant)
 
         if score > bestScore:
             bestScore = score
