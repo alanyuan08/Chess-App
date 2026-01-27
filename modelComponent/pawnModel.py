@@ -96,12 +96,13 @@ class PawnModel(ChessPieceModel):
 				# En Passant
 				if self.row == 3:
 					opponentEnPassantCol = chessBoard.enPassant
-					if opponentEnPassantCol == self.col-1 or opponentEnPassantCol == self.col+1:
+					if opponentEnPassantCol != 8:
+						if opponentEnPassantCol == self.col-1 or opponentEnPassantCol == self.col+1:
 
-						opponentPawn = chessBoard.board[self.row][opponentEnPassantCol]
-						if opponentPawn.player != self.player:
-							returnMoves.append(
-								MoveCommand(self.row, self.col, self.row-1, opponentEnPassantCol, MoveCommandType.ENPASSANT)
+							opponentPawn = chessBoard.board[self.row][opponentEnPassantCol]
+							if opponentPawn.player != self.player:
+								returnMoves.append(
+									MoveCommand(self.row, self.col, self.row-1, opponentEnPassantCol, MoveCommandType.ENPASSANT)
 							)
 
 				# Normal
@@ -159,13 +160,14 @@ class PawnModel(ChessPieceModel):
 				# En passant
 				if self.row == 4:
 					opponentEnPassantCol = chessBoard.enPassant
-					if opponentEnPassantCol == self.col-1 or opponentEnPassantCol == self.col+1:
+					if opponentEnPassantCol != 8:
+						if opponentEnPassantCol == self.col-1 or opponentEnPassantCol == self.col+1:
 
-						opponentPawn = chessBoard.board[self.row][opponentEnPassantCol]
-						if opponentPawn.player != self.player:
-							returnMoves.append(
-								MoveCommand(self.row, self.col, self.row+1, opponentEnPassantCol, MoveCommandType.ENPASSANT)
-							)
+							opponentPawn = chessBoard.board[self.row][opponentEnPassantCol]
+							if opponentPawn.player != self.player:
+								returnMoves.append(
+									MoveCommand(self.row, self.col, self.row+1, opponentEnPassantCol, MoveCommandType.ENPASSANT)
+								)
 
 				# Normal
 				if self.col > 0:

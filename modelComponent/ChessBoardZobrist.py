@@ -31,7 +31,7 @@ class ChessBoardZobrist():
     CASTLING = [secrets.randbits(64) for _ in range(16)]
     
     # 4. En Passant (8 files where a capture can happen, +1 for "none")
-    EN_PASSANT = [secrets.randbits(64) for _ in range(8)]
+    EN_PASSANT = [secrets.randbits(64) for _ in range(9)]
 
     @staticmethod
     def computeInitValue(chessBoard: ChessBoardProtocal) -> int:
@@ -53,6 +53,9 @@ class ChessBoardZobrist():
         # Castling
         castleIndex = ChessBoardZobrist.castleIndex(chessBoard)
         h ^= ChessBoardZobrist.CASTLING[castleIndex]
+
+        # En Passant
+        h ^= ChessBoardZobrist.EN_PASSANT[8]
 
         return h
 
@@ -126,6 +129,16 @@ class ChessBoardZobrist():
 
             # Compute new Zobrists
             chessBoard.zobristHash ^= ChessBoardZobrist.CASTLING[currCastleIndex]
+
+    @staticmethod
+    def forwardEnPassant(chessBoard: ChessBoardProtocal, previousEnPassant: int):
+
+        if previousEnPassant != chessBoard.enPassant:
+            # Remove the Previous En Passant
+            chessBoard.zobristHash ^= ChessBoardZobrist.EN_PASSANT[previousEnPassant]
+
+            # Roll to New En Passant
+            chessBoard.zobristHash ^= ChessBoardZobrist.EN_PASSANT[chessBoard.enPassant]
 
     @staticmethod
     def removePiece(chessBoard: ChessBoardProtocal, initRow: int, initCol: int):

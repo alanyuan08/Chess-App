@@ -22,8 +22,8 @@ class ChessBoardModel():
         # This is maintained for backtracking
         self.playerTurn = Player.WHITE
 
-        # En Passant Column
-        self.enPassant = None
+        # En Passant Column -> 8 is Null
+        self.enPassant = 8
 
         # Used to Check for King Safety
         self.whiteKingSquareRow = 0
@@ -277,7 +277,7 @@ class ChessBoardModel():
         prevEnPassant = self.enPassant
 
         # Set enPassant to Null
-        self.enPassant = None
+        self.enPassant = 8
 
         # Update ZobristHash
         ChessBoardZobrist.forwardUpdate(self, cmd, prevEnPassant)
@@ -358,12 +358,13 @@ class ChessBoardModel():
         self.playerTurn = ChessBoardModel.opponent(self.playerTurn)
 
         # Update Zobrist Castle to Curr Castle Index
-        currCastleIndex = ChessBoardZobrist.castleIndex(self)
-
         ChessBoardZobrist.forwardCastle(self, prevCastleIndex)
 
+        # Update En Passant Forward
+        ChessBoardZobrist.forwardEnPassant(self, prevEnPassant)
+
         # Create a new copy of the removed Piece
-        return removedPiece, self.enPassant
+        return removedPiece, prevEnPassant
 
     # Undo Move - Used to for Pruning
     def undoMove(self, cmd: MoveCommand, restorePiece: Optional[ChessPieceModel], prevEnPassant: int) -> None:
@@ -437,6 +438,9 @@ class ChessBoardModel():
                 # Store Removed Piece
                 self.board[cmd.startRow][cmd.endCol] = restorePiece
 
+        # Update En Passant Forward
+        ChessBoardZobrist.forwardEnPassant(self, prevEnPassant)
+
         # Set En Passant to previous State
         self.enPassant = prevEnPassant
 
@@ -473,7 +477,7 @@ class ChessBoardModel():
                 self.whiteKingSquareRow = startRow
                 self.whiteKingSquareCol = startCol
 
-        # Recompute Castle Condition 
+        # Recompute Castle Condition - Move / Capture / Castling could effect
         if movePiece.player == Player.BLACK:
             kingPiece = \
                 self.board[self.blackKingSquareRow][self.blackKingSquareCol]
