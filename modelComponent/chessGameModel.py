@@ -45,17 +45,22 @@ class ChessGameModel():
 
         self.gamePlayerTurn = ChessBoardModel.opponent(self.gamePlayerTurn)
 
-        # Set Player Loss
-        if len(self.chessBoard.allValidMoves()) == 0:
-            if self.gamePlayerTurn == Player.WHITE:
-                self.gameState = GameState.BLACKWIN
-            else:
-                self.gameState = GameState.WHITEWIN
-
-        # Set Draw
-        if self.chessBoard.checkThreeMoveReptiton():
+        # Three Move Repetition Draw
+        if self.chessBoard.checkThreeMoveRepetiton():
             self.gameState = GameState.DRAW
 
+        # No Moves - Determine Checkmate or Draw
+        if len(self.chessBoard.allValidMoves()) == 0:
+            if self.gamePlayerTurn == Player.WHITE:
+                if self.chessBoard.checkMate():
+                    self.gameState = GameState.BLACKWIN
+                else:
+                    self.gameState = self.gameState.DRAW
+            else:
+                if self.chessBoard.checkMate():
+                    self.gameState = GameState.WHITEWIN
+                else:
+                    self.gameState = self.gameState.DRAW
     # Validate Move
     def validateMove(self, initRow: int, initCol: int, targetRow: int, 
         targetCol: int, player: Player) -> MoveCommand:

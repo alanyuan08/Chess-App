@@ -87,10 +87,10 @@ class ChessBoardModel():
         validMoves.sort(key=lambda move: self._getMovePriority(move), reverse=True)
 
         # Three Move Repetition Draw
-        if self.checkThreeMoveReptiton():
+        if self.checkThreeMoveRepetiton():
             return 0
 
-        # No Valid Moves = Lose
+        # No Valid Moves = Lose / Draw
         if len(validMoves) == 0:
             return self.resolveEndGame(ply)
 
@@ -115,12 +115,19 @@ class ChessBoardModel():
 
             return maxEval
 
+    # Used to Determine if Checkmate Or Draw
+    def checkMate(self) -> bool:
+        kingTuple = self.kingTuple(self.playerTurn)
+        if kingTuple in opponentAttackTargets:
+            return True
+
+        return False
+
     # Resolve End Game -> Called when No Valid Moves
     def resolveEndGame(self, ply: int) -> int:
         opponentAttackTargets = self.allOpponentCaptureTargets()
 
-        kingTuple = self.kingTuple(self.playerTurn)
-        if kingTuple in opponentAttackTargets:
+        if self.checkMate():
             return -1000000 + ply 
         
         # Otherwise, it is a Stalemate (Draw)
@@ -131,7 +138,7 @@ class ChessBoardModel():
         staticEval = self._computeBoardValue()
 
         # Three Move Repetition Draw
-        if self.checkThreeMoveReptiton():
+        if self.checkThreeMoveRepetiton():
             return 0
 
         if staticEval >= beta:
@@ -250,7 +257,7 @@ class ChessBoardModel():
         self.traversedPositions[self.zobristHash] = \
             self.traversedPositions.get(self.zobristHash, 0) - 1
 
-    def checkThreeMoveReptiton(self):
+    def checkThreeMoveRepetiton(self):
         if self.traversedPositions.get(self.zobristHash, 0) == 3:
             return True
         else:
