@@ -1,10 +1,23 @@
 
-
 class TranspositionTable():
+    def __init__(self):
+        self.size = 2 ** 30
+        self.mask = self.size - 1
+        self.table = [None] * self.size
 
-	TABLE_SIZE_MB = 16 
-	ENTRY_SIZE_BYTES = 16 # Assuming 128-bit entry
-	num_entries = (TABLE_SIZE_MB * 1024 * 1024) // ENTRY_SIZE_BYTES
-	TT_SIZE = 1 << int(num_entries.bit_length() - 1)
+    def store(self, key, score, depth, flag):
+        index = key & self.mask
+        existing = self.table[index]
+        
+        # Replacement Strategy: Depth-Preferred
+        # Keep the search that went deeper, as it is more valuable
+        if existing is None or depth >= existing[2]:
+            self.table[index] = [key, score, depth, flag]
 
-	
+    def probe(self, key):
+        index = key & self.mask
+        entry = self.table[index]
+        # Verification: The full 64-bit key MUST match
+        if entry and entry[0] == key:
+            return entry
+        return None

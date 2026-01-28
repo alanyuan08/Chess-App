@@ -42,11 +42,15 @@ class ChessBoardModel():
         # Zobrist Hash
         self.zobristHash = ChessBoardZobrist.computeInitValue(self)
 
+        # Traversed Positions - Zobrist Hash
+        self.traversedPositions = {}
+        self.forwardPosition()
+
     # This worker runs in a separate process
     def _negamaxWorker(self, cmd: MoveCommand, currAlpha: int, currBeta: int, depth: int) -> (MoveCommand, int):
         removedPiece, prevEnPassant = self.movePiece(cmd)
         
-        # We search with the narrow window established by the PV move
+        # Negamx search for Best Position
         score = (-1) * self._negamax(depth - 1, (-1) * currBeta, (-1) * currAlpha)
                 
         return cmd, score
@@ -82,6 +86,10 @@ class ChessBoardModel():
         validMoves = self.allValidMoves()
         validMoves.sort(key=lambda move: self._getMovePriority(move), reverse=True)
 
+        # Three Move Repetition Draw
+        if self.checkThreeMoveReptiton():
+            return 0
+
         # No Valid Moves = Lose
         if len(validMoves) == 0:
             return self.resolveEndGame(ply)
@@ -97,14 +105,7 @@ class ChessBoardModel():
 
                 removedPiece, prevEnPassant = self.movePiece(cmd)
                 score = (-1) * self._negamax(depth - 1, (-1) * beta, (-1) * alpha, ply + 1)
-
-                if self.zobristHash == prevzobristHash:
-                    print(cmd, "Zobrist Didn't Move Forward")
-
                 self.undoMove(cmd, removedPiece, prevEnPassant)
-
-                if prevzobristHash != self.zobristHash:
-                    print(cmd, "Zobrist Didn't Revert back to Normal")
 
                 maxEval = max(maxEval, score)
                 alpha = max(alpha, score)
@@ -128,6 +129,10 @@ class ChessBoardModel():
     # MinMaxSearch -> General
     def _quiesceneSearch(self, alpha: int, beta: int, depth: int = 0) -> int:
         staticEval = self._computeBoardValue()
+
+        # Three Move Repetition Draw
+        if self.checkThreeMoveReptiton():
+            return 0
 
         if staticEval >= beta:
             return beta
@@ -236,6 +241,20 @@ class ChessBoardModel():
         return 0
 
     # --------
+
+    def forwardPosition(self):
+        self.traversedPositions[self.zobristHash] = \
+            self.traversedPositions.get(self.zobristHash, 0) + 1
+
+    def backtrackPosition(self):
+        self.traversedPositions[self.zobristHash] = \
+            self.traversedPositions.get(self.zobristHash, 0) - 1
+
+    def checkThreeMoveReptiton(self):
+        if self.traversedPositions.get(self.zobristHash, 0) == 3:
+            return True
+        else:
+            return False
 
     @staticmethod
     def opponent(player: Player):
@@ -370,6 +389,9 @@ class ChessBoardModel():
         # Update En Passant Forward
         ChessBoardZobrist.forwardEnPassant(self, prevEnPassant)
 
+        # Update Board Position
+        self.forwardPosition()
+
         # Create a new copy of the removed Piece
         return removedPiece, prevEnPassant
 
@@ -378,6 +400,9 @@ class ChessBoardModel():
         # Swap the Player Turn
         self.playerTurn = ChessBoardModel.opponent(self.playerTurn)
         prevCastleIndex = ChessBoardZobrist.castleIndex(self)
+
+        # Backtrack Board Position
+        self.backtrackPosition()
 
         # Undo ZobristHash
         ChessBoardZobrist.backwardUpdate(self, cmd, restorePiece, prevEnPassant)

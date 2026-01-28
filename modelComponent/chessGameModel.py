@@ -52,6 +52,10 @@ class ChessGameModel():
             else:
                 self.gameState = GameState.WHITEWIN
 
+        # Set Draw
+        if self.chessBoard.checkThreeMoveReptiton():
+            self.gameState = GameState.DRAW
+
     # Validate Move
     def validateMove(self, initRow: int, initCol: int, targetRow: int, 
         targetCol: int, player: Player) -> MoveCommand:
