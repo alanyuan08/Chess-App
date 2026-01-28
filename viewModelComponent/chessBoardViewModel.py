@@ -9,7 +9,7 @@ from modelComponent.chessBoardModel import ChessBoardModel
 from PySide6.QtCore import QRunnable, QThreadPool, Slot
 
 # Enum
-from appEnums import PieceType, Player, MoveCommandType
+from appEnums import PieceType, Player, MoveCommandType, GameState
 import random
 
 # Controller 
@@ -51,6 +51,10 @@ class ChessBoardViewModel():
 
         moveCommand = self.chessGameModel.validateMove(initRow, 
             initCol, targetRow, targetCol, player)
+
+        # Game Over / Board is Locked
+        if self.chessGameModel.gameState != GameState.PLAYING:
+            return 
 
         if moveCommand != None:
             # Move the Chess Piece
