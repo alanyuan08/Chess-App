@@ -6,12 +6,13 @@ from modelComponent.chessBoardModel import ChessBoardModel
 from modelComponent.moveCommand import MoveCommand
 from modelComponent.openingMoveProtocal import OpeningMoveNodeProtocal
 from modelComponent.chessBoardZobrist import ChessBoardZobrist
+from modelComponent.transpositionTable import TranspositionTable
 
 # Factory
 from modelFactory.chessPieceFactory import ChessPieceFactory
 
 # Enum
-from appEnums import PieceType, Player, MoveCommandType, GameState
+from appEnums import PieceType, Player, MoveCommandType, GameState, TTBoundType
 
 # Multi Process
 import multiprocessing
@@ -34,6 +35,9 @@ class ChessGameModel():
 
         # Opening Handbook - Node Represents Current Move
         self.currOpeningMove = openingHandBook
+
+        # Transposition Table
+        self.transpositionTable = TranspositionTable()
 
     # Move Piece
     def movePiece(self, cmd: MoveCommand):
@@ -134,6 +138,21 @@ class ChessGameModel():
         validMoves = self.chessBoard.allValidMoves()
         validMoves.sort(key=lambda move: self.chessBoard._getMovePriority(move), reverse=True)
 
+        # Store Original Alpha 
+        originalAlpha = alpha
+
+        # Retrieve ttEntry Cache
+        ttEntry = self.transpositionTable.probe(self.chessBoard.zobristHash)
+        if ttEntry and ttEntry.depth >= depth:
+            if ttEntry.flag == TTBoundType.EXACT:
+                return ttEntry.score
+
+            elif ttEntry.flag == TTBoundType.UPPERBOUND and ttEntry.score <= alpha:
+                return ttEntry.score
+
+            elif ttEntry.flag == TTBoundType.LOWERBOUND and ttEntry.score >= beta:
+                return ttEntry.score
+
         # Three Move Repetition Draw
         if self.chessBoard.checkThreeMoveRepetiton():
             return 0
@@ -160,6 +179,20 @@ class ChessGameModel():
                 
                 if alpha >= beta:
                     break
+
+            # Store Value
+            ttValue = maxEval
+            flag = None
+            if ttValue <= originalAlpha:
+                flag = TTBoundType.UPPERBOUND
+
+            elif ttValue >= beta:
+                flag = TTBoundType.LOWERBOUND
+
+            else:
+                flag = TTBoundType.EXACT
+            self.transpositionTable.store(
+                self.chessBoard.zobristHash, maxEval, depth, flag)
 
             return maxEval
 

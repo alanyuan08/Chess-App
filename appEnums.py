@@ -27,3 +27,7 @@ class MoveCommandType(Enum):
     PAWNOPENMOVE = 6
     PROMOTE = 7
  
+class TTBoundType(Enum):
+ 	EXACT = 1
+ 	UPPERBOUND = 2
+ 	LOWERBOUND = 3
