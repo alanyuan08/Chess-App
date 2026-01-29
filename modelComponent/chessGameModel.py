@@ -91,7 +91,7 @@ class ChessGameModel():
         cmd1 = commandList[0]
         removedPiece, prevEnPassant = self.chessBoard.movePiece(cmd1)
         # Search the first move normally to get a strong alpha value quickly
-        score = (-1) * self.chessBoard._negamax(4, (-1) * beta, (-1) * alpha) 
+        score = (-1) * self._negamax(4, (-1) * beta, (-1) * alpha) 
         self.chessBoard.undoMove(cmd1, removedPiece, prevEnPassant)
 
         if score > bestScore:
@@ -104,7 +104,7 @@ class ChessGameModel():
         
         with concurrent.futures.ProcessPoolExecutor(max_workers=multiprocessing.cpu_count() - 1) as executor:
             futures = [
-                executor.submit(self.chessBoard._negamaxWorker, cmd, alpha, beta, 4) 
+                executor.submit(self._negamaxWorker, cmd, alpha, beta, 4) 
                 for cmd in remaining_moves
             ]
             
@@ -115,4 +115,51 @@ class ChessGameModel():
                     bestMove = move
 
         return bestMove
+
+    # -----
+
+    # This worker runs in a separate process
+    def _negamaxWorker(self, cmd: MoveCommand, currAlpha: int, currBeta: int, 
+            depth: int) -> (MoveCommand, int):
+        removedPiece, prevEnPassant = self.chessBoard.movePiece(cmd)
+        
+        # Negamx search for Best Position
+        score = (-1) * self._negamax(depth - 1, (-1) * currBeta, (-1) * currAlpha)
+                
+        return cmd, score
+
+
+    # MinMaxSearch -> General
+    def _negamax(self, depth: int, alpha: int, beta: int, ply: int = 0) -> int:
+        validMoves = self.chessBoard.allValidMoves()
+        validMoves.sort(key=lambda move: self.chessBoard._getMovePriority(move), reverse=True)
+
+        # Three Move Repetition Draw
+        if self.chessBoard.checkThreeMoveRepetiton():
+            return 0
+
+        # No Valid Moves = Lose / Draw
+        if len(validMoves) == 0:
+            return self.chessBoard.resolveEndGame(ply)
+
+        # Termination Condition
+        if depth == 0:
+            return self.chessBoard._quiesceneSearch(alpha, beta)
+        else:
+            maxEval = float('-inf')
+
+            for cmd in validMoves:
+                prevzobristHash = self.chessBoard.zobristHash
+
+                removedPiece, prevEnPassant = self.chessBoard.movePiece(cmd)
+                score = (-1) * self._negamax(depth - 1, (-1) * beta, (-1) * alpha, ply + 1)
+                self.chessBoard.undoMove(cmd, removedPiece, prevEnPassant)
+
+                maxEval = max(maxEval, score)
+                alpha = max(alpha, score)
+                
+                if alpha >= beta:
+                    break
+
+            return maxEval
 

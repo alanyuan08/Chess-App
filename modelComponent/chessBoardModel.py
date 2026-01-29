@@ -46,15 +46,6 @@ class ChessBoardModel():
         self.traversedPositions = {}
         self.forwardPosition()
 
-    # This worker runs in a separate process
-    def _negamaxWorker(self, cmd: MoveCommand, currAlpha: int, currBeta: int, depth: int) -> (MoveCommand, int):
-        removedPiece, prevEnPassant = self.movePiece(cmd)
-        
-        # Negamx search for Best Position
-        score = (-1) * self._negamax(depth - 1, (-1) * currBeta, (-1) * currAlpha)
-                
-        return cmd, score
-
     # Compute Board Value - White is Positive/ Black is Negative
     def _computeBoardValue(self) -> int:
         returnValue = 0
@@ -81,42 +72,9 @@ class ChessBoardModel():
         else:
             return (-1) * returnValue
 
-    # MinMaxSearch -> General
-    def _negamax(self, depth: int, alpha: int, beta: int, ply: int = 0) -> int:
-        validMoves = self.allValidMoves()
-        validMoves.sort(key=lambda move: self._getMovePriority(move), reverse=True)
-
-        # Three Move Repetition Draw
-        if self.checkThreeMoveRepetiton():
-            return 0
-
-        # No Valid Moves = Lose / Draw
-        if len(validMoves) == 0:
-            return self.resolveEndGame(ply)
-
-        # Termination Condition
-        if depth == 0:
-            return self._quiesceneSearch(alpha, beta)
-        else:
-            maxEval = float('-inf')
-
-            for cmd in validMoves:
-                prevzobristHash = self.zobristHash
-
-                removedPiece, prevEnPassant = self.movePiece(cmd)
-                score = (-1) * self._negamax(depth - 1, (-1) * beta, (-1) * alpha, ply + 1)
-                self.undoMove(cmd, removedPiece, prevEnPassant)
-
-                maxEval = max(maxEval, score)
-                alpha = max(alpha, score)
-                
-                if alpha >= beta:
-                    break
-
-            return maxEval
-
     # Used to Determine if Checkmate Or Draw
     def checkMate(self) -> bool:
+        opponentAttackTargets = self.allOpponentCaptureTargets()
         kingTuple = self.kingTuple(self.playerTurn)
         if kingTuple in opponentAttackTargets:
             return True
@@ -125,8 +83,6 @@ class ChessBoardModel():
 
     # Resolve End Game -> Called when No Valid Moves
     def resolveEndGame(self, ply: int) -> int:
-        opponentAttackTargets = self.allOpponentCaptureTargets()
-
         if self.checkMate():
             return -1000000 + ply 
         
@@ -146,9 +102,6 @@ class ChessBoardModel():
 
         if staticEval > alpha:
             alpha = staticEval
-
-        if depth >= 10:
-            return staticEval
 
         validMoves = self.allValidMoves()
         validMoves.sort(key=lambda move: self._getMovePriority(move), reverse=True)
@@ -554,7 +507,6 @@ class ChessBoardModel():
                     self.whiteCanKingSide = \
                         whiteKing.canKingSideCastle(self)
 
-
     # Update King Square
     def _updateKingSquare(self, startRow: int, startCol: int) -> None:
         movePiece = self.board[startRow][startCol]
@@ -686,4 +638,3 @@ class ChessBoardModel():
                         return False
 
         return True
-
