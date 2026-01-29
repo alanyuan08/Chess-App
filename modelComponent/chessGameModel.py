@@ -17,6 +17,7 @@ from appEnums import PieceType, Player, MoveCommandType, GameState, TTBoundType
 # Multi Process
 import multiprocessing
 import concurrent.futures
+from multiprocessing import shared_memory
 
 # Controller 
 class ChessGameModel():
@@ -191,8 +192,7 @@ class ChessGameModel():
 
             else:
                 flag = TTBoundType.EXACT
-            self.transpositionTable.store(
-                self.chessBoard.zobristHash, maxEval, depth, flag)
+            self.transpositionTable.store(self.chessBoard.zobristHash, maxEval, depth, flag)
 
             return maxEval
 
