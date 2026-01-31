@@ -1,6 +1,3 @@
-# Enum
-from appEnums import TTBoundType
-from dataclasses import dataclass
 from appEnums import PieceType
 
 # Model
@@ -26,7 +23,7 @@ class TTEntry:
             flagMap = 3
 
         return TTEntryCType(key, score, depth, flagMap)
-
+  
     @staticmethod
     def mapFromTTEntryCType(ttEntryCType: TTEntryCType) -> TTEntry:
         flag = None

@@ -37,6 +37,7 @@ class ChessGameModel():
 
     # Shared Transposition Table for NegaMax Processing
     ttTable = None
+    ttMask = 0
 
     # Move Piece
     def movePiece(self, cmd: MoveCommand):
@@ -88,7 +89,7 @@ class ChessGameModel():
         sharedttTable = TranspositionTable()
 
         with multiprocessing.Pool(initializer=ChessGameModel.init_worker, 
-            initargs=(sharedttTable,)) as pool:
+            initargs=(sharedttTable.table,)) as pool:
             for move, score in pool.imap_unordered(self._negamaxWorker, commandList):
                 if score > bestScore:
                     bestScore = score
@@ -98,10 +99,33 @@ class ChessGameModel():
 
     # -----
 
+    # Transpositon Table
+    def store(ttTable, ttMask, key: int, score: int, depth: int, flag: TTBoundType):
+        index = key & ttMask
+        existing = ttTable[index]
+        
+        # Replacement Strategy: Depth-Preferred
+        # Keep the search that went deeper, as it is more valuable
+        if existing is None or depth >= existing.depth:
+            self.table[index] = \
+                TTEntry,mapToTTEntryCType(key, score, depth, flag)
+
+    def probe(self, key: int) -> TTEntry:
+        index = key & self.mask
+        entry = self.table[index]
+        # Verification: The full 64-bit key MUST match
+        if entry and entry.key == key:
+            return TTEntry.mapFromTTEntryCType(entry)
+        return None
+
     @staticmethod
     def init_worker(sharedttTable: TranspositionTable):
         global ttTable
-        ttTable = sharedttTable
+        global ttMask
+
+        ttSize = 2 ** 26
+        ttMask = ttSize - 1
+        ttTable = multiprocessing.Array(TTEntryCType, ttSize, lock=False)
 
     # This worker runs in a separate process
     def _negamaxWorker(self, cmd: MoveCommand, depth: int = 5, 
