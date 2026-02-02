@@ -6,7 +6,6 @@ from modelComponent.chessBoardModel import ChessBoardModel
 from modelComponent.moveCommand import MoveCommand
 from modelComponent.openingMoveProtocal import OpeningMoveNodeProtocal
 from modelComponent.chessBoardZobrist import ChessBoardZobrist
-from modelComponent.transpositionTable import TranspositionTable
 
 # Factory
 from modelFactory.chessPieceFactory import ChessPieceFactory
@@ -16,6 +15,7 @@ from appEnums import PieceType, Player, MoveCommandType, GameState, TTBoundType
 
 # Multi Process
 import multiprocessing
+import concurrent.futures
 
 # Controller 
 class ChessGameModel():
@@ -34,10 +34,6 @@ class ChessGameModel():
 
         # Opening Handbook - Node Represents Current Move
         self.currOpeningMove = openingHandBook
-
-    # Shared Transposition Table for NegaMax Processing
-    ttTable = None
-    ttMask = 0
 
     # Move Piece
     def movePiece(self, cmd: MoveCommand):
@@ -82,54 +78,56 @@ class ChessGameModel():
         commandList = self.chessBoard.allValidMoves()
         commandList.sort(key=lambda move: self.chessBoard._getMovePriority(move), reverse=True)
 
+        alpha = float('-inf')
+        beta = float('inf')
+
         bestScore = float('-inf')
         bestMove = None
 
-        # Init Shared Transposition Table
-        sharedttTable = TranspositionTable()
+        if len(commandList) == 0:
+            return None
 
-        with multiprocessing.Pool(initializer=ChessGameModel.init_worker, 
-            initargs=(sharedttTable.table,)) as pool:
-            for move, score in pool.imap_unordered(self._negamaxWorker, commandList):
-                if score > bestScore:
-                    bestScore = score
-                    bestMove = move
-        
+        # Younger Brother Best Move
+        initMove = commandList[0]
+        for depth in range(1, 6):
+
+            # Compute the most optimal search move            
+            if bestMove != None:
+                print(depth, bestMove)
+                initMove = bestMove
+
+            removedPiece, prevEnPassant = self.chessBoard.movePiece(initMove)
+            # Search the first move normally to get a strong alpha value quickly
+            score = (-1) * self._negamax(depth, (-1) * beta, (-1) * alpha) 
+            self.chessBoard.undoMove(initMove, removedPiece, prevEnPassant)
+
+            # Older Brother 
+            bestScore = score
+            bestMove = initMove
+            alpha = score # Establish the strong alpha
+
+            # Younger Brother Parallel Search
+            remaining_moves = [item for item in commandList if item != initMove]
+            
+            with concurrent.futures.ProcessPoolExecutor(max_workers=multiprocessing.cpu_count() - 1) as executor:
+                futures = [
+                    executor.submit(self._negamaxWorker, cmd, alpha, beta, depth) 
+                    for cmd in remaining_moves
+                ]
+                
+                for future in concurrent.futures.as_completed(futures):
+                    move, score = future.result()
+                    if score > bestScore:
+                        bestScore = score
+                        bestMove = move
+
         return bestMove
 
     # -----
 
-    # Transpositon Table
-    def store(ttTable, ttMask, key: int, score: int, depth: int, flag: TTBoundType):
-        index = key & ttMask
-        existing = ttTable[index]
-        
-        # Replacement Strategy: Depth-Preferred
-        # Keep the search that went deeper, as it is more valuable
-        if existing is None or depth >= existing.depth:
-            self.table[index] = \
-                TTEntry,mapToTTEntryCType(key, score, depth, flag)
-
-    def probe(self, key: int) -> TTEntry:
-        index = key & self.mask
-        entry = self.table[index]
-        # Verification: The full 64-bit key MUST match
-        if entry and entry.key == key:
-            return TTEntry.mapFromTTEntryCType(entry)
-        return None
-
-    @staticmethod
-    def init_worker(sharedttTable: TranspositionTable):
-        global ttTable
-        global ttMask
-
-        ttSize = 2 ** 26
-        ttMask = ttSize - 1
-        ttTable = multiprocessing.Array(TTEntryCType, ttSize, lock=False)
-
     # This worker runs in a separate process
-    def _negamaxWorker(self, cmd: MoveCommand, depth: int = 5, 
-        currAlpha: int = float('-inf'), currBeta: int = float('inf')) -> (MoveCommand, int):
+    def _negamaxWorker(self, cmd: MoveCommand, currAlpha: int, currBeta: int, 
+            depth: int) -> (MoveCommand, int):
         removedPiece, prevEnPassant = self.chessBoard.movePiece(cmd)
         
         # Negamx search for Best Position
@@ -144,18 +142,6 @@ class ChessGameModel():
 
         # Store Original Alpha 
         originalAlpha = alpha
-
-        # Retrieve ttEntry Cache
-        ttEntry = ttTable.probe(self.chessBoard.zobristHash)
-        if ttEntry and ttEntry.depth >= depth:
-            if ttEntry.flag == TTBoundType.EXACT:
-                return ttEntry.score
-
-            elif ttEntry.flag == TTBoundType.UPPERBOUND and ttEntry.score <= alpha:
-                return ttEntry.score
-
-            elif ttEntry.flag == TTBoundType.LOWERBOUND and ttEntry.score >= beta:
-                return ttEntry.score
 
         # Three Move Repetition Draw
         if self.chessBoard.checkThreeMoveRepetiton():
@@ -184,18 +170,4 @@ class ChessGameModel():
                 if alpha >= beta:
                     break
 
-            # Store Value
-            ttValue = maxEval
-            flag = None
-            if ttValue <= originalAlpha:
-                flag = TTBoundType.UPPERBOUND
-
-            elif ttValue >= beta:
-                flag = TTBoundType.LOWERBOUND
-
-            else:
-                flag = TTBoundType.EXACT
-            ttTable.store(self.chessBoard.zobristHash, maxEval, depth, flag)
-
             return maxEval
-
