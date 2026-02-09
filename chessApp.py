@@ -10,6 +10,9 @@ from viewComponent.chessBoardView import ChessBoardView
 # Import ViewModel
 from viewModelComponent.chessBoardViewModel import ChessBoardViewModel
 
+# Import Rust Test
+import rustCompute		
+
 if __name__ == '__main__':
 	# Import Model
 	from modelFactory.chessGameFactory import ChessGameFactory
@@ -17,6 +20,9 @@ if __name__ == '__main__':
 	app = QApplication(sys.argv)
 
 	humanPlayer = [Player.BLACK, Player.WHITE]
+
+	# Test Rust Integration
+	rustCompute.test_print()
 
 	# Set Human Player
 	if len(sys.argv) > 1:

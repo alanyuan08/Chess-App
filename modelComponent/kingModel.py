@@ -59,12 +59,12 @@ class KingModel(ChessPieceModel):
 
 		# Castle Bonus
 		if self.castled:
-			returnScore += 90
+			returnScore += 50
 		else:
 			if not self.canQueenSideCastle(chessBoard):
-				returnScore -= 30
+				returnScore -= 20
 			elif not self.canKingSideCastle(chessBoard):
-				returnScore -= 30
+				returnScore -= 20
 
 		# Value Table Bonus
 		row = 0

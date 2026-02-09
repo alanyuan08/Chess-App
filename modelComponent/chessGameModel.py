@@ -89,7 +89,7 @@ class ChessGameModel():
 
         # Younger Brother Best Move
         initMove = commandList[0]
-        for depth in [3, 5]:
+        for depth in [3, 4]:
 
             # Compute the most optimal search move            
             if bestMove != None:
