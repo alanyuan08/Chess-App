@@ -21,4 +21,5 @@ impl Chessboard {
 pub fn new_chessBoard(width: u32, height: u32) {
     let chessBoard = Chessboard::new(width, height);
     println!("Area: {}", chessBoard.area());
+    chessBoad.area()
 }
