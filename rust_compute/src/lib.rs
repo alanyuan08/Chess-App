@@ -7,7 +7,7 @@ mod chessBoard;
 /// import the module.
 #[pymodule]
 fn rust_compute(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(chessBoard::test_print, m)?)?;
+    m.add_function(wrap_pyfunction!(chessBoard::new_chessBoard, m)?)?;
 
     Ok(())
 }
