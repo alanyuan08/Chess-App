@@ -130,7 +130,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rustCompute"
+name = "rust_compute"
 version = "0.1.0"
 dependencies = [
  "pyo3",

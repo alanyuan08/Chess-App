@@ -11,7 +11,7 @@ from viewComponent.chessBoardView import ChessBoardView
 from viewModelComponent.chessBoardViewModel import ChessBoardViewModel
 
 # Import Rust Test
-import rustCompute		
+import rust_compute		
 
 if __name__ == '__main__':
 	# Import Model
@@ -22,7 +22,7 @@ if __name__ == '__main__':
 	humanPlayer = [Player.BLACK, Player.WHITE]
 
 	# Test Rust Integration
-	rustCompute.test_print()
+	rust_compute.test_print("INPUT STRING HOOARY")
 
 	# Set Human Player
 	if len(sys.argv) > 1:

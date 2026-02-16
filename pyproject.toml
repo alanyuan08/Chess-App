@@ -10,4 +10,4 @@ requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"
 
 [tool.maturin]
-manifest-path = "rustCompute/Cargo.toml"
+manifest-path = "rust_compute/Cargo.toml"
