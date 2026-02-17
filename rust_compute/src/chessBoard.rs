@@ -18,8 +18,15 @@ impl Chessboard {
 }
 
 #[pyfunction]
-pub fn new_chessBoard(width: u32, height: u32) {
+pub fn new_chessBoard(width: u32, height: u32) -> bool {
     let chessBoard = Chessboard::new(width, height);
-    println!("Area: {}", chessBoard.area());
-    chessBoad.area()
+
+    let chessBoardArea = chessBoard.area();
+    println!("Area: {}", chessBoardArea);
+    
+    if chessBoardArea > 100 {
+        true
+    } else {
+        false
+    }
 }
