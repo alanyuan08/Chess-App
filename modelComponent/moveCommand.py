@@ -1,6 +1,6 @@
 # Enum
 from dataclasses import dataclass
-from appEnums import PieceType
+from appEnums import MoveCommandType
 
 @dataclass
 class MoveCommand:
@@ -8,4 +8,4 @@ class MoveCommand:
     startCol: int
     endRow: int
     endCol: int
-    moveType: PieceType
+    moveType: MoveCommandType

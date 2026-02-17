@@ -1,11 +1,11 @@
 use pyo3::prelude::*;
 
-struct Chessboard {
+pub struct ChessBoard {
     width: u32,
     height: u32,
 }
 
-impl Chessboard {
+impl ChessBoard {
     // A constructor-like associated function
     fn new(width: u32, height: u32) -> Self {
         Self { width, height }
@@ -18,13 +18,13 @@ impl Chessboard {
 }
 
 #[pyfunction]
-pub fn new_chessBoard(width: u32, height: u32) -> bool {
-    let chessBoard = Chessboard::new(width, height);
+pub fn new_chess_board(width: u32, height: u32) -> bool {
+    let chess_board = ChessBoard::new(width, height);
 
-    let chessBoardArea = chessBoard.area();
-    println!("Area: {}", chessBoardArea);
+    let chess_board_area = chess_board.area();
+    println!("Area: {}", chess_board_area);
     
-    if chessBoardArea > 100 {
+    if chess_board_area > 100 {
         true
     } else {
         false
