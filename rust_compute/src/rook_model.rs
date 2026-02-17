@@ -1,9 +1,8 @@
-use pyo3::prelude::*;
+use crate::chess_piece::ChessPiece;
 
-mod chess_piece;
-use chess_piece::ChessPiece;
+pub struct RookModel;
 
-impl RookModel for ChessPiece {
+impl ChessPiece for RookModel {
     fn phase_weight(&self) -> u32 {
         2
     }

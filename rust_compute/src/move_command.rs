@@ -1,11 +1,9 @@
-use pyo3::prelude::*;
-
 pub struct MoveCommand {
-    startRow: u32,
-    startCol: u32,
-    endRow: u32,
-    endCol: u32,
-    moveType: MoveCommandType
+    start_row: u32,
+    start_col: u32,
+    end_row: u32,
+    end_col: u32,
+    move_type: MoveCommandType
 }
 
 #[derive(Debug, PartialEq)]

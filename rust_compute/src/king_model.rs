@@ -1,9 +1,8 @@
-use pyo3::prelude::*;
+use crate::chess_piece::ChessPiece;
 
-mod chess_piece;
-use chess_piece::ChessPiece;
+pub struct KingModel;
 
-impl KingModel for ChessPiece {
+impl ChessPiece for KingModel {
     fn phase_weight(&self) -> u32 {
         0
     }
