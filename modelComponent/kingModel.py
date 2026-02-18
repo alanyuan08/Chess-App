@@ -43,6 +43,12 @@ class KingModel(ChessPieceModel):
 	    [-50, -30, -30, -30, -30, -30, -30, -50] 
 	]
 
+	def fenValue(self) -> str:
+		if self.player == Player.BLACK:
+			return "k"
+		else:
+			return "K"
+
 	# Update Castle
 	def updateCastle(self, castled: bool):
 		self.castled = castled

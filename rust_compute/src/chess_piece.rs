@@ -2,7 +2,7 @@ use crate::chess_board::ChessBoard;
 use crate::move_command::MoveCommand;
 
 #[derive(Debug, PartialEq)]
-enum Color {
+pub enum Color {
     White,
     Black,
 }

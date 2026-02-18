@@ -60,6 +60,8 @@ class ChessBoardViewModel():
             # Move the Chess Piece
             self.chessGameModel.movePiece(moveCommand)
 
+            print(self.chessGameModel.computeForsythEdwardsNotation())
+
             # Communicate the command to FrontEnd
             self.communicatorProxy.signalUpdateRequest(moveCommand)
 

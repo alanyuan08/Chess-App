@@ -22,7 +22,7 @@ if __name__ == '__main__':
 	humanPlayer = [Player.BLACK, Player.WHITE]
 
 	# Test Rust Integration
-	print(rust_compute.new_chess_board(15, 10))
+	# print(rust_compute.new_chess_board(15, 10))
 
 	# Set Human Player
 	if len(sys.argv) > 1:

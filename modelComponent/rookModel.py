@@ -27,6 +27,12 @@ class RookModel(ChessPieceModel):
 	    [ 0,  0,  0,  5,  5,  0,  0,  0] 
 	]
 
+	def fenValue(self) -> str:
+		if self.player == Player.BLACK:
+			return "r"
+		else:
+			return "R"
+
 	def phaseWeight(self) -> int:
 		return 2
 

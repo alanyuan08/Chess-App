@@ -46,6 +46,34 @@ class ChessBoardModel():
         self.traversedPositions = {}
         self.forwardPosition()
 
+    # Return Forsyth-Edwards Notation (FEN)
+    def computeForsythEdwardsNotation(self) -> str:
+        returnString = []
+
+        for r in range(7, -1, -1):
+            emptyCount = 0 
+            for item in self.board[r]:
+                if item != None:
+                    if emptyCount > 0:
+                        returnString.append(str(emptyCount))
+
+                    returnString.append(item.fenValue())
+                    emptyCount = 0
+
+                else:
+                    emptyCount += 1
+
+            # End of Row
+            if emptyCount > 0:
+                returnString.append(str(emptyCount))
+
+            # Append /
+            if r > 0:
+                returnString.append("/")
+
+        return "".join(returnString)
+
+
     # Compute Board Value - White is Positive/ Black is Negative
     def _computeBoardValue(self) -> int:
         returnValue = 0

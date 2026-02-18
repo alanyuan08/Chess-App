@@ -41,6 +41,12 @@ class QueenModel(ChessPieceModel):
 	    [-20, -15, -10,  -5,  -5, -10, -15, -20]
 	]
 
+	def fenValue(self) -> str:
+		if self.player == Player.BLACK:
+			return "q"
+		else:
+			return "Q"
+
 	def pieceValue(self) -> int:
 		return 900
 

@@ -35,6 +35,10 @@ class ChessGameModel():
         # Opening Handbook - Node Represents Current Move
         self.currOpeningMove = openingHandBook
 
+    # Return Forsyth-Edwards Notation (FEN)
+    def computeForsythEdwardsNotation(self) -> str:
+        return self.chessBoard.computeForsythEdwardsNotation()
+
     # Move Piece
     def movePiece(self, cmd: MoveCommand):
         # Move the Chess Piece

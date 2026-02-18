@@ -9,5 +9,8 @@ fi
 source .venv/bin/activate
 pip install .
 
+# Build Rust
+# maturin develop 
+
 # 3. Run your main script
 python chessApp.py black

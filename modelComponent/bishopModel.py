@@ -27,6 +27,12 @@ class BishopModel(ChessPieceModel):
 	    [-20, -10, -10, -10, -10, -10, -10, -20]
 	]
 
+	def fenValue(self) -> str:
+		if self.player == Player.BLACK:
+			return "b"
+		else:
+			return "B"
+
 	def phaseWeight(self) -> int:
 		return 1
 

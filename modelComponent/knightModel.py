@@ -27,6 +27,13 @@ class KnightModel(ChessPieceModel):
 	    [-50, -40, -30, -30, -30, -30, -40, -50]
 	]
 
+	def fenValue(self) -> str:
+		if self.player == Player.BLACK:
+			return "n"
+		else:
+			return "N"
+
+
 	def phaseWeight(self) -> int:
 		return 1
 

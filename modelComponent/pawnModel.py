@@ -40,6 +40,12 @@ class PawnModel(ChessPieceModel):
 	    [  0,   0,   0,   0,   0,   0,   0,   0]
 	]
 
+	def fenValue(self) -> str:
+		if self.player == Player.BLACK:
+			return "p"
+		else:
+			return "P"
+
 	# Pawn isn't part of Phase Weights
 	def phaseWeight(self) -> int:
 		return 0
