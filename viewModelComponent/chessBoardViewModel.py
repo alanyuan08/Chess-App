@@ -60,8 +60,6 @@ class ChessBoardViewModel():
             # Move the Chess Piece
             self.chessGameModel.movePiece(moveCommand)
 
-            print(self.chessGameModel.computeForsythEdwardsNotation())
-
             # Communicate the command to FrontEnd
             self.communicatorProxy.signalUpdateRequest(moveCommand)
 
@@ -79,7 +77,7 @@ class ChessBoardViewModel():
 
     def takeOpponentTurn(self):
         # Compute Opponent Move
-        opponentCmd = self.chessGameModel.computeBestMove()
+        opponentCmd = self.chessGameModel.computeBestMove()        
 
         # Move the Chess Piece
         self.chessGameModel.movePiece(opponentCmd)

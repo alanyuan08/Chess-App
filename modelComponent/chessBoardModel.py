@@ -71,6 +71,29 @@ class ChessBoardModel():
             if r > 0:
                 returnString.append("/")
 
+        if self.playerTurn == Player.WHITE:
+            returnString.append(" w")
+        else:
+            returnString.append(" b")
+
+        # Black Castle
+        castleRights = ""
+
+        if self.whiteCanKingSide:
+            castleRights += "Q"
+        if self.whiteCanQueenSide:
+            castleRights += "K"
+
+        if self.blackCanKingSide:
+            castleRights += "q"
+        if self.blackCanQueenSide:
+            castleRights += "k"
+
+        if castleRights == "":
+            returnString.append(" -")
+        else:
+            returnString.append(" " + castleRights)
+
         return "".join(returnString)
 
 
@@ -282,6 +305,7 @@ class ChessBoardModel():
 
     # Move Piece
     def movePiece(self, cmd: MoveCommand) -> Union[Optional[ChessPieceModel], int]:
+
         # Store for Undo
         removedPiece = None
         prevCastleIndex = ChessBoardZobrist.castleIndex(self)
@@ -379,6 +403,7 @@ class ChessBoardModel():
 
         # Update Board Position
         self.forwardPosition()
+
 
         # Create a new copy of the removed Piece
         return removedPiece, prevEnPassant

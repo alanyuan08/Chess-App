@@ -1,4 +1,4 @@
-# Enum
+    # Enum
 from appEnums import PieceType, Player, MoveCommandType
 
 # Import Factory
@@ -17,20 +17,20 @@ class ChessBoardFactory:
 
         newBoard = ChessBoardModel()
     
-        # Poplute Black Pieces
+        # Populate Black Pieces
         for col in range(0, 8):
             type = materialLine[col]
             newBoard.board[7][col] = ChessPieceFactory.createChessPiece(type, Player.BLACK, 7, col)
 
-        # Poplute Black Pawns
+        # Populate Black Pawns
         for col in range(0, 8):
             newBoard.board[6][col] = ChessPieceFactory.createChessPiece(PieceType.PAWN, Player.BLACK, 6, col)
 
-        # Poplute White Pawns
+        # Populate White Pawns
         for col in range(0, 8):
             newBoard.board[1][col] = ChessPieceFactory.createChessPiece(PieceType.PAWN, Player.WHITE, 1, col)
 
-        # Poplute White Pieces
+        # Populate White Pieces
         for col in range(0, 8):
             type = materialLine[col]
             newBoard.board[0][col] = ChessPieceFactory.createChessPiece(type, Player.WHITE, 0, col)

@@ -1,6 +1,5 @@
 use pyo3::prelude::*;
-
-use crate::chess_piece::ChessPiece;
+use crate::bishop_mask::BISHOP_MASKS;
 
 #[derive(Debug, PartialEq)]
 enum PlayerTurn {
@@ -12,10 +11,7 @@ pub struct ChessBoard {
     width: u32,
     height: u32,
     player_turn: PlayerTurn,
-    chess_board: [[Option<Box<dyn ChessPiece>>; 8]; 8]
 }
-
-const EMPTY: Option<Box<dyn ChessPiece>> = None;
 
 impl ChessBoard {
     // A constructor-like associated function
@@ -24,7 +20,6 @@ impl ChessBoard {
             width, 
             height, 
             player_turn: PlayerTurn::White,
-            chess_board: [const { [const { None }; 8] }; 8]
         }
     }
 
@@ -37,6 +32,13 @@ impl ChessBoard {
 #[pyfunction]
 pub fn new_chess_board(width: u32, height: u32) -> bool {
     let chess_board = ChessBoard::new(width, height);
+
+    let masks = BISHOP_MASKS.get().ok_or_else(|| {
+        PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("Masks not initialized")
+    });
+
+    println!("{:?}", masks);
+    
 
     let chess_board_area = chess_board.area();
     println!("Area: {}", chess_board_area);

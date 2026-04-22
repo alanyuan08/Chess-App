@@ -26,7 +26,7 @@ class ChessBoardView(QGraphicsPixmapItem):
 		pixmap = QPixmap("img/chessBackground.jpg")
 		super().__init__(pixmap.scaled(720, 720), None)
 
-		pixmapItem = scene.addItem(self)
+		scene.addItem(self)
 		self.setPos(0, 60)
 		self.scene = scene
 
