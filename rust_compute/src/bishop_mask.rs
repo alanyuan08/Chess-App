@@ -18,6 +18,16 @@ pub fn mask(sq: u8) -> u64 {
             cur_f += df;
         }
     }
+
+    for rank in (0..8).rev() { // Start from top rank (8) down to (1)
+        for file in 0..8 {
+            let bit = (mask >> (rank * 8 + file)) & 1;
+            print!("{} ", bit);
+        }
+        println!(); // New line after each rank
+    }
+    println!();
+    
     mask
 }
 
