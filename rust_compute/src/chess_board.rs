@@ -33,13 +33,10 @@ impl ChessBoard {
 pub fn new_chess_board(width: u32, height: u32) -> bool {
     let chess_board = ChessBoard::new(width, height);
 
-    let masks = BISHOP_MASKS.get().ok_or_else(|| {
-        PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("Masks not initialized")
-    });
+    let masks = BISHOP_MASKS;
 
     println!("{:?}", masks);
     
-
     let chess_board_area = chess_board.area();
     println!("Area: {}", chess_board_area);
     

@@ -404,7 +404,6 @@ class ChessBoardModel():
         # Update Board Position
         self.forwardPosition()
 
-
         # Create a new copy of the removed Piece
         return removedPiece, prevEnPassant
 
