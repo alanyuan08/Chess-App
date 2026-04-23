@@ -33,12 +33,22 @@ impl ChessBoard {
 pub fn new_chess_board(width: u32, height: u32) -> bool {
     let chess_board = ChessBoard::new(width, height);
 
-    let masks = BISHOP_MASKS;
+    for mask in &BISHOP_MASKS {
+        let mut r = 7;
+        while r >= 0 {
+            let mut c = 0;
+            while c < 8 {
+                print!("{}", ((mask >> r*8 + c) & 1));
+                c += 1;
+            }
+            r -= 1;
+            println!("");
+        }
+        println!("");
 
-    println!("{:?}", masks);
+    }
     
     let chess_board_area = chess_board.area();
-    println!("Area: {}", chess_board_area);
     
     if chess_board_area > 100 {
         true
