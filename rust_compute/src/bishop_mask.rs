@@ -9,8 +9,6 @@ pub const BISHOP_MASKS: [u64; 64] = {
     masks
 };
 
-// (Board & Mask) * Magic Number >> (64 - n)
-
 // Compute the number of significant bits to shift 
 pub const BISHOP_SHIFT: [u64; 64] = {
     let mut shifts = [0u64; 64];
@@ -22,11 +20,22 @@ pub const BISHOP_SHIFT: [u64; 64] = {
     shifts
 };
 
+// Compute the offset for the calculation 
 pub const BISHOP_OFFSETS: [u64; 64] = {
-    let mut magic_number = [0u64; 64];
+    let mut offset = [0u64; 64];
 
-    magic_number
+    let mut i = 0;
+    let mut agg = 0;
+    while i < 64 {
+        agg += BISHOP_SHIFT[i]
+        offset[i] = agg;
+        i += 1;
+    }
+
+    offset
 };
+
+// (Board & Mask) * Magic Number >> (64 - n)
 
 // Compute 
 pub const BISHOP_MAGIC: [u64; 64] = {

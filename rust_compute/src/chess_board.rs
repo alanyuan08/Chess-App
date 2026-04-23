@@ -49,7 +49,7 @@ pub fn new_chess_board(width: u32, height: u32) -> bool {
     }
     */
 
-    for shift in &BISHOP_SHIFT {
+    for shift in &BISHOP_OFFSETS {
         println!("{}", shift);
     }
     
