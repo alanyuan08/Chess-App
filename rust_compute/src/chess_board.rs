@@ -1,5 +1,5 @@
 use pyo3::prelude::*;
-use crate::bishop_mask::BISHOP_MASKS;
+use crate::bishop_mask::*;
 
 #[derive(Debug, PartialEq)]
 enum PlayerTurn {
@@ -33,6 +33,7 @@ impl ChessBoard {
 pub fn new_chess_board(width: u32, height: u32) -> bool {
     let chess_board = ChessBoard::new(width, height);
 
+    /*
     for mask in &BISHOP_MASKS {
         let mut r = 7;
         while r >= 0 {
@@ -45,7 +46,11 @@ pub fn new_chess_board(width: u32, height: u32) -> bool {
             println!("");
         }
         println!("");
+    }
+    */
 
+    for shift in &BISHOP_SHIFT {
+        println!("{}", shift);
     }
     
     let chess_board_area = chess_board.area();

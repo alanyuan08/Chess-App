@@ -1,3 +1,4 @@
+// Mask the Irrelevant Bits no in the Diagonal Path
 pub const BISHOP_MASKS: [u64; 64] = {
     let mut masks = [0u64; 64];
     let mut i = 0;
@@ -8,14 +9,37 @@ pub const BISHOP_MASKS: [u64; 64] = {
     masks
 };
 
-// Retrieval 
-// 1 - Apply Board + Mask only diagonal values
-// 2 - ((occupancy & mask) * magic_number) >> (64 - shift)
+// (Board & Mask) * Magic Number >> (64 - n)
 
-// Compile - Build
-// 1 - Generate every possiblity -> Store inside a set
-// 2 - Test magic number for all 2096 possbilities to see if there are collisions
-// 3 - Build the Hash Table
+// Compute the number of significant bits to shift 
+pub const BISHOP_SHIFT: [u64; 64] = {
+    let mut shifts = [0u64; 64];
+    let mut i = 0;
+    while i < 64 {
+        shifts[i] = compute_shift(i as u8);
+        i += 1;
+    }
+    shifts
+};
+
+pub const BISHOP_OFFSETS: [u64; 64] = {
+    let mut magic_number = [0u64; 64];
+
+    magic_number
+};
+
+// Compute 
+pub const BISHOP_MAGIC: [u64; 64] = {
+    let mut magic_number = [0u64; 64];
+
+    magic_number
+};
+
+pub const BISHOP_ATTACKS: [u64; 64] = {
+    let mut magic_number = [0u64; 64];
+
+    magic_number
+};
 
 // Mask the diagonal route
 pub const fn mask(sq: u8) -> u64 {
@@ -42,6 +66,26 @@ pub const fn mask(sq: u8) -> u64 {
 
     mask
 }
+
+// Compute shift 
+pub const fn compute_shift(sq: u8) -> u64 {
+    let r = (sq / 8) as i8;
+    let f = (sq % 8) as i8;
+
+    let col_left = if f > 1 { f - 1 } else { 0 };
+    let col_right = if f < 6 { 6 - f } else { 0 };
+    let row_bot = if r > 1 { r - 1 } else { 0 };
+    let row_top = if r < 6 { 6 - r } else { 0 };
+
+    let mut shift = 0;
+    shift += if col_left < row_bot { col_left } else { row_bot };
+    shift += if col_right < row_bot { col_right } else { row_bot };
+    shift += if col_left < row_top { col_left } else { row_top };
+    shift += if col_right < row_top { col_right } else { row_top };
+
+    1 << shift
+}
+
 
 // Mask the capture targets
 pub const fn compute_path_mask(sq: u8, input_board: u64) -> u64 {
