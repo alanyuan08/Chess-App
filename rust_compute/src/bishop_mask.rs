@@ -27,7 +27,7 @@ pub const BISHOP_OFFSETS: [u64; 64] = {
     let mut i = 0;
     let mut agg = 0;
     while i < 64 {
-        agg += BISHOP_SHIFT[i]
+        agg += BISHOP_SHIFT[i];
         offset[i] = agg;
         i += 1;
     }
@@ -95,10 +95,9 @@ pub const fn compute_shift(sq: u8) -> u64 {
     1 << shift
 }
 
-
-// Mask the capture targets
-pub const fn compute_path_mask(sq: u8, input_board: u64) -> u64 {
-    let mut mask: u64 = 0;
+// Compute Bishop Attack Targets
+pub const fn compute_bishop_attacks(sq: usize, occupancy: u64) -> u64 {
+    let mut attacks = 0u64;    
     let r = (sq / 8) as i8;
     let f = (sq % 8) as i8;
 
@@ -109,19 +108,18 @@ pub const fn compute_path_mask(sq: u8, input_board: u64) -> u64 {
     while d < 4 {
         let (dr, df) = directions[d];
         let (mut cur_r, mut cur_f) = (r + dr, f + df);
-        
-        // Bitboard Excludes the Edges of the Board
-        while cur_r > 0 && cur_r < 7 && cur_f > 0 && cur_f < 7 {
 
-            if (input_board >> (cur_r * 8 + cur_f)) & 1 == 0 {
-                mask |= 1 << (cur_r * 8 + cur_f);
-                cur_r += dr;
-                cur_f += df;
+        while cur_r >= 0 && cur_r <= 7 && cur_f >= 0 && cur_f <= 7 {
+            let target_bit = 1u64 << (cur_r * 8 + cur_f);
+            attacks |= target_bit;
+
+            if (occupancy & target_bit) != 0 {
+                break;
             }
-            break;
+            
+            r += dr;
+            f += df;
         }
-        d += 1;
     }
-
-    mask
+    attacks
 }
