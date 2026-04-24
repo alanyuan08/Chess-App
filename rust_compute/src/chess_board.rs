@@ -48,10 +48,6 @@ pub fn new_chess_board(width: u32, height: u32) -> bool {
         println!("");
     }
     */
-
-    for shift in &BISHOP_OFFSETS {
-        println!("{}", shift);
-    }
     
     let chess_board_area = chess_board.area();
     

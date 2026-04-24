@@ -1,3 +1,5 @@
+use const_random::const_random;
+
 // Mask the Irrelevant Bits no in the Diagonal Path
 pub const BISHOP_MASKS: [u64; 64] = {
     let mut masks = [0u64; 64];
@@ -35,19 +37,17 @@ pub const BISHOP_OFFSETS: [u64; 64] = {
     offset
 };
 
-// (Board & Mask) * Magic Number >> (64 - n)
-
 // Compute 
 pub const BISHOP_MAGIC: [u64; 64] = {
-    let mut magic_number = [0u64; 64];
+    let magic_number = [0u64; 64];
 
     magic_number
 };
 
 pub const BISHOP_ATTACKS: [u64; 64] = {
-    let mut magic_number = [0u64; 64];
+    let bishop_attack = [0u64; 64];
 
-    magic_number
+    bishop_attack
 };
 
 // Mask the diagonal route
@@ -117,9 +117,46 @@ pub const fn compute_bishop_attacks(sq: usize, occupancy: u64) -> u64 {
                 break;
             }
             
-            r += dr;
-            f += df;
+            cur_r += dr;
+            cur_f += df;
         }
+        d += 1;
     }
     attacks
 }
+
+// Compute Possible Boards using Ripply-Carry
+
+// Given a mask m:
+// Initialize: Start with the mask itself: s = m.
+// Process: Use the current s as a submask.
+// Iterate: Update s to the next smaller submask using:
+// s = (s - 1) & m
+// Terminate: Repeat steps 2-3 until s becomes 0. 
+
+pub const fn compute_ripply_carry(sq: usize, mask: u64, size: usize) -> Vec<u32>  {
+    Vec::new()
+}
+
+pub const fn random_u64() -> u64 {
+    const_random!(u64)
+}
+
+// Compute Bishop Magic
+pub const fn compute_bishop_magic(sq: usize, occupancy: u64) -> u64 {
+    let mut magic = 0u64;
+
+    let mut i = 0;
+    while i < 64 {
+        let candidate = random_u64() & random_u64() & random_u64();
+
+        let shift = BISHOP_SHIFT[i];
+        let mask = BISHOP_MASKS[i];
+        let spaces = 1 << shift;
+        i += 1;
+    }
+
+    magic
+}
+
+// (Board & Mask) * Magic Number >> (64 - n)
