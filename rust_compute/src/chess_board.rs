@@ -33,10 +33,6 @@ impl ChessBoard {
 pub fn new_chess_board(width: u32, height: u32) -> bool {
     let chess_board = ChessBoard::new(width, height);
     
-    for i in 0..5248 {
-        println!("Computed magic: {}", BISHOP_ATTACKS[i]);
-    }
-    
     let chess_board_area = chess_board.area();
     
     if chess_board_area > 100 {
