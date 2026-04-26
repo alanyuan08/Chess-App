@@ -49,6 +49,10 @@ pub fn new_chess_board(width: u32, height: u32) -> bool {
     }
     */
     
+    for i in 0..64 {
+        println!("Computed magic: {}", BISHOP_MAGIC[i]);
+    }
+    
     let chess_board_area = chess_board.area();
     
     if chess_board_area > 100 {
