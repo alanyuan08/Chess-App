@@ -1,4 +1,3 @@
-use const_random::const_random;
 use std::sync::LazyLock;
 
 // Mask the Irrelevant Bits no in the Diagonal Path
@@ -30,8 +29,8 @@ pub const BISHOP_OFFSETS: [u64; 64] = {
     let mut i = 0;
     let mut agg = 0;
     while i < 64 {
-        agg += 1 << BISHOP_SHIFT[i];
         offset[i] = agg;
+        agg += 1 << BISHOP_SHIFT[i];
         i += 1;
     }
 
@@ -51,8 +50,30 @@ pub static BISHOP_MAGIC: LazyLock<[u64; 64]> = LazyLock::new(|| {
     magic_number
 });
 
-pub static BISHOP_ATTACKS: LazyLock<[u64; 64]> = LazyLock::new(|| {
-    let bishop_attack = [0u64; 64];
+// Compute Bishop Attack after Bishop Magic is computed
+
+// Number of Bishop Combinations is 5248
+pub static BISHOP_ATTACKS: LazyLock<[u64; 5248]> = LazyLock::new(|| {
+    let mut bishop_attack = [0u64; 5248];
+
+    for i in 0..64 {
+        let magic_number = BISHOP_MAGIC[i];
+        let shift = BISHOP_SHIFT[i];
+
+        let mask = BISHOP_MASKS[i];
+        let offset = BISHOP_OFFSETS[i];
+
+        let mut board = mask;
+        loop {
+            let index = ((board & mask) * magic_number) >> (64 - shift);
+            let attack = compute_bishop_attacks(i, board);
+
+            bishop_attack[(offset + index) as usize] = attack;
+
+            board = (board - 1) & mask;
+            if board == 0 { break; }
+        }
+    }
 
     bishop_attack
 });
@@ -136,7 +157,6 @@ pub fn compute_bishop_magic(sq: usize) -> u64 {
     let shift = BISHOP_SHIFT[sq];
     let mask = BISHOP_MASKS[sq];
     let size = 1 << shift;
-    let index_shift = 64 - shift ;
 
     let mut seed: u64 = 0x12345678;
 
@@ -157,7 +177,7 @@ pub fn compute_bishop_magic(sq: usize) -> u64 {
         // (Board & Mask) * Magic Number >> (64 - n)
         let mut board = mask;
         loop {
-            let index = ((board & mask) * magic_candidate) >> index_shift;
+            let index = ((board & mask) * magic_candidate) >> (64 - shift);
             let attack = compute_bishop_attacks(sq, board);
 
             if results[index as usize] == 0 || results[index as usize] == attack {

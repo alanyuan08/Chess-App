@@ -32,25 +32,9 @@ impl ChessBoard {
 #[pyfunction]
 pub fn new_chess_board(width: u32, height: u32) -> bool {
     let chess_board = ChessBoard::new(width, height);
-
-    /*
-    for mask in &BISHOP_MASKS {
-        let mut r = 7;
-        while r >= 0 {
-            let mut c = 0;
-            while c < 8 {
-                print!("{}", ((mask >> r*8 + c) & 1));
-                c += 1;
-            }
-            r -= 1;
-            println!("");
-        }
-        println!("");
-    }
-    */
     
-    for i in 0..64 {
-        println!("Computed magic: {}", BISHOP_MAGIC[i]);
+    for i in 0..5248 {
+        println!("Computed magic: {}", BISHOP_ATTACKS[i]);
     }
     
     let chess_board_area = chess_board.area();
