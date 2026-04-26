@@ -78,6 +78,19 @@ pub static BISHOP_ATTACKS: LazyLock<[u64; 5248]> = LazyLock::new(|| {
     bishop_attack
 });
 
+// Retrieve the Bishop Attack Paths for board / position
+pub fn BISHOP_FETCH(sq: u8, board: u64) {
+    let magic_number = BISHOP_MAGIC[i];
+    let shift = BISHOP_SHIFT[i];
+
+    let mask = BISHOP_MASKS[i];
+    let offset = BISHOP_OFFSETS[i];
+
+    let index = ((board & mask) * magic_number) >> (64 - shift);
+
+    bishop_attack[(offset + index) as usize]
+}
+
 // Mask the diagonal route
 pub const fn mask(sq: u8) -> u64 {
     let mut mask: u64 = 0;
