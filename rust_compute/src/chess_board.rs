@@ -1,4 +1,5 @@
 use pyo3::prelude::*;
+use std::collections::HashMap;
 use crate::bishop_mask::*;
 
 // 0 -> White / 1 -> Black
@@ -39,15 +40,29 @@ impl ChessBoard {
             total_moves: 0,
         }
     }
+    fn move_piece(&mut self, move: &String) {
+        let map = HashMap::from([
+            ('a', 0), ('b', 1), ('c', 2), ("d", 3),
+            ("e", 4), ("f", 5), ("g", 6), ("h", 7),
+        ]);
+        
+        let result: Vec<u32> = input.chars().map(|c| {
+            if c.is_alphabetic() {
+                // Fetch from map, default to 0 if not found
+                *map.get(&c).unwrap_or(&0) 
+            } else {
+                // Convert digit char to its numeric value (e.g., '3' -> 3)
+                c.to_digit(10).unwrap_or(0)
+            }
+        }).collect();
+
+        println!("{:?}", result);
+    }
 }
 
 #[pyfunction]
 pub fn compute_next_move(prev_moves: Vec<String>) -> bool {
     let chess_board = ChessBoard::new();
-
-    for prev_move in &prev_moves {
-        println!("{}", prev_move);
-    }
 
     true
 }
