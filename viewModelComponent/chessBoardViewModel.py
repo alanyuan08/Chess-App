@@ -69,9 +69,8 @@ class ChessBoardViewModel():
                 self.chessGameModel.gamePlayerTurn
             )
 
-            # Rust Integration - Fake Wheel
-            fen_notation = self.chessGameModel.computeForsythEdwardsNotation()
-            print(rust_compute.compute_next_move(fen_notation))
+            # Rust Integration
+            print(rust_compute.compute_next_move(self.chessGameModel.returnChessUCIMoves()))
 
             # Run the compute for the Opponent's Move
             if self.computerTurn():

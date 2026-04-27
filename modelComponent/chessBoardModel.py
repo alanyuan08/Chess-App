@@ -32,6 +32,9 @@ class ChessBoardModel():
         self.blackKingSquareRow = 7
         self.blackKingSquareCol = 4
 
+        # Used to Store previous Moves in UCI Format
+        self.previousMoves = []
+
         # Use for Zobrist Hash
         self.whiteCanQueenSide = True
         self.whiteCanKingSide = True
@@ -404,6 +407,12 @@ class ChessBoardModel():
         # Update Board Position
         self.forwardPosition()
 
+        # Update UCI
+        colArray = ["a", "b", "c", "d", "e", "f", "g", "h"]
+        self.previousMoves.append(
+            colArray[cmd.startCol] + str(cmd.startRow + 1) + colArray[cmd.endCol] + str(cmd.endRow + 1)
+        )
+
         # Create a new copy of the removed Piece
         return removedPiece, prevEnPassant
 
@@ -412,6 +421,9 @@ class ChessBoardModel():
         # Swap the Player Turn
         self.playerTurn = ChessBoardModel.opponent(self.playerTurn)
         prevCastleIndex = ChessBoardZobrist.castleIndex(self)
+
+        # Remove Last Move
+        self.previousMoves.pop()
 
         # Backtrack Board Position
         self.backtrackPosition()
