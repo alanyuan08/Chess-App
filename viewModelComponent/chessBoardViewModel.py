@@ -2,15 +2,15 @@
 from communicatorProxy import CommunicatorProxy
 
 # Models
-from modelComponent.moveCommand import MoveCommand
 from modelComponent.chessBoardModel import ChessBoardModel
 
 # QTCore
 from PySide6.QtCore import QRunnable, QThreadPool, Slot
 
 # Enum
-from appEnums import PieceType, Player, MoveCommandType, GameState
-import random
+from appEnums import Player, GameState
+
+import rust_compute		
 
 # Controller 
 class ChessBoardViewModel():
@@ -68,6 +68,10 @@ class ChessBoardViewModel():
                 self.chessGameModel.gameState, 
                 self.chessGameModel.gamePlayerTurn
             )
+
+            # Rust Integration - Fake Wheel
+            fen_notation = self.chessGameModel.computeForsythEdwardsNotation()
+            print(rust_compute.compute_next_move(fen_notation))
 
             # Run the compute for the Opponent's Move
             if self.computerTurn():

@@ -1,43 +1,40 @@
 use pyo3::prelude::*;
 use crate::bishop_mask::*;
 
-#[derive(Debug, PartialEq)]
-enum PlayerTurn {
-    White,
-    Black,
-}
+/*
 
-pub struct ChessBoard {
-    width: u32,
-    height: u32,
+// 0 -> White / 1 -> Black
+struct ChessBoard {
+    pawns: [u64; 2],
+    knights: [u64; 2],
+    bishops: [u64; 2],
+    rooks: [u64; 2],
+    queens: [u64; 2],
+    kings: [u64; 2],
+    
+    all_pieces: [u64; 2],
+    occupied: u64,
     player_turn: PlayerTurn,
+
+    castling_rights: u8,
+    en_passant: i8,
+    active_player: u8,
 }
 
 impl ChessBoard {
     // A constructor-like associated function
-    fn new(width: u32, height: u32) -> Self {
+    fn new(fen_notation: String) -> Self {
         Self { 
-            width, 
-            height, 
-            player_turn: PlayerTurn::White,
         }
-    }
-
-    // A read-only method
-    fn area(&self) -> u32 {
-        self.width * self.height
     }
 }
 
+*/
+
 #[pyfunction]
-pub fn new_chess_board(width: u32, height: u32) -> bool {
-    let chess_board = ChessBoard::new(width, height);
+pub fn compute_next_move(fen_notation: String) -> bool {
+    // let chess_board = ChessBoard::new(fen_notation);
     
-    let chess_board_area = chess_board.area();
-    
-    if chess_board_area > 100 {
-        true
-    } else {
-        false
-    }
+    println!("{}", fen_notation);
+    true
 }

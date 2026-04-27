@@ -79,7 +79,7 @@ pub static BISHOP_ATTACKS: LazyLock<[u64; 5248]> = LazyLock::new(|| {
 });
 
 // Retrieve the Bishop Attack Paths for board / position
-pub fn BISHOP_FETCH(sq: usize, board: u64) -> u64{
+pub fn bishop_move_paths(sq: usize, board: u64) -> u64{
     let magic_number = BISHOP_MAGIC[sq];
     let shift = BISHOP_SHIFT[sq];
 

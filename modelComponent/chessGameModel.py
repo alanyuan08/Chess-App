@@ -97,7 +97,6 @@ class ChessGameModel():
 
             # Compute the most optimal search move            
             if bestMove != None:
-                print(depth, bestMove)
                 initMove = bestMove
 
             removedPiece, prevEnPassant = self.chessBoard.movePiece(initMove)
