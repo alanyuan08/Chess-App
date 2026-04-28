@@ -13,4 +13,4 @@ pip install .
 # maturin develop 
 
 # 3. Run your main script
-python chessApp.py black
+python chessApp.py white
