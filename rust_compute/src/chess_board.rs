@@ -46,6 +46,9 @@ struct ChessBoard {
     total_moves: i32,
 
     mailbox: [Piece; 64],
+
+    history: [UndoInfo; 1024],
+    history_index: usize,
 }
 
 #[derive(Copy, Clone)]
@@ -83,6 +86,8 @@ impl ChessBoard {
             active_player: Side::WHITE,
             total_moves: 0,
             mailbox: [Piece::NONE; 64],
+            history: [None, 1024],
+            history_index, 0,
         }
     }
 
