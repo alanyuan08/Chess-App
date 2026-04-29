@@ -168,6 +168,5 @@ pub fn compute_next_move(prev_moves: Vec<String>) -> bool {
         chess_board.move_piece(prev_move);
     }
 
-    let bishop_attack = bishop_move_paths(2 as usize, (chess_board.all_pieces[0] | chess_board.all_pieces[1]));
     true
 }

@@ -54,7 +54,7 @@ pub static ROOK_MAGIC: LazyLock<[u64; 64]> = LazyLock::new(|| {
 
 // Number of Rook Combinations is 5248
 pub static ROOK_ATTACKS: LazyLock<[u64; 5248]> = LazyLock::new(|| {
-    let mut bishop_attack = [0u64; 5248];
+    let mut rook_attack = [0u64; 5248];
 
     for i in 0..64 {
         let magic_number = ROOK_MAGIC[i];
@@ -68,7 +68,7 @@ pub static ROOK_ATTACKS: LazyLock<[u64; 5248]> = LazyLock::new(|| {
             let index = ((board & mask) * magic_number) >> (64 - shift);
             let attack = compute_rook_attacks(i, board);
 
-            bishop_attack[(offset + index) as usize] = attack;
+            rook_attack[(offset + index) as usize] = attack;
 
             board = (board - 1) & mask;
             if board == 0 { break; }
