@@ -65,16 +65,6 @@ struct Move {
     moveType: MoveFlag,
 }
 
-fn print_board(board: u64) {
-    println!("PRINT BOARD");
-    for r in (0..8).rev() {
-        for c in 0..8 {
-            print!("{}", (board >> (r * 8 + c)) & 1);
-        }
-        println!("");
-    }
-}
-
 impl ChessBoard {
     // A constructor-like associated function
     // [0] - White / [1] - Black
@@ -156,6 +146,16 @@ impl ChessBoard {
         }).collect();
 
         println!("{:?}", result);
+    }
+}
+
+fn print_board(board: u64) {
+    println!("PRINT BOARD");
+    for r in (0..8).rev() {
+        for c in 0..8 {
+            print!("{}", (board >> (r * 8 + c)) & 1);
+        }
+        println!("");
     }
 }
 
