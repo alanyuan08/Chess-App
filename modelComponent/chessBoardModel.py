@@ -409,8 +409,24 @@ class ChessBoardModel():
 
         # Update UCI
         colArray = ["a", "b", "c", "d", "e", "f", "g", "h"]
+
+        moveAction = 0
+        match cmd.moveType:
+            case MoveCommandType.MOVE | MoveCommandType.PAWNOPENMOVE:
+                moveAction = 0 
+            case MoveCommandType.KINGSIDECASTLE:
+                moveAction = 1
+            case MoveCommandType.QUEENSIDECASTLE:
+                moveAction = 2
+            case MoveCommandType.PROMOTE:
+                moveAction = 3
+            case MoveCommandType.ENPASSANT:
+                moveAction = 4
+            case MoveCommandType.CAPTURE:
+                moveAction = 5
+
         self.previousMoves.append(
-            colArray[cmd.startCol] + str(cmd.startRow + 1) + colArray[cmd.endCol] + str(cmd.endRow + 1)
+            colArray[cmd.startCol] + str(cmd.startRow) + colArray[cmd.endCol] + str(cmd.endRow) + str(moveAction)
         )
 
         # Create a new copy of the removed Piece

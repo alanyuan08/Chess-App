@@ -48,6 +48,23 @@ struct ChessBoard {
     mailbox: [Piece; 64],
 }
 
+#[derive(Copy, Clone)]
+pub enum MoveFlag {
+    MOVE = 0,
+    KINGSIDECASTLE = 1,
+    QUEENSIDECASTLE = 2,
+    PROMOTION = 3,
+    ENPASSANT = 4,
+    CAPTURE = 5,
+}
+
+#[derive(Clone, Copy)]
+struct Move {
+    startSq: usize,
+    endSq: usize,
+    moveType: MoveFlag,
+}
+
 fn print_board(board: u64) {
     println!("PRINT BOARD");
     for r in (0..8).rev() {
@@ -124,13 +141,13 @@ impl ChessBoard {
         }
     }
 
-    fn move_piece(&mut self, hci_move: &String) {
+    fn move_piece(&mut self, uci_move: &String) {
         let map = HashMap::from([
             ('a', 0), ('b', 1), ('c', 2), ('d', 3),
             ('e', 4), ('f', 5), ('g', 6), ('h', 7),
         ]);
         
-        let result: Vec<u32> = hci_move.chars().map(|c: char| {
+        let result: Vec<u32> = uci_move.chars().map(|c: char| {
             if c.is_alphabetic() {
                 *map.get(&c).unwrap_or(&0) 
             } else {
@@ -147,9 +164,10 @@ pub fn compute_next_move(prev_moves: Vec<String>) -> bool {
     let mut chess_board = ChessBoard::new();
     chess_board.init_board();
 
-    let bishop_attack = bishop_move_paths(2 as usize, (chess_board.all_pieces[0] | chess_board.all_pieces[1]));
-    print_board(bishop_attack & !(chess_board.all_pieces[1]));
-    print_board(chess_board.all_pieces[1]);
+    for prev_move in &prev_moves {
+        chess_board.move_piece(prev_move);
+    }
 
+    let bishop_attack = bishop_move_paths(2 as usize, (chess_board.all_pieces[0] | chess_board.all_pieces[1]));
     true
 }
