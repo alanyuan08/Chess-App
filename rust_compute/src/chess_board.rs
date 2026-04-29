@@ -47,7 +47,7 @@ struct ChessBoard {
 
     mailbox: [Piece; 64],
 
-    history: [UndoInfo; 1024],
+    history: [Option<Move>; 1024],
     history_index: usize,
 }
 
@@ -66,6 +66,7 @@ struct Move {
     startSq: usize,
     endSq: usize,
     moveType: MoveFlag,
+    capturedPiece: Option<Piece>,
 }
 
 impl ChessBoard {
@@ -87,7 +88,7 @@ impl ChessBoard {
             total_moves: 0,
             mailbox: [Piece::NONE; 64],
             history: [None, 1024],
-            history_index, 0,
+            history_index: 0,
         }
     }
 
