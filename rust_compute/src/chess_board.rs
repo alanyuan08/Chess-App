@@ -1,6 +1,10 @@
 use pyo3::prelude::*;
 use std::collections::HashMap;
 use crate::bishop_mask::*;
+use crate::king_mask::*;
+use crate::knight_mask::*;
+use crate::pawn_mask::*;
+use crate::rook_mask::*;
 
 #[derive(Copy, Clone)]
 pub enum Side {
@@ -47,7 +51,7 @@ struct ChessBoard {
 
     mailbox: [Piece; 64],
 
-    history: [Option<Move>; 1024],
+    history: [Option<UndoMove>; 1024],
     history_index: usize,
 }
 
@@ -66,7 +70,15 @@ struct Move {
     startSq: usize,
     endSq: usize,
     moveType: MoveFlag,
+}
+
+#[derive(Clone, Copy)]
+struct UndoMove {
+    startSq: usize,
+    endSq: usize,
+    moveType: MoveFlag,
     capturedPiece: Option<Piece>,
+    prevCastleRights: u8,
 }
 
 impl ChessBoard {
@@ -153,6 +165,21 @@ impl ChessBoard {
 
         println!("{:?}", result);
     }
+}
+
+fn get_lsb_indices(board: u64) -> Vec<u32> {
+    let mut bitboard: u64 = board;
+    let mut indices = Vec::new();
+    
+    while bitboard != 0 {
+        let lsb_index = bitboard.trailing_zeros();
+        indices.push(lsb_index);
+        
+        // Clear the least significant bit
+        bitboard &= bitboard - 1;
+    }
+    
+    indices
 }
 
 fn print_board(board: u64) {
