@@ -99,7 +99,7 @@ impl ChessBoard {
             active_player: Side::WHITE,
             total_moves: 0,
             mailbox: [Piece::NONE; 64],
-            history: [None, 1024],
+            history: [None; 1024],
             history_index: 0,
         }
     }
