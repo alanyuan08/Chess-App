@@ -149,6 +149,31 @@ impl ChessBoard {
         }
     }
 
+    fn generate_moves(&mut self, board: u64) -> Vec<Move> {
+        let mut generate_moves = Vec::new();
+        let mut player_index = if self.active_player == Side::WHITE { 0 } else { 1 }; 
+
+        let pawn_position = get_lsb_indices(self.pawns[player_index]);
+        println!("{:?}", pawn_position);
+
+        let rook_position = get_lsb_indices(self.rooks[player_index]);
+        println!("{:?}", rook_position);
+
+        let knight_positon = get_lsb_indices(self.knights[player_index]);
+        println!("{:?}", knight_positon);
+
+        let bishop_position = get_lsb_indices(self.bishops[player_index]);
+        println!("{:?}", bishop_position);
+
+        let queen_position = get_lsb_indices(self.queens[player_index]);
+        println!("{:?}", queen_position);
+
+        let king_positon = get_lsb_indices(self.kings[player_index]);
+        println!("{:?}", king_positon);
+
+        generate_moves
+    }
+
     fn move_piece(&mut self, uci_move: &String) {
         let map = HashMap::from([
             ('a', 0), ('b', 1), ('c', 2), ('d', 3),
@@ -197,9 +222,7 @@ pub fn compute_next_move(prev_moves: Vec<String>) -> bool {
     let mut chess_board = ChessBoard::new();
     chess_board.init_board();
 
-    for rook_offset in ROOK_OFFSETS {
-        println!("{}", rook_offset);
-    }
+    chess_board.generate_moves();
 
     true
 }
