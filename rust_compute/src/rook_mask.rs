@@ -52,9 +52,9 @@ pub static ROOK_MAGIC: LazyLock<[u64; 64]> = LazyLock::new(|| {
 
 // Compute Rook Attack after Rook Magic is computed
 
-// Number of Rook Combinations is 5248
-pub static ROOK_ATTACKS: LazyLock<[u64; 5248]> = LazyLock::new(|| {
-    let mut rook_attack = [0u64; 5248];
+// Number of Rook Combinations is 5184
+pub static ROOK_ATTACKS: LazyLock<[u64; 5184]> = LazyLock::new(|| {
+    let mut rook_attack = [0u64; 5184];
 
     for i in 0..64 {
         let magic_number = ROOK_MAGIC[i];
@@ -75,19 +75,19 @@ pub static ROOK_ATTACKS: LazyLock<[u64; 5248]> = LazyLock::new(|| {
         }
     }
 
-    bishop_attack
+    rook_attack
 });
 
-// Retrieve the Bishop Attack Paths for board / position
+// Retrieve the Rook Attack Paths for board / position
 pub fn bishop_move_paths(sq: usize, board: u64) -> u64{
-    let magic_number = BISHOP_MAGIC[sq];
-    let shift = BISHOP_SHIFT[sq];
+    let magic_number = ROOK_MAGIC[sq];
+    let shift = ROOK_SHIFT[sq];
 
-    let mask = BISHOP_MASKS[sq];
-    let offset = BISHOP_OFFSETS[sq];
+    let mask = ROOK_MASKS[sq];
+    let offset = ROOK_OFFSETS[sq];
 
     let index = ((board & mask) * magic_number) >> (64 - shift);
-    BISHOP_ATTACKS[(offset + index) as usize]
+    ROOK_ATTACKS[(offset + index) as usize]
 }
 
 // Mask the Cross route

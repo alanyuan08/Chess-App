@@ -97,7 +97,8 @@ pub const fn mask(sq: u8) -> u64 {
     let f = (sq % 8) as i8;
 
     // The 4 diagonal directions
-    let directions: [(i8, i8); 4] = [(1, 1), (1, -1), (-1, 1), (-1, -1)];
+    let directions: [(i8, i8); 4] = 
+    [(1, 1), (1, -1), (-1, 1), (-1, -1)];
 
     let mut d = 0;
     while d < 4 {

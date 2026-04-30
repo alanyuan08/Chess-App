@@ -197,8 +197,8 @@ pub fn compute_next_move(prev_moves: Vec<String>) -> bool {
     let mut chess_board = ChessBoard::new();
     chess_board.init_board();
 
-    for prev_move in &prev_moves {
-        chess_board.move_piece(prev_move);
+    for rook_offset in ROOK_OFFSETS {
+        println!("{}", rook_offset);
     }
 
     true
