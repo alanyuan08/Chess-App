@@ -6,13 +6,13 @@ use crate::knight_mask::*;
 use crate::pawn_mask::*;
 use crate::rook_mask::*;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub enum Side {
     WHITE = 0,
     BLACK = 1,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub enum Piece {
     NONE = 0,
 
@@ -32,7 +32,7 @@ pub enum Piece {
 }
 
 // 0 -> White / 1 -> Black
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 struct ChessBoard {
     pawns: [u64; 2],
     knights: [u64; 2],
@@ -55,7 +55,7 @@ struct ChessBoard {
     history_index: usize,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub enum MoveFlag {
     MOVE = 0,
     KINGSIDECASTLE = 1,
@@ -65,14 +65,14 @@ pub enum MoveFlag {
     CAPTURE = 5,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 struct Move {
     startSq: usize,
     endSq: usize,
     moveType: MoveFlag,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 struct UndoMove {
     startSq: usize,
     endSq: usize,
@@ -105,51 +105,99 @@ impl ChessBoard {
     }
 
     fn init_board(&mut self) {
-        // Black is 0 / White is 1
         for color in 0..2 {
-            let offset = if color == 1 { 0 } else { 48 };
+            // Ranks: White = 0 & 1, Black = 6 & 7
+            let piece_rank_offset = if color == 0 { 0 } else { 56 };
+            let pawn_rank_offset  = if color == 0 { 8 } else { 48 };
+
+            // 1. Initialize Pawns
+            for i in 0..8 {
+                let sq = pawn_rank_offset + i;
+                self.pawns[color] |= 1u64 << sq;
+                self.mailbox[sq] = if color == 0 { Piece::WPAWN } else { Piece::BPAWN };
+            }
+
+            // 2. Initialize Major Pieces (Bitboards)
+            self.rooks[color]   |= (1u64 << (piece_rank_offset + 0)) | (1u64 << (piece_rank_offset + 7));
+            self.knights[color] |= (1u64 << (piece_rank_offset + 1)) | (1u64 << (piece_rank_offset + 6));
+            self.bishops[color] |= (1u64 << (piece_rank_offset + 2)) | (1u64 << (piece_rank_offset + 5));
+            self.queens[color]  |= 1u64 << (piece_rank_offset + 3);
+            self.kings[color]   |= 1u64 << (piece_rank_offset + 4);
+
+            // 3. Initialize Major Pieces (Mailbox)
+            let pieces = if color == 0 {
+                [Piece::WROOK, Piece::WKNIGHT, Piece::WBISHOP, Piece::WQUEEN, Piece::WKING, Piece::WBISHOP, Piece::WKNIGHT, Piece::WROOK]
+            } else {
+                [Piece::BROOK, Piece::BKNIGHT, Piece::BBISHOP, Piece::BQUEEN, Piece::BKING, Piece::BBISHOP, Piece::BKNIGHT, Piece::BROOK]
+            };
 
             for i in 0..8 {
-                self.pawns[color] |= 1u64 << (i + offset + if color == 1 { 8 } else { 0 });
-                self.mailbox[i + offset] = if color == 1 { Piece::WPAWN } else { Piece::BPAWN };
+                self.mailbox[piece_rank_offset + i] = pieces[i];
             }
 
-            let p_off = if color == 1 { 0 } else { 56 };
-            self.rooks[color] |= (1u64 << (0 + p_off)) | (1u64 << (7 + p_off));
-            self.knights[color] |= (1u64 << (1 + p_off)) | (1u64 << (6 + p_off));
-            self.bishops[color] |= (1u64 << (2 + p_off)) | (1u64 << (5 + p_off));
-            self.queens[color] |= 1u64 << (3 + p_off);
-            self.kings[color] |= 1u64 << (4 + p_off);
-
-            if color == 1 {
-                self.mailbox[0 + offset] = Piece::WROOK;
-                self.mailbox[1 + offset] = Piece::WKNIGHT;
-                self.mailbox[2 + offset] = Piece::WBISHOP;
-                self.mailbox[3 + offset] = Piece::WQUEEN;
-                self.mailbox[4 + offset] = Piece::WKING;
-                self.mailbox[5 + offset] = Piece::WBISHOP;
-                self.mailbox[6 + offset] = Piece::WKNIGHT;
-                self.mailbox[7 + offset] = Piece::WROOK;
-            } else {
-                self.mailbox[0 + offset] = Piece::BROOK;
-                self.mailbox[1 + offset] = Piece::BKNIGHT;
-                self.mailbox[2 + offset] = Piece::BBISHOP;
-                self.mailbox[3 + offset] = Piece::BQUEEN;
-                self.mailbox[4 + offset] = Piece::BKING;
-                self.mailbox[5 + offset] = Piece::BBISHOP;
-                self.mailbox[6 + offset] = Piece::BKNIGHT;
-                self.mailbox[7 + offset] = Piece::BROOK;
-            }
-
-            // Update composite bitboards
+            // 4. Composite Bitboards
             self.all_pieces[color] = self.pawns[color] | self.rooks[color] | 
-                                        self.knights[color] | self.bishops[color] | 
-                                        self.queens[color] | self.kings[color];
+                                    self.knights[color] | self.bishops[color] | 
+                                    self.queens[color] | self.kings[color];
             self.occupied |= self.all_pieces[color];
         }
     }
 
-    fn generate_moves(&mut self, board: u64) -> Vec<Move> {
+    fn opponent_attack_targets(&mut self) -> u64 {
+        let mut attacks = 0u64;
+        let opp = if self.active_player == Side::WHITE { 1 } else { 0 };
+        let occ = self.occupied;
+
+        // 1. Pawns - Print Opponent Attack Pawns
+        let mut pawns = self.pawns[opp];
+        if self.active_player == Side::WHITE {
+            while pawns != 0 {
+                attacks |= BLACK_PAWN_ATTACKS[pawns.trailing_zeros() as usize];
+                pawns &= pawns - 1;
+            }
+        } else {
+            while pawns != 0 {
+                attacks |= WHITE_PAWN_ATTACKS[pawns.trailing_zeros() as usize];
+                pawns &= pawns - 1;
+            }
+        }
+
+        // 2. Knights
+        let mut knights = self.knights[opp];
+        while knights != 0 {
+            attacks |= KNIGHT_ATTACKS[knights.trailing_zeros() as usize];
+            knights &= knights - 1;
+        }
+
+        // 3. Kings
+        let mut kings = self.kings[opp];
+        while kings != 0 {
+            attacks |= KING_ATTACKS[kings.trailing_zeros() as usize];
+            kings &= kings - 1;
+        }
+
+        // 4. Sliders (Bishops, Rooks, Queens)
+        let mut bishops = self.bishops[opp] | self.queens[opp];
+        while bishops != 0 {
+            print_board(bishop_move_paths(bishops.trailing_zeros() as usize, occ));
+
+            attacks |= bishop_move_paths(bishops.trailing_zeros() as usize, occ);
+            bishops &= bishops - 1;
+        }
+
+        let mut rooks = self.rooks[opp] | self.queens[opp];
+
+        while rooks != 0 {
+            print_board(rook_attack_paths(rooks.trailing_zeros() as usize, occ));
+
+            attacks |= rook_attack_paths(rooks.trailing_zeros() as usize, occ);
+            rooks &= rooks - 1;
+        }
+
+        attacks
+    }
+
+    fn generate_moves(&mut self) -> Vec<Move> {
         let mut generate_moves = Vec::new();
         let mut player_index = if self.active_player == Side::WHITE { 0 } else { 1 }; 
 
@@ -170,6 +218,9 @@ impl ChessBoard {
 
         let king_positon = get_lsb_indices(self.kings[player_index]);
         println!("{:?}", king_positon);
+
+        let opponent_attack_targets = self.opponent_attack_targets();
+        print_board(opponent_attack_targets);
 
         generate_moves
     }
@@ -192,15 +243,15 @@ impl ChessBoard {
     }
 }
 
-fn get_lsb_indices(board: u64) -> Vec<u32> {
-    let mut bitboard: u64 = board;
+fn get_lsb_indices(board: u64) -> Vec<usize> {
+    let mut bitboard = board;
     let mut indices = Vec::new();
     
     while bitboard != 0 {
         let lsb_index = bitboard.trailing_zeros();
-        indices.push(lsb_index);
+        // Storing as usize now prevents indexing errors later
+        indices.push(lsb_index as usize);
         
-        // Clear the least significant bit
         bitboard &= bitboard - 1;
     }
     
@@ -222,6 +273,8 @@ pub fn compute_next_move(prev_moves: Vec<String>) -> bool {
     let mut chess_board = ChessBoard::new();
     chess_board.init_board();
 
+
+    println!("{}", ROOK_ATTACK_SIZE);
     chess_board.generate_moves();
 
     true

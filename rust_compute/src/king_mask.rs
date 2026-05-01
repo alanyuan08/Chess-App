@@ -1,5 +1,3 @@
-use std::sync::LazyLock;
-
 // Compute King Attack on Compile
 pub const KING_ATTACKS: [u64; 64] = {
     let mut king_attack = [0u64; 64];

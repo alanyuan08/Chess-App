@@ -10,7 +10,8 @@ from PySide6.QtCore import QRunnable, QThreadPool, Slot
 # Enum
 from appEnums import Player, GameState
 
-import rust_compute		
+import rust_compute
+import traceback
 
 # Controller 
 class ChessBoardViewModel():
@@ -69,9 +70,6 @@ class ChessBoardViewModel():
                 self.chessGameModel.gamePlayerTurn
             )
 
-            # Rust Integration
-            print(rust_compute.compute_next_move(self.chessGameModel.returnChessUCIMoves()))
-
             # Run the compute for the Opponent's Move
             if self.computerTurn():
                 self.threadpool.start(Worker(
@@ -79,21 +77,27 @@ class ChessBoardViewModel():
                 ))
 
     def takeOpponentTurn(self):
-        # Compute Opponent Move
-        opponentCmd = self.chessGameModel.computeBestMove()        
+        try:
+            # Rust Integration
+            print(rust_compute.compute_next_move(self.chessGameModel.returnChessUCIMoves()))
 
-        # Move the Chess Piece
-        self.chessGameModel.movePiece(opponentCmd)
+            # Compute Opponent Move
+            opponentCmd = self.chessGameModel.computeBestMove()        
 
-        # Communicate the command to FrontEnd
-        self.communicatorProxy.signalUpdateRequest(opponentCmd)
+            # Move the Chess Piece
+            self.chessGameModel.movePiece(opponentCmd)
 
-        # Update Game State
-        self.communicatorProxy.signalUpdateGameState(
-            self.chessGameModel.gameState, 
-            self.chessGameModel.gamePlayerTurn
-        )
+            # Communicate the command to FrontEnd
+            self.communicatorProxy.signalUpdateRequest(opponentCmd)
 
+            # Update Game State
+            self.communicatorProxy.signalUpdateGameState(
+                self.chessGameModel.gameState, 
+                self.chessGameModel.gamePlayerTurn
+            )
+        except Exception:
+            # This force-prints the full error to your console
+            traceback.print_exc() 
 class Worker(QRunnable):
     def __init__(self, fn, *args, **kwargs):
         super().__init__()

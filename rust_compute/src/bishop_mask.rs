@@ -16,7 +16,7 @@ pub const BISHOP_SHIFT: [u64; 64] = {
     let mut shifts = [0u64; 64];
     let mut i = 0;
     while i < 64 {
-        shifts[i] = compute_shift(i as u8);
+        shifts[i] = mask(i as u8).count_ones() as u64;
         i += 1;
     }
     shifts
@@ -50,11 +50,22 @@ pub static BISHOP_MAGIC: LazyLock<[u64; 64]> = LazyLock::new(|| {
     magic_number
 });
 
-// Compute Bishop Attack after Bishop Magic is computed
+/// Computes the total size of the bishop attack table
+const fn bishop_table_size() -> usize {
+    let mut total = 0;
+    let mut i = 0;
+    while i < 64 {
+        total += 1 << BISHOP_SHIFT[i];
+        i += 1;
+    }
+    total
+}
 
-// Number of Bishop Combinations is 5248
-pub static BISHOP_ATTACKS: LazyLock<[u64; 5248]> = LazyLock::new(|| {
-    let mut bishop_attack = [0u64; 5248];
+// Compute Bishop Attack after Bishop Magic is computed
+pub const BISHOP_ATTACK_SIZE: usize = bishop_table_size();
+
+pub static BISHOP_ATTACKS: LazyLock<[u64; BISHOP_ATTACK_SIZE]> = LazyLock::new(|| {
+    let mut bishop_attack = [0u64; BISHOP_ATTACK_SIZE];
 
     for i in 0..64 {
         let magic_number = BISHOP_MAGIC[i];
@@ -65,7 +76,7 @@ pub static BISHOP_ATTACKS: LazyLock<[u64; 5248]> = LazyLock::new(|| {
 
         let mut board = mask;
         loop {
-            let index = ((board & mask) * magic_number) >> (64 - shift);
+            let index = ((board & mask).wrapping_mul(magic_number)) >> (64 - shift);
             let attack = compute_bishop_attacks(i, board);
 
             bishop_attack[(offset + index) as usize] = attack;
@@ -97,8 +108,7 @@ pub const fn mask(sq: u8) -> u64 {
     let f = (sq % 8) as i8;
 
     // The 4 diagonal directions
-    let directions: [(i8, i8); 4] = 
-    [(1, 1), (1, -1), (-1, 1), (-1, -1)];
+    let directions: [(i8, i8); 4] = [(1, 1), (1, -1), (-1, 1), (-1, -1)];
 
     let mut d = 0;
     while d < 4 {
@@ -107,7 +117,7 @@ pub const fn mask(sq: u8) -> u64 {
         
         // Bitboard Excludes the Edges of the Board
         while cur_r > 0 && cur_r < 7 && cur_f > 0 && cur_f < 7 {
-            mask |= 1 << (cur_r * 8 + cur_f);
+            mask |= 1u64 << (cur_r * 8 + cur_f);
             cur_r += dr;
             cur_f += df;
         }
@@ -115,25 +125,6 @@ pub const fn mask(sq: u8) -> u64 {
     }
 
     mask
-}
-
-// Compute shift 
-pub const fn compute_shift(sq: u8) -> u64 {
-    let r = (sq / 8) as i8;
-    let f = (sq % 8) as i8;
-
-    let col_left = if f > 1 { f - 1 } else { 0 };
-    let col_right = if f < 6 { 6 - f } else { 0 };
-    let row_bot = if r > 1 { r - 1 } else { 0 };
-    let row_top = if r < 6 { 6 - r } else { 0 };
-
-    let mut shift = 0;
-    shift += if col_left < row_bot { col_left } else { row_bot };
-    shift += if col_right < row_bot { col_right } else { row_bot };
-    shift += if col_left < row_top { col_left } else { row_top };
-    shift += if col_right < row_top { col_right } else { row_top };
-
-    shift as u64
 }
 
 // Compute Bishop Attack Targets - Including First Obstacle
@@ -190,7 +181,7 @@ pub fn compute_bishop_magic(sq: usize) -> u64 {
         // (Board & Mask) * Magic Number >> (64 - n)
         let mut board = mask;
         loop {
-            let index = ((board & mask) * magic_candidate) >> (64 - shift);
+            let index = ((board & mask).wrapping_mul(magic_candidate)) >> (64 - shift);
             let attack = compute_bishop_attacks(sq, board);
 
             if results[index as usize] == 0 || results[index as usize] == attack {
