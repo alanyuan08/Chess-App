@@ -273,8 +273,6 @@ pub fn compute_next_move(prev_moves: Vec<String>) -> bool {
     let mut chess_board = ChessBoard::new();
     chess_board.init_board();
 
-
-    println!("{}", ROOK_ATTACK_SIZE);
     chess_board.generate_moves();
 
     true
