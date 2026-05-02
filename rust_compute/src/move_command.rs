@@ -1,12 +1,12 @@
 #[derive(Clone, Copy, PartialEq, Eq)]
-struct Move {
+pub struct Move {
     startSq: usize,
     endSq: usize,
     moveType: MoveFlag,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-struct UndoMove {
+pub struct UndoMove {
     startSq: usize,
     endSq: usize,
     moveType: MoveFlag,
