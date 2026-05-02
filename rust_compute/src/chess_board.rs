@@ -21,7 +21,7 @@ struct ChessBoard {
     occupied: u64,
 
     castling_rights: u8,
-    en_passant: i8,
+    en_passant: u64,
     active_player: Side,
     total_moves: i32,
 
@@ -30,6 +30,12 @@ struct ChessBoard {
     history: [Option<UndoMove>; 1024],
     history_index: usize,
 }
+
+const WHITE_KINGSIDE: u8 = 0b0001; // 1
+const WHITE_QUEENSIDE: u8 = 0b0010; // 2
+const BLACK_KINGSIDE: u8 = 0b0100; // 4
+const BLACK_QUEENSIDE: u8 = 0b1000; // 8
+
 
 impl ChessBoard {
     // A constructor-like associated function
@@ -44,8 +50,8 @@ impl ChessBoard {
             kings: [0, 0],
             all_pieces: [0, 0],
             occupied: 0,
-            castling_rights: 0,
-            en_passant: -1,
+            castling_rights: 0b1111,
+            en_passant: 0,
             active_player: Side::WHITE,
             total_moves: 0,
             mailbox: [Piece::NONE; 64],
@@ -194,7 +200,6 @@ fn get_lsb_indices(board: u64) -> Vec<usize> {
     
     while bitboard != 0 {
         let lsb_index = bitboard.trailing_zeros();
-        // Storing as usize now prevents indexing errors later
         indices.push(lsb_index as usize);
         
         bitboard &= bitboard - 1;

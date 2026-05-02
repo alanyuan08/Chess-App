@@ -12,6 +12,7 @@ struct UndoMove {
     moveType: MoveFlag,
     capturedPiece: Option<Piece>,
     prevCastleRights: u8,
+    prevEnPassant: u64,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]
