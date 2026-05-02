@@ -1,18 +1,50 @@
-pub struct MoveCommand {
-    start_row: u32,
-    start_col: u32,
-    end_row: u32,
-    end_col: u32,
-    move_type: MoveCommandType
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Move {
+    startSq: usize,
+    endSq: usize,
+    moveType: MoveFlag,
 }
 
-#[derive(Debug, PartialEq)]
-enum MoveCommandType {
-    Move,
-    QueenSideCastle,
-    KingSideCastle,
-    Capture,
-    Enpassant,
-    PawnOpenMove,
-    Promote
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct UndoMove {
+    startSq: usize,
+    endSq: usize,
+    moveType: MoveFlag,
+    capturedPiece: Option<Piece>,
+    prevCastleRights: u8,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum MoveFlag {
+    MOVE = 0,
+    KINGSIDECASTLE = 1,
+    QUEENSIDECASTLE = 2,
+    PROMOTION = 3,
+    ENPASSANT = 4,
+    CAPTURE = 5,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum Side {
+    WHITE = 0,
+    BLACK = 1,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum Piece {
+    NONE = 0,
+
+    WPAWN = 1,
+    WBISHOP = 2,
+    WKNIGHT = 3,
+    WROOK = 4,
+    WQUEEN = 5,
+    WKING = 6,
+
+    BPAWN = 7,
+    BBISHOP = 8,
+    BKNIGHT = 9,
+    BROOK = 10,
+    BQUEEN = 11,
+    BKING = 12,
 }

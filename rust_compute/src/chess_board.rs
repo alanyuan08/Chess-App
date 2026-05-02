@@ -5,31 +5,7 @@ use crate::king_mask::*;
 use crate::knight_mask::*;
 use crate::pawn_mask::*;
 use crate::rook_mask::*;
-
-#[derive(Copy, Clone, PartialEq, Eq)]
-pub enum Side {
-    WHITE = 0,
-    BLACK = 1,
-}
-
-#[derive(Copy, Clone, PartialEq, Eq)]
-pub enum Piece {
-    NONE = 0,
-
-    WPAWN = 1,
-    WBISHOP = 2,
-    WKNIGHT = 3,
-    WROOK = 4,
-    WQUEEN = 5,
-    WKING = 6,
-
-    BPAWN = 7,
-    BBISHOP = 8,
-    BKNIGHT = 9,
-    BROOK = 10,
-    BQUEEN = 11,
-    BKING = 12,
-}
+use crate::move_command::*;
 
 // 0 -> White / 1 -> Black
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -53,32 +29,6 @@ struct ChessBoard {
 
     history: [Option<UndoMove>; 1024],
     history_index: usize,
-}
-
-#[derive(Copy, Clone, PartialEq, Eq)]
-pub enum MoveFlag {
-    MOVE = 0,
-    KINGSIDECASTLE = 1,
-    QUEENSIDECASTLE = 2,
-    PROMOTION = 3,
-    ENPASSANT = 4,
-    CAPTURE = 5,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct Move {
-    startSq: usize,
-    endSq: usize,
-    moveType: MoveFlag,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct UndoMove {
-    startSq: usize,
-    endSq: usize,
-    moveType: MoveFlag,
-    capturedPiece: Option<Piece>,
-    prevCastleRights: u8,
 }
 
 impl ChessBoard {
@@ -179,17 +129,12 @@ impl ChessBoard {
         // 4. Sliders (Bishops, Rooks, Queens)
         let mut bishops = self.bishops[opp] | self.queens[opp];
         while bishops != 0 {
-            print_board(bishop_move_paths(bishops.trailing_zeros() as usize, occ));
-
             attacks |= bishop_move_paths(bishops.trailing_zeros() as usize, occ);
             bishops &= bishops - 1;
         }
 
         let mut rooks = self.rooks[opp] | self.queens[opp];
-
         while rooks != 0 {
-            print_board(rook_attack_paths(rooks.trailing_zeros() as usize, occ));
-
             attacks |= rook_attack_paths(rooks.trailing_zeros() as usize, occ);
             rooks &= rooks - 1;
         }
