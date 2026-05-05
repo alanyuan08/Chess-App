@@ -155,6 +155,9 @@ impl ChessBoard {
             white_pawn_moves(self.pawns[player_index], self.occupied, 
                 self.all_pieces[opp_index], self.en_passant, &mut gen_moves);
             println!("{:?}", gen_moves);
+        } else {
+            black_pawn_moves(self.pawns[player_index], self.occupied, 
+                self.all_pieces[opp_index], self.en_passant, &mut gen_moves);
         }
 
         let rook_position = get_lsb_indices(self.rooks[player_index]);
