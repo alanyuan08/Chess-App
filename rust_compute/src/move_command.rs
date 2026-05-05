@@ -1,21 +1,21 @@
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Move {
-    startSq: usize,
-    endSq: usize,
-    moveType: MoveFlag,
+    pub startSq: usize,
+    pub endSq: usize,
+    pub moveType: MoveFlag,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UndoMove {
-    startSq: usize,
-    endSq: usize,
-    moveType: MoveFlag,
-    capturedPiece: Option<Piece>,
-    prevCastleRights: u8,
-    prevEnPassant: u64,
+    pub startSq: usize,
+    pub endSq: usize,
+    pub moveType: MoveFlag,
+    pub capturedPiece: Option<Piece>,
+    pub prevCastleRights: u8,
+    pub prevEnPassant: u64,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum MoveFlag {
     MOVE = 0,
     KINGSIDECASTLE = 1,
@@ -25,13 +25,13 @@ pub enum MoveFlag {
     CAPTURE = 5,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Side {
     WHITE = 0,
     BLACK = 1,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Piece {
     NONE = 0,
 

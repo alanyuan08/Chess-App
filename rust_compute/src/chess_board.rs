@@ -36,7 +36,6 @@ const WHITE_QUEENSIDE: u8 = 0b0010; // 2
 const BLACK_KINGSIDE: u8 = 0b0100; // 4
 const BLACK_QUEENSIDE: u8 = 0b1000; // 8
 
-
 impl ChessBoard {
     // A constructor-like associated function
     // [0] - White / [1] - Black
@@ -51,6 +50,8 @@ impl ChessBoard {
             all_pieces: [0, 0],
             occupied: 0,
             castling_rights: 0b1111,
+
+            // Stores the Square behind the Pawn 
             en_passant: 0,
             active_player: Side::WHITE,
             total_moves: 0,
@@ -99,23 +100,18 @@ impl ChessBoard {
         }
     }
 
+    // Used to Calculate Castling / King Safety
     fn opponent_attack_targets(&mut self) -> u64 {
         let mut attacks = 0u64;
         let opp = if self.active_player == Side::WHITE { 1 } else { 0 };
         let occ = self.occupied;
 
         // 1. Pawns - Print Opponent Attack Pawns
-        let mut pawns = self.pawns[opp];
+        let pawns = self.pawns[opp];
         if self.active_player == Side::WHITE {
-            while pawns != 0 {
-                attacks |= BLACK_PAWN_ATTACKS[pawns.trailing_zeros() as usize];
-                pawns &= pawns - 1;
-            }
+            attacks |= black_pawn_attacks(pawns);
         } else {
-            while pawns != 0 {
-                attacks |= WHITE_PAWN_ATTACKS[pawns.trailing_zeros() as usize];
-                pawns &= pawns - 1;
-            }
+            attacks |= white_pawn_attacks(pawns);
         }
 
         // 2. Knights
@@ -149,11 +145,17 @@ impl ChessBoard {
     }
 
     fn generate_moves(&mut self) -> Vec<Move> {
-        let mut generate_moves = Vec::new();
-        let mut player_index = if self.active_player == Side::WHITE { 0 } else { 1 }; 
+        let mut gen_moves: Vec<Move> = Vec::with_capacity(64);
+        let player_index = if self.active_player == Side::WHITE { 0 } else { 1 }; 
+        let opp_index = if self.active_player == Side::WHITE { 1 } else { 0 }; 
 
-        let pawn_position = get_lsb_indices(self.pawns[player_index]);
-        println!("{:?}", pawn_position);
+        let _opponent_attack_targets = self.opponent_attack_targets();
+
+        if self.active_player == Side::WHITE {
+            white_pawn_moves(self.pawns[player_index], self.occupied, 
+                self.all_pieces[opp_index], self.en_passant, &mut gen_moves);
+            println!("{:?}", gen_moves);
+        }
 
         let rook_position = get_lsb_indices(self.rooks[player_index]);
         println!("{:?}", rook_position);
@@ -170,10 +172,7 @@ impl ChessBoard {
         let king_positon = get_lsb_indices(self.kings[player_index]);
         println!("{:?}", king_positon);
 
-        let opponent_attack_targets = self.opponent_attack_targets();
-        print_board(opponent_attack_targets);
-
-        generate_moves
+        gen_moves
     }
 
     fn move_piece(&mut self, uci_move: &String) {
