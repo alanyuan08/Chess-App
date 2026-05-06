@@ -175,6 +175,8 @@ impl ChessBoard {
         // Clear the Previous En Passant
         self.en_passant = 0;
 
+        self.total_moves += 1;
+
         match move_command.moveType {
             MoveFlag::MOVE => {
                 let move_piece = self.mailbox[move_command.startSq];
