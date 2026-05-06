@@ -303,7 +303,8 @@ impl ChessBoard {
                         remove_piece = Some(self.mailbox[move_command.endSq + 8]);
                     },
                 }
-            }
+            },
+            _ => {},
         }
         
         let undo_move = UndoMove {
