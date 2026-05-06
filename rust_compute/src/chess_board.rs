@@ -166,6 +166,8 @@ impl ChessBoard {
         let queen_position = get_lsb_indices(self.queens[player_index]);
         let king_positon = get_lsb_indices(self.kings[player_index]);
 
+        println!("{:?}", gen_moves);
+
         gen_moves
     }
 
