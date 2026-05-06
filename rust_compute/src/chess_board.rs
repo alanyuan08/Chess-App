@@ -290,10 +290,20 @@ impl ChessBoard {
 
     fn execute_move(&mut self, move_command: Move) {
         let mut remove_piece = None;
-        if matches!(move_command.moveType, 
-            MoveFlag::PROMOTION | MoveFlag::ENPASSANT | MoveFlag::CAPTURE ) {
-            
-            remove_piece = Some(self.mailbox[move_command.endSq]);
+        match move_command.moveType { 
+            MoveFlag::CAPTURE | MoveFlag::PROMOTION => {
+                remove_piece = Some(self.mailbox[move_command.endSq]);
+            },
+            MoveFlag::ENPASSANT => {
+                match self.active_player {
+                    Side::WHITE => {
+                        remove_piece = Some(self.mailbox[move_command.endSq - 8]);
+                    },
+                    Side::BLACK => {
+                        remove_piece = Some(self.mailbox[move_command.endSq + 8]);
+                    },
+                }
+            }
         }
         
         let undo_move = UndoMove {
@@ -314,14 +324,18 @@ impl ChessBoard {
         match move_command.moveType {
             MoveFlag::MOVE => {
                 // Update En Passant
-                match self.active_player {
-                    Side::WHITE => {
-                        self.en_passant = 1u64 << (move_command.startSq + 8);
-                    },
-                    Side::BLACK => {
-                        self.en_passant = 1u64 << (move_command.startSq - 8);
-                    },
-                }      
+                let piece = self.mailbox[move_command.startSq];
+                if (piece == Piece::WPAWN || piece == Piece::BPAWN) && 
+                (move_command.startSq as i8 - move_command.endSq as i8).abs() == 16 {
+                    match self.active_player {
+                        Side::WHITE => {
+                            self.en_passant = 1u64 << (move_command.startSq + 8);
+                        },
+                        Side::BLACK => {
+                            self.en_passant = 1u64 << (move_command.startSq - 8);
+                        },
+                    }
+                }
 
                 // Update Castle
                 let target_piece = self.mailbox[move_command.startSq];
@@ -392,7 +406,18 @@ impl ChessBoard {
             },
             MoveFlag::PROMOTION => {
                 self._remove_piece(move_command.startSq);
-                self._remove_piece(move_command.endSq);
+
+                if self.mailbox[move_command.endSq] != Piece::NONE {
+                    self._remove_piece(move_command.endSq);
+                }
+
+                match move_command.endSq {
+                    0  => self.castling_rights &= !WHITE_QUEENSIDE,
+                    7  => self.castling_rights &= !WHITE_KINGSIDE,
+                    56 => self.castling_rights &= !BLACK_QUEENSIDE,
+                    63 => self.castling_rights &= !BLACK_KINGSIDE,
+                    _ => {}
+                }
 
                 match self.active_player {
                     Side::WHITE => {
