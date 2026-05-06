@@ -314,6 +314,7 @@ impl ChessBoard {
             },
             MoveFlag::PROMOTION => {
                 self._remove_piece(move_command.startSq);
+                self._remove_piece(move_command.endSq);
 
                 match self.active_player {
                     Side::WHITE => {
@@ -329,10 +330,10 @@ impl ChessBoard {
 
                 match self.active_player {
                     Side::WHITE => {
-                        self._remove_piece(move_command.endSq + 8);
+                        self._remove_piece(move_command.endSq - 8);
                     },
                     Side::BLACK => {
-                        self._remove_piece(move_command.endSq - 8);
+                        self._remove_piece(move_command.endSq + 8);
                     },
                 }
             },
