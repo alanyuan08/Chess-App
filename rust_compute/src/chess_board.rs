@@ -144,6 +144,7 @@ impl ChessBoard {
         attacks
     }
 
+    // Generate Pseudo-Moves - Only Validate King Safety for Castle / King Movement
     fn generate_moves(&mut self) -> Vec<Move> {
         let mut gen_moves: Vec<Move> = Vec::with_capacity(64);
         let player_index = if self.active_player == Side::WHITE { 0 } else { 1 }; 
@@ -178,21 +179,55 @@ impl ChessBoard {
         gen_moves
     }
 
-    fn move_piece(&mut self, uci_move: &String) {
-        let map = HashMap::from([
-            ('a', 0), ('b', 1), ('c', 2), ('d', 3),
-            ('e', 4), ('f', 5), ('g', 6), ('h', 7),
-        ]);
-        
-        let result: Vec<u32> = uci_move.chars().map(|c: char| {
-            if c.is_alphabetic() {
-                *map.get(&c).unwrap_or(&0) 
-            } else {
-                c.to_digit(10).unwrap_or(0)
-            }
-        }).collect();
+    fn execute_move(&mut self, move_command: Move) {
+        match move_command.moveType {
+            MoveFlag::MOVE => {
+                println!("Move")
+            },
+            MoveFlag::KINGSIDECASTLE => {
+                println!("King Side Castle")
+            },
+            MoveFlag::QUEENSIDECASTLE => {
+                println!("Queen Side Castle")
+            },
+            MoveFlag::PROMOTION => {
+                println!("Promotion")
+            },
+            MoveFlag::ENPASSANT => {
+                println!("En Passant")
+            },
+            MoveFlag::CAPTURE => {
+                println!("Capture")
+            },
+        }
+    }
 
-        println!("{:?}", result);
+    fn process_moves(&mut self, prev_moves: Vec<String>) {
+        for prev_move in &prev_moves {
+            let parsed_move: Move = parse_move(prev_move);
+            self.execute_move(parsed_move);
+        }
+    }
+}
+
+fn parse_move(uci_move: &String) -> Move {
+    let map = HashMap::from([
+        ('a', 0), ('b', 1), ('c', 2), ('d', 3),
+        ('e', 4), ('f', 5), ('g', 6), ('h', 7),
+    ]);
+    
+    let result: Vec<u32> = uci_move.chars().map(|c: char| {
+        if c.is_alphabetic() {
+            *map.get(&c).unwrap_or(&0) 
+        } else {
+            c.to_digit(10).unwrap_or(0)
+        }
+    }).collect();
+
+    Move { 
+        startSq: (result[1] * 8 + result[0]) as usize, 
+        endSq: (result[3] * 8 + result[2]) as usize, 
+        moveType: MoveFlag::try_from(result[4]).expect("Corrupted move data"),
     }
 }
 
@@ -225,7 +260,15 @@ pub fn compute_next_move(prev_moves: Vec<String>) -> bool {
     let mut chess_board = ChessBoard::new();
     chess_board.init_board();
 
+    chess_board.process_moves(prev_moves);
+
     chess_board.generate_moves();
 
     true
+}
+
+#[pyfunction]
+pub fn init_attack_tables() {
+    let _ = *BISHOP_ATTACKS;
+    let _ = *ROOK_ATTACKS;
 }

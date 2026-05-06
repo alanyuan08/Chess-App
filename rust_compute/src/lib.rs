@@ -9,10 +9,12 @@ pub mod rook_mask;
 pub mod move_command;
 pub mod chess_board;
 
+use crate::chess_board::{init_attack_tables};
 use crate::chess_board::{compute_next_move};
 
 #[pymodule]
 fn rust_compute(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(init_attack_tables, m)?)?;
     m.add_function(wrap_pyfunction!(compute_next_move, m)?)?;
 
     Ok(())

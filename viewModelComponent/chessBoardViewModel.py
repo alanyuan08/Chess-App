@@ -101,6 +101,7 @@ class ChessBoardViewModel():
         except Exception:
             # This force-prints the full error to your console
             traceback.print_exc() 
+
 class Worker(QRunnable):
     def __init__(self, fn, *args, **kwargs):
         super().__init__()

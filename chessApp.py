@@ -10,6 +10,9 @@ from viewComponent.chessBoardView import ChessBoardView
 # Import ViewModel
 from viewModelComponent.chessBoardViewModel import ChessBoardViewModel
 
+# Import Rust Compute Module
+import rust_compute
+
 if __name__ == '__main__':
 	# Import Model
 	from modelFactory.chessGameFactory import ChessGameFactory
@@ -39,6 +42,9 @@ if __name__ == '__main__':
 
 	# Create ChessBoard ViewModel
 	chessBoardController = ChessBoardViewModel(chessBoardView, chessGameModel)
+
+	# Precompute the Rust Tables
+	rust_compute.init_attack_tables()
 
 	view.show()
 	app.exec()

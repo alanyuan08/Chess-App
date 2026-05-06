@@ -16,6 +16,7 @@ pub struct UndoMove {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[repr(u32)]
 pub enum MoveFlag {
     MOVE = 0,
     KINGSIDECASTLE = 1,
@@ -23,6 +24,22 @@ pub enum MoveFlag {
     PROMOTION = 3,
     ENPASSANT = 4,
     CAPTURE = 5,
+}
+
+impl TryFrom<u32> for MoveFlag {
+    type Error = ();
+
+    fn try_from(v: u32) -> Result<Self, Self::Error> {
+        match v {
+            0 => Ok(MoveFlag::MOVE),
+            1 => Ok(MoveFlag::KINGSIDECASTLE),
+            2 => Ok(MoveFlag::QUEENSIDECASTLE),
+            3 => Ok(MoveFlag::PROMOTION),
+            4 => Ok(MoveFlag::ENPASSANT),
+            5 => Ok(MoveFlag::CAPTURE),
+            _ => Err(()),
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
