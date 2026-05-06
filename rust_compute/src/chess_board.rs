@@ -155,26 +155,16 @@ impl ChessBoard {
         if self.active_player == Side::WHITE {
             white_pawn_moves(self.pawns[player_index], self.occupied, 
                 self.all_pieces[opp_index], self.en_passant, &mut gen_moves);
-            println!("{:?}", gen_moves);
         } else {
             black_pawn_moves(self.pawns[player_index], self.occupied, 
                 self.all_pieces[opp_index], self.en_passant, &mut gen_moves);
         }
 
         let rook_position = get_lsb_indices(self.rooks[player_index]);
-        println!("{:?}", rook_position);
-
         let knight_positon = get_lsb_indices(self.knights[player_index]);
-        println!("{:?}", knight_positon);
-
         let bishop_position = get_lsb_indices(self.bishops[player_index]);
-        println!("{:?}", bishop_position);
-
         let queen_position = get_lsb_indices(self.queens[player_index]);
-        println!("{:?}", queen_position);
-
         let king_positon = get_lsb_indices(self.kings[player_index]);
-        println!("{:?}", king_positon);
 
         gen_moves
     }
@@ -182,7 +172,49 @@ impl ChessBoard {
     fn execute_move(&mut self, move_command: Move) {
         match move_command.moveType {
             MoveFlag::MOVE => {
-                println!("Move")
+                let move_piece = self.mailbox[move_command.startSq];
+                
+                let player_index = if self.active_player == Side::WHITE { 0 } else { 1 }; 
+
+                match move_piece {
+                    Piece::WPAWN | Piece::BPAWN => {
+                        self.pawns[player_index] ^= 1u64 << move_command.startSq;
+                        self.pawns[player_index] ^= 1u64 << move_command.endSq;
+                    },
+                    Piece::WBISHOP | Piece::BBISHOP => {
+                        self.bishops[player_index] ^= 1u64 << move_command.startSq;
+                        self.bishops[player_index] ^= 1u64 << move_command.endSq;
+                    },
+                    Piece::WKNIGHT | Piece::BKNIGHT => {
+                        self.knights[player_index] ^= 1u64 << move_command.startSq;
+                        self.knights[player_index] ^= 1u64 << move_command.endSq;
+                    },
+                    Piece::WROOK | Piece::BROOK => {
+                        self.rooks[player_index] ^= 1u64 << move_command.startSq;
+                        self.rooks[player_index] ^= 1u64 << move_command.endSq;
+                    },
+                    Piece::WQUEEN | Piece::BQUEEN => {
+                        self.queens[player_index] ^= 1u64 << move_command.startSq;
+                        self.queens[player_index] ^= 1u64 << move_command.endSq;
+                    },
+                    Piece::WKING | Piece::BKING=> {
+                        self.kings[player_index] ^= 1u64 << move_command.startSq;
+                        self.kings[player_index] ^= 1u64 << move_command.endSq;
+                    },
+                    Piece::NONE => {},
+                }
+
+                self.mailbox[move_command.startSq] = Piece::NONE;
+                self.mailbox[move_command.endSq] = move_piece;
+
+                self.all_pieces[player_index] ^= 1u64 << move_command.startSq;
+                self.all_pieces[player_index] ^= 1u64 << move_command.endSq;
+
+                self.occupied ^= 1u64 << move_command.startSq;
+                self.occupied ^= 1u64 << move_command.endSq;
+
+                self.active_player = if self.active_player == Side::WHITE { Side::BLACK } else { Side::WHITE }; 
+
             },
             MoveFlag::KINGSIDECASTLE => {
                 println!("King Side Castle")
@@ -256,7 +288,7 @@ fn print_board(board: u64) {
 }
 
 #[pyfunction]
-pub fn compute_next_move(prev_moves: Vec<String>) -> bool {
+pub fn compute_next_move(prev_moves: Vec<String>) {
     let mut chess_board = ChessBoard::new();
     chess_board.init_board();
 
@@ -264,7 +296,7 @@ pub fn compute_next_move(prev_moves: Vec<String>) -> bool {
 
     chess_board.generate_moves();
 
-    true
+    print_board(chess_board.occupied);
 }
 
 #[pyfunction]
