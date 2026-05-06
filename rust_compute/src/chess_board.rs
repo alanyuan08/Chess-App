@@ -172,6 +172,9 @@ impl ChessBoard {
     }
 
     fn execute_move(&mut self, move_command: Move) {
+        // Clear the Previous En Passant
+        self.en_passant = 0;
+
         match move_command.moveType {
             MoveFlag::MOVE => {
                 let move_piece = self.mailbox[move_command.startSq];
@@ -179,9 +182,17 @@ impl ChessBoard {
                 let player_index = if self.active_player == Side::WHITE { 0 } else { 1 }; 
 
                 match move_piece {
-                    Piece::WPAWN | Piece::BPAWN => {
+                    Piece::WPAWN => {
                         self.pawns[player_index] ^= 1u64 << move_command.startSq;
                         self.pawns[player_index] ^= 1u64 << move_command.endSq;
+
+                        self.en_passant = 1u64 << (move_command.startSq + 8);
+                    },
+                    Piece::BPAWN => {
+                        self.pawns[player_index] ^= 1u64 << move_command.startSq;
+                        self.pawns[player_index] ^= 1u64 << move_command.endSq;
+
+                        self.en_passant = 1u64 << (move_command.startSq - 8);
                     },
                     Piece::WBISHOP | Piece::BBISHOP => {
                         self.bishops[player_index] ^= 1u64 << move_command.startSq;
