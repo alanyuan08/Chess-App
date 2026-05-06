@@ -166,7 +166,7 @@ impl ChessBoard {
         let queen_position = get_lsb_indices(self.queens[player_index]);
         let king_positon = get_lsb_indices(self.kings[player_index]);
 
-        println!("{:?}", gen_moves);
+        print_board(_opponent_attack_targets);
 
         gen_moves
     }
@@ -503,6 +503,7 @@ fn parse_move(uci_move: &String) -> Move {
     }
 }
 
+// DEBUG
 fn get_lsb_indices(board: u64) -> Vec<usize> {
     let mut bitboard = board;
     let mut indices = Vec::new();
@@ -517,6 +518,7 @@ fn get_lsb_indices(board: u64) -> Vec<usize> {
     indices
 }
 
+// DEBUG
 fn print_board(board: u64) {
     println!("PRINT BOARD");
     for r in (0..8).rev() {
@@ -535,8 +537,6 @@ pub fn compute_next_move(prev_moves: Vec<String>) {
     chess_board.process_moves(prev_moves);
 
     chess_board.generate_moves();
-
-    print_board(chess_board.occupied);
 }
 
 #[pyfunction]
