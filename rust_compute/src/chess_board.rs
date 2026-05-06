@@ -289,14 +289,31 @@ impl ChessBoard {
     }
 
     fn execute_move(&mut self, move_command: Move) {
+        let mut remove_piece = None;
+        if matches!(move_command.moveType, 
+            MoveFlag::PROMOTION | MoveFlag::ENPASSANT | MoveFlag::CAPTURE ) {
+            
+            remove_piece = Some(self.mailbox[move_command.endSq]);
+        }
+        
+        let undo_move = UndoMove {
+            startSq: move_command.startSq,
+            endSq: move_command.endSq,
+            moveType: move_command.moveType,
+            capturedPiece: remove_piece,
+            prevCastleRights: self.castling_rights.clone(),
+            prevEnPassant: self.en_passant.clone(),
+        };
+        self.history[self.history_index] = Some(undo_move);
+        self.history_index += 1;
+
         // Clear the Previous En Passant
         self.en_passant = 0;
         self.total_moves += 1;
 
         match move_command.moveType {
             MoveFlag::MOVE => {
-                self._move_piece(move_command);
-
+                // Update En Passant
                 match self.active_player {
                     Side::WHITE => {
                         self.en_passant = 1u64 << (move_command.startSq + 8);
@@ -304,13 +321,74 @@ impl ChessBoard {
                     Side::BLACK => {
                         self.en_passant = 1u64 << (move_command.startSq - 8);
                     },
+                }      
+
+                // Update Castle
+                let target_piece = self.mailbox[move_command.startSq];
+                match target_piece {
+                    Piece::WKING => {
+                        self.castling_rights &= !(WHITE_KINGSIDE | WHITE_QUEENSIDE);
+                    },
+                    Piece::BKING => {
+                        self.castling_rights &= !(BLACK_KINGSIDE | BLACK_QUEENSIDE);
+                    },
+                    Piece::WROOK => {
+                        if move_command.startSq == 7 { self.castling_rights &= !WHITE_KINGSIDE; }
+                        if move_command.startSq == 0 { self.castling_rights &= !WHITE_QUEENSIDE; }
+                    },
+                    Piece::BROOK => {
+                        if move_command.startSq == 63 { self.castling_rights &= !BLACK_KINGSIDE; }
+                        if move_command.startSq == 56 { self.castling_rights &= !BLACK_QUEENSIDE; }
+                    },
+                    _ => {}
                 }
+                
+                self._move_piece(move_command);
+          
             },
             MoveFlag::KINGSIDECASTLE => {
-                println!("King Side Castle")
+                match self.active_player {
+                    Side::WHITE => {
+                        self.castling_rights &= !(WHITE_KINGSIDE | WHITE_QUEENSIDE);
+
+                        let king_move_cmd = Move { startSq: 4, endSq: 6, moveType: MoveFlag::MOVE };
+                        self._move_piece(king_move_cmd);
+
+                        let rook_move_cmd = Move { startSq: 7, endSq: 5, moveType: MoveFlag::MOVE };
+                        self._move_piece(rook_move_cmd);
+                    },
+                    Side::BLACK => {
+                        self.castling_rights &= !(BLACK_KINGSIDE | BLACK_QUEENSIDE);
+
+                        let king_move_cmd = Move { startSq: 60, endSq: 62, moveType: MoveFlag::MOVE };
+                        self._move_piece(king_move_cmd);
+
+                        let rook_move_cmd = Move { startSq: 63, endSq: 61, moveType: MoveFlag::MOVE };
+                        self._move_piece(rook_move_cmd);
+                    },
+                }
             },
             MoveFlag::QUEENSIDECASTLE => {
-                println!("Queen Side Castle")
+                match self.active_player {
+                    Side::WHITE => {
+                        self.castling_rights &= !(WHITE_KINGSIDE | WHITE_QUEENSIDE);
+
+                        let king_move_cmd = Move { startSq: 4, endSq: 2, moveType: MoveFlag::MOVE };
+                        self._move_piece(king_move_cmd);
+
+                        let rook_move_cmd = Move { startSq: 0, endSq: 3, moveType: MoveFlag::MOVE };
+                        self._move_piece(rook_move_cmd);
+                    },
+                    Side::BLACK => {
+                        self.castling_rights &= !(BLACK_KINGSIDE | BLACK_QUEENSIDE);
+
+                        let king_move_cmd = Move { startSq: 60, endSq: 58, moveType: MoveFlag::MOVE };
+                        self._move_piece(king_move_cmd);
+
+                        let rook_move_cmd = Move { startSq: 56, endSq: 59, moveType: MoveFlag::MOVE };
+                        self._move_piece(rook_move_cmd);
+                    },
+                }
             },
             MoveFlag::PROMOTION => {
                 self._remove_piece(move_command.startSq);
@@ -338,6 +416,14 @@ impl ChessBoard {
                 }
             },
             MoveFlag::CAPTURE => {
+                match move_command.endSq {
+                    0  => self.castling_rights &= !WHITE_QUEENSIDE,
+                    7  => self.castling_rights &= !WHITE_KINGSIDE,
+                    56 => self.castling_rights &= !BLACK_QUEENSIDE,
+                    63 => self.castling_rights &= !BLACK_KINGSIDE,
+                    _ => {}
+                }
+
                 self._remove_piece(move_command.endSq);
                 self._move_piece(move_command);
             },
