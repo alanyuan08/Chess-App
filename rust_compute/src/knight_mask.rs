@@ -1,3 +1,5 @@
+use crate::move_command::*;
+
 // Compute Knight Attack on Compile
 pub const KNIGHT_ATTACKS: [u64; 64] = {
     let mut knight_attack = [0u64; 64];
@@ -26,3 +28,26 @@ pub const KNIGHT_ATTACKS: [u64; 64] = {
 
     knight_attack
 };
+
+pub fn knight_moves(active_knights: Vec<usize>, occupancy: u64, 
+    opponent_pieces: u64, moves: &mut Vec<Move>)  {
+
+    for &knight in &active_knights {
+        let knight_attack_paths = KNIGHT_ATTACKS[knight as usize];
+
+        let mut knight_moves = knight_attack_paths & !occupancy;
+        let mut knight_captures = knight_attack_paths & opponent_pieces;
+
+        while knight_moves != 0 {
+            let target = knight_moves.trailing_zeros() as usize;
+            moves.push(Move { startSq: knight, endSq: target, moveType: MoveFlag::MOVE });
+            knight_moves &= knight_moves - 1;
+        }
+
+        while knight_captures != 0 {
+            let target = knight_captures.trailing_zeros() as usize;
+            moves.push(Move { startSq: knight, endSq: target, moveType: MoveFlag::CAPTURE });
+            knight_captures &= knight_captures - 1;
+        }
+    }
+}

@@ -131,7 +131,7 @@ impl ChessBoard {
         // 4. Sliders (Bishops, Rooks, Queens)
         let mut bishops = self.bishops[opp] | self.queens[opp];
         while bishops != 0 {
-            attacks |= bishop_move_paths(bishops.trailing_zeros() as usize, occ);
+            attacks |= bishop_attack_paths(bishops.trailing_zeros() as usize, occ);
             bishops &= bishops - 1;
         }
 
@@ -152,21 +152,28 @@ impl ChessBoard {
 
         let _opponent_attack_targets = self.opponent_attack_targets();
 
-        if self.active_player == Side::WHITE {
-            white_pawn_moves(self.pawns[player_index], self.occupied, 
-                self.all_pieces[opp_index], self.en_passant, &mut gen_moves);
-        } else {
-            black_pawn_moves(self.pawns[player_index], self.occupied, 
-                self.all_pieces[opp_index], self.en_passant, &mut gen_moves);
-        }
+        let knight_positon = get_lsb_indices(self.knights[player_index]);
+        knight_moves(knight_positon, self.occupied, self.all_pieces[opp_index], &mut gen_moves);
 
         let rook_position = get_lsb_indices(self.rooks[player_index]);
-        let knight_positon = get_lsb_indices(self.knights[player_index]);
+        rook_moves(rook_position, self.occupied, self.all_pieces[opp_index], &mut gen_moves);
+
         let bishop_position = get_lsb_indices(self.bishops[player_index]);
+        bishop_moves(bishop_position, self.occupied, self.all_pieces[opp_index], &mut gen_moves);
+
         let queen_position = get_lsb_indices(self.queens[player_index]);
         let king_positon = get_lsb_indices(self.kings[player_index]);
 
-        print_board(_opponent_attack_targets);
+        match self.active_player {
+            Side::WHITE => {
+                white_pawn_moves(self.pawns[player_index], self.occupied, 
+                    self.all_pieces[opp_index], self.en_passant, &mut gen_moves);
+            },
+            Side::BLACK => {
+                black_pawn_moves(self.pawns[player_index], self.occupied, 
+                    self.all_pieces[opp_index], self.en_passant, &mut gen_moves);
+            }
+        }
 
         gen_moves
     }
@@ -455,7 +462,10 @@ impl ChessBoard {
             },
         }
 
-        self.active_player = if self.active_player == Side::WHITE { Side::BLACK } else { Side::WHITE };
+        self.active_player = match self.active_player {
+            Side::WHITE => Side::BLACK,
+            Side::BLACK => Side::WHITE,
+        };
     }
 
     fn process_moves(&mut self, prev_moves: Vec<String>) {
@@ -503,7 +513,6 @@ fn parse_move(uci_move: &String) -> Move {
     }
 }
 
-// DEBUG
 fn get_lsb_indices(board: u64) -> Vec<usize> {
     let mut bitboard = board;
     let mut indices = Vec::new();

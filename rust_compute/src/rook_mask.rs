@@ -1,4 +1,5 @@
 use std::sync::LazyLock;
+use crate::move_command::*;
 
 // Mask the Irrelevant Bits no in the Diagonal Path
 pub const ROOK_MASKS: [u64; 64] = {
@@ -220,6 +221,29 @@ pub fn compute_rook_magic(sq: usize) -> u64 {
 
         if found {
             return magic_candidate;
+        }
+    }
+}
+
+pub fn rook_moves(active_rooks: Vec<usize>, occupancy: u64, 
+    opponent_pieces: u64, moves: &mut Vec<Move>)  {
+
+    for &rook in &active_rooks {
+        let rook_attack_paths = rook_attack_paths(rook, occupancy);
+
+        let mut rook_moves = rook_attack_paths & !occupancy;
+        let mut rook_captures = rook_attack_paths & opponent_pieces;
+
+        while rook_moves != 0 {
+            let target = rook_moves.trailing_zeros() as usize;
+            moves.push(Move { startSq: rook, endSq: target, moveType: MoveFlag::MOVE });
+            rook_moves &= rook_moves - 1;
+        }
+
+        while rook_captures != 0 {
+            let target = rook_captures.trailing_zeros() as usize;
+            moves.push(Move { startSq: rook, endSq: target, moveType: MoveFlag::CAPTURE });
+            rook_captures &= rook_captures - 1;
         }
     }
 }

@@ -1,4 +1,5 @@
 use std::sync::LazyLock;
+use crate::move_command::*;
 
 // Mask the Irrelevant Bits no in the Diagonal Path
 pub const BISHOP_MASKS: [u64; 64] = {
@@ -90,7 +91,7 @@ pub static BISHOP_ATTACKS: LazyLock<[u64; BISHOP_ATTACK_SIZE]> = LazyLock::new(|
 });
 
 // Retrieve the Bishop Attack Paths for board / position
-pub fn bishop_move_paths(sq: usize, board: u64) -> u64{
+pub fn bishop_attack_paths(sq: usize, board: u64) -> u64{
     let magic_number = BISHOP_MAGIC[sq];
     let shift = BISHOP_SHIFT[sq];
 
@@ -196,6 +197,29 @@ pub fn compute_bishop_magic(sq: usize) -> u64 {
 
         if found {
             return magic_candidate;
+        }
+    }
+}
+
+pub fn bishop_moves(active_bishop: Vec<usize>, occupancy: u64, 
+    opponent_pieces: u64, moves: &mut Vec<Move>)  {
+
+    for &bishop in &active_bishop {
+       let bishop_attack_paths = bishop_attack_paths(bishop, occupancy);
+
+        let mut bishop_moves = bishop_attack_paths & !occupancy;
+        let mut bishop_captures = bishop_attack_paths & opponent_pieces;
+
+        while bishop_moves != 0 {
+            let target = bishop_moves.trailing_zeros() as usize;
+            moves.push(Move { startSq: bishop, endSq: target, moveType: MoveFlag::MOVE });
+            bishop_moves &= bishop_moves - 1;
+        }
+
+        while bishop_captures != 0 {
+            let target = bishop_captures.trailing_zeros() as usize;
+            moves.push(Move { startSq: bishop, endSq: target, moveType: MoveFlag::CAPTURE });
+            bishop_captures &= bishop_captures - 1;
         }
     }
 }
