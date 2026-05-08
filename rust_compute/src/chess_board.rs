@@ -31,10 +31,10 @@ struct ChessBoard {
     history_index: usize,
 }
 
-const WHITE_KINGSIDE: u8 = 0b0001; // 1
-const WHITE_QUEENSIDE: u8 = 0b0010; // 2
-const BLACK_KINGSIDE: u8 = 0b0100; // 4
-const BLACK_QUEENSIDE: u8 = 0b1000; // 8
+pub const WHITE_KINGSIDE: u8 = 0b0001; // 1
+pub const WHITE_QUEENSIDE: u8 = 0b0010; // 2
+pub const BLACK_KINGSIDE: u8 = 0b0100; // 4
+pub const BLACK_QUEENSIDE: u8 = 0b1000; // 8
 
 impl ChessBoard {
     // A constructor-like associated function
@@ -152,6 +152,12 @@ impl ChessBoard {
 
         let _opponent_attack_targets = self.opponent_attack_targets();
 
+        let king_positon = get_lsb_indices(self.kings[player_index]);
+        king_moves(king_position, self.occupied, _opponent_attack_targets,
+        self.active_player, self.castling_rights, self.all_pieces[opp_index], &mut gen_moves);
+
+        println!("{:?}", gen_moves);
+
         let knight_positon = get_lsb_indices(self.knights[player_index]);
         knight_moves(knight_positon, self.occupied, self.all_pieces[opp_index], &mut gen_moves);
 
@@ -162,7 +168,7 @@ impl ChessBoard {
         bishop_moves(bishop_position, self.occupied, self.all_pieces[opp_index], &mut gen_moves);
 
         let queen_position = get_lsb_indices(self.queens[player_index]);
-        let king_positon = get_lsb_indices(self.kings[player_index]);
+        bishop_moves(queen_position, self.occupied, self.all_pieces[opp_index], &mut gen_moves);
 
         match self.active_player {
             Side::WHITE => {
