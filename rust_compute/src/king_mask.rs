@@ -1,4 +1,5 @@
 use crate::move_command::*;
+use crate::chess_board::*;
 
 // White: Rank 1 (Indices 0-7)
 // e1=4, f1=5, g1=6
@@ -36,7 +37,7 @@ pub const KING_ATTACKS: [u64; 64] = {
         let r = (i / 8) as i8;
         let f = (i % 8) as i8;
 
-        // The 8 directions for the knight
+        // The 8 directions for the king
         let directions: [(i8, i8); 8] = 
         [(-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1)];
 
@@ -57,15 +58,15 @@ pub const KING_ATTACKS: [u64; 64] = {
 };
 
 pub fn king_moves(active_king: Vec<usize>, occupancy: u64, 
-    opponent_attacks: u64, active_player: Side, castling_rights: u64,
+    opponent_attacks: u64, active_player: Side, castling_rights: u8,
     opponent_pieces: u64, moves: &mut Vec<Move>)  {
 
     // Check if King Capture / Move goes into Check
     for &king in &active_king {
         let king_attack_paths = KING_ATTACKS[king as usize] & !opponent_attacks;
 
-        let mut king_moves = knight_attack_paths & !occupancy;
-        let mut king_captures = knight_attack_paths & opponent_pieces;
+        let mut king_moves = king_attack_paths & !occupancy;
+        let mut king_captures = king_attack_paths & opponent_pieces;
 
         while king_moves != 0 {
             let target = king_moves.trailing_zeros() as usize;
@@ -78,40 +79,40 @@ pub fn king_moves(active_king: Vec<usize>, occupancy: u64,
             moves.push(Move { startSq: king, endSq: target, moveType: MoveFlag::CAPTURE });
             king_captures &= king_captures - 1;
         }
-    }
 
-    // Check for Queen / King Side Castle
-    match active_player {
-        Side::WHITE => {
-            if (castling_rights & WHITE_KINGSIDE) != 0 {
-                if (WHITE_KINGSIDE_PATH & !opponent_attacks) === 0 {
-                    if (WHITE_KINGSIDE_MOVE_PATH & !occupancy) {
-                        moves.push(Move { startSq: king, endSq: king + 2, moveType: MoveFlag::KINGSIDECASTLE });
+        // Check for Queen / King Side Castle
+        match active_player {
+            Side::WHITE => {
+                if (castling_rights & WHITE_KINGSIDE) != 0 {
+                    if (WHITE_KINGSIDE_PATH & !opponent_attacks) == 0 {
+                        if (WHITE_KINGSIDE_MOVE_PATH & !occupancy) == 0{
+                            moves.push(Move { startSq: king, endSq: king + 2, moveType: MoveFlag::KINGSIDECASTLE });
+                        }
                     }
                 }
-            }
 
-            if (castling_rights & WHITE_QUEENSIDE) != 0 {
-                if (WHITE_QUEENSIDE_PATH & !opponent_attacks) === 0 {   
-                    if (WHITE_QUEENSIDE_MOVE_PATH & !occupancy) {
-                        moves.push(Move { startSq: king, endSq: king - 2, moveType: MoveFlag::QUEENSIDECASTLE });
+                if (castling_rights & WHITE_QUEENSIDE) != 0 {
+                    if (WHITE_QUEENSIDE_PATH & !opponent_attacks) == 0 {   
+                        if (WHITE_QUEENSIDE_MOVE_PATH & !occupancy) == 0 {
+                            moves.push(Move { startSq: king, endSq: king - 2, moveType: MoveFlag::QUEENSIDECASTLE });
+                        }
                     }
                 }
-            }
-        },
-        Side::BLACK => {
-            if (castling_rights & BLACK_KINGSIDE) != 0 {
-                if (BLACK_KINGSIDE_PATH & !opponent_attacks) === 0 {
-                    if (BLACK_KINGSIDE_MOVE_PATH & !occupancy) {
-                        moves.push(Move { startSq: king, endSq: king + 2, moveType: MoveFlag::KINGSIDECASTLE });
+            },
+            Side::BLACK => {
+                if (castling_rights & BLACK_KINGSIDE) != 0 {
+                    if (BLACK_KINGSIDE_PATH & !opponent_attacks) == 0 {
+                        if (BLACK_KINGSIDE_MOVE_PATH & !occupancy) == 0 {
+                            moves.push(Move { startSq: king, endSq: king + 2, moveType: MoveFlag::KINGSIDECASTLE });
+                        }
                     }
                 }
-            }
 
-            if (castling_rights & BLACK_QUEENSIDE) != 0 {
-                if (BLACK_QUEENSIDE_PATH & !opponent_attacks) === 0 {   
-                    if (BLACK_QUEENSIDE_MOVE_PATH & !occupancy) {
-                        moves.push(Move { startSq: king, endSq: king - 2, moveType: MoveFlag::QUEENSIDECASTLE });
+                if (castling_rights & BLACK_QUEENSIDE) != 0 {
+                    if (BLACK_QUEENSIDE_PATH & !opponent_attacks) == 0 {   
+                        if (BLACK_QUEENSIDE_MOVE_PATH & !occupancy) == 0 {
+                            moves.push(Move { startSq: king, endSq: king - 2, moveType: MoveFlag::QUEENSIDECASTLE });
+                        }
                     }
                 }
             }

@@ -153,7 +153,7 @@ impl ChessBoard {
         let _opponent_attack_targets = self.opponent_attack_targets();
 
         let king_positon = get_lsb_indices(self.kings[player_index]);
-        king_moves(king_position, self.occupied, _opponent_attack_targets,
+        king_moves(king_positon, self.occupied, _opponent_attack_targets,
         self.active_player, self.castling_rights, self.all_pieces[opp_index], &mut gen_moves);
 
         println!("{:?}", gen_moves);
