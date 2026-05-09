@@ -80,7 +80,6 @@ pub static BISHOP_ATTACKS: LazyLock<Box<[u64; BISHOP_ATTACK_SIZE]>> = LazyLock::
         loop {
             let index = (board.wrapping_mul(magic_number)) >> (64 - shift);
             let attack = compute_bishop_attacks(i, board);
-
             bishop_attack[(offset + index) as usize] = attack;
 
             if board == 0 { break; }
