@@ -476,17 +476,8 @@ impl ChessBoard {
     // Undo Move
     pub fn unexecute_move(&mut self) {
         self.history_index -= 1;
-        println!("{:?}", self.history[self.history_index]);
 
-        let undo_move_cmd;
-        match self.history[self.history_index] {
-            Some(val) => {
-                undo_move_cmd = val;
-            },
-            None => {
-                return;
-            }
-        }
+        let Some(undo_move_cmd) = self.history[self.history_index] else { return; };
 
         // Swap Active
         self.active_player = match self.active_player {
@@ -572,38 +563,26 @@ impl ChessBoard {
             },
         }
 
+        let capturedPiece;
+        // Restore Piece only if one was actually captured
+        if let Some(piece) = undo_move_cmd.capturedPiece {
+            match undo_move_cmd.moveType { 
+                MoveFlag::CAPTURE | MoveFlag::PROMOTION => {
+                    self.mailbox[undo_move_cmd.endSq] = piece;
+                },
+                MoveFlag::ENPASSANT => {
+                    let offset = if self.active_player == Side::WHITE { -8 } else { 8 };
+                    self.mailbox[(undo_move_cmd.endSq as i32 + offset) as usize] = piece;
+                },
+                _ => {},
+            }
+        }
+
         // Restore En Passant
         self.en_passant = undo_move_cmd.prevEnPassant;
         self.castling_rights = undo_move_cmd.prevCastleRights;
         self.total_moves -= 1;
         
-
-        let capturedPiece;
-        match undo_move_cmd.capturedPiece {
-            Some(val) => {
-                capturedPiece = val;
-            },
-            None => {
-                return;
-            },
-        }
-        // Restore Piece
-        match undo_move_cmd.moveType { 
-            MoveFlag::CAPTURE | MoveFlag::PROMOTION => {
-                self.mailbox[undo_move_cmd.endSq] = capturedPiece;
-            },
-            MoveFlag::ENPASSANT => {
-                match self.active_player {
-                    Side::WHITE => {
-                        self.mailbox[undo_move_cmd.endSq - 8] = capturedPiece;
-                    },
-                    Side::BLACK => {
-                        self.mailbox[undo_move_cmd.endSq + 8] = capturedPiece;
-                    },
-                }
-            },
-            _ => {},
-        }
     }
 
     fn process_moves(&mut self, prev_moves: Vec<String>) {
