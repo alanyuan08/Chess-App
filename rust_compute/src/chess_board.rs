@@ -563,7 +563,6 @@ impl ChessBoard {
             },
         }
 
-        let capturedPiece;
         // Restore Piece only if one was actually captured
         if let Some(piece) = undo_move_cmd.capturedPiece {
             match undo_move_cmd.moveType { 
