@@ -156,8 +156,6 @@ impl ChessBoard {
         king_moves(king_positon, self.occupied, _opponent_attack_targets,
         self.active_player, self.castling_rights, self.all_pieces[opp_index], &mut gen_moves);
 
-        println!("{:?}", gen_moves);
-
         let knight_positon = get_lsb_indices(self.knights[player_index]);
         knight_moves(knight_positon, self.occupied, self.all_pieces[opp_index], &mut gen_moves);
 
@@ -474,10 +472,150 @@ impl ChessBoard {
         };
     }
 
+
+    // Undo Move
+    pub fn unexecute_move(&mut self) {
+        self.history_index -= 1;
+        println!("{:?}", self.history[self.history_index]);
+
+        let undo_move_cmd;
+        match self.history[self.history_index] {
+            Some(val) => {
+                undo_move_cmd = val;
+            },
+            None => {
+                return;
+            }
+        }
+
+        // Swap Active
+        self.active_player = match self.active_player {
+            Side::WHITE => Side::BLACK,
+            Side::BLACK => Side::WHITE,
+        };
+        
+        // Undo Move
+        match undo_move_cmd.moveType {
+            MoveFlag::MOVE | MoveFlag::CAPTURE => {
+                let undo_command = Move { 
+                    startSq: undo_move_cmd.endSq, 
+                    endSq: undo_move_cmd.startSq, 
+                    moveType: MoveFlag::MOVE 
+                };
+                self._move_piece(undo_command);
+          
+            },
+            MoveFlag::KINGSIDECASTLE => {
+                match self.active_player {
+                    Side::WHITE => {
+                        let king_move_cmd = Move { startSq: 6, endSq: 4, moveType: MoveFlag::MOVE };
+                        self._move_piece(king_move_cmd);
+
+                        let rook_move_cmd = Move { startSq: 5, endSq: 7, moveType: MoveFlag::MOVE };
+                        self._move_piece(rook_move_cmd);
+                    },
+                    Side::BLACK => {
+                        let king_move_cmd = Move { startSq: 62, endSq: 60, moveType: MoveFlag::MOVE };
+                        self._move_piece(king_move_cmd);
+
+                        let rook_move_cmd = Move { startSq: 61, endSq: 63, moveType: MoveFlag::MOVE };
+                        self._move_piece(rook_move_cmd);
+                    },
+                }
+            },
+            MoveFlag::QUEENSIDECASTLE => {
+                match self.active_player {
+                    Side::WHITE => {
+                        let king_move_cmd = Move { startSq: 2, endSq: 4, moveType: MoveFlag::MOVE };
+                        self._move_piece(king_move_cmd);
+
+                        let rook_move_cmd = Move { startSq: 3, endSq: 0, moveType: MoveFlag::MOVE };
+                        self._move_piece(rook_move_cmd);
+                    },
+                    Side::BLACK => {
+                        let king_move_cmd = Move { startSq: 58, endSq: 60, moveType: MoveFlag::MOVE };
+                        self._move_piece(king_move_cmd);
+
+                        let rook_move_cmd = Move { startSq: 59, endSq: 56, moveType: MoveFlag::MOVE };
+                        self._move_piece(rook_move_cmd);
+                    },
+                }
+            },
+            MoveFlag::PROMOTION => {
+                self._remove_piece(undo_move_cmd.endSq);
+
+                match self.active_player {
+                    Side::WHITE => {
+                        self._place_piece(undo_move_cmd.startSq, Piece::WPAWN);
+                    },
+                    Side::BLACK => {
+                        self._place_piece(undo_move_cmd.startSq, Piece::BPAWN);
+                    },
+                }
+            },
+            MoveFlag::ENPASSANT => {
+                let undo_command = Move { 
+                    startSq: undo_move_cmd.endSq, 
+                    endSq: undo_move_cmd.startSq, 
+                    moveType: MoveFlag::MOVE 
+                };
+                self._move_piece(undo_command);
+
+                match self.active_player {
+                    Side::WHITE => {
+                        self._remove_piece(undo_move_cmd.endSq - 8);
+                    },
+                    Side::BLACK => {
+                        self._remove_piece(undo_move_cmd.endSq + 8);
+                    },
+                }
+            },
+        }
+
+        // Restore En Passant
+        self.en_passant = undo_move_cmd.prevEnPassant;
+        self.castling_rights = undo_move_cmd.prevCastleRights;
+        self.total_moves -= 1;
+        
+
+        let capturedPiece;
+        match undo_move_cmd.capturedPiece {
+            Some(val) => {
+                capturedPiece = val;
+            },
+            None => {
+                return;
+            },
+        }
+        // Restore Piece
+        match undo_move_cmd.moveType { 
+            MoveFlag::CAPTURE | MoveFlag::PROMOTION => {
+                self.mailbox[undo_move_cmd.endSq] = capturedPiece;
+            },
+            MoveFlag::ENPASSANT => {
+                match self.active_player {
+                    Side::WHITE => {
+                        self.mailbox[undo_move_cmd.endSq - 8] = capturedPiece;
+                    },
+                    Side::BLACK => {
+                        self.mailbox[undo_move_cmd.endSq + 8] = capturedPiece;
+                    },
+                }
+            },
+            _ => {},
+        }
+    }
+
     fn process_moves(&mut self, prev_moves: Vec<String>) {
         for prev_move in &prev_moves {
             let parsed_move: Move = parse_move(prev_move);
             self.execute_move(parsed_move);
+        }
+    }
+
+    fn undo_moves(&mut self) {
+        for _ in 0..(self.history_index) {
+            self.unexecute_move();
         }
     }
 }
@@ -548,6 +686,7 @@ pub fn print_board(board: u64, debug_string: &str) {
 pub fn compute_next_move(prev_moves: Vec<String>) {
     let mut chess_board = ChessBoard::new();
     chess_board.init_board();
+
     chess_board.process_moves(prev_moves);
     chess_board.generate_moves();
 }

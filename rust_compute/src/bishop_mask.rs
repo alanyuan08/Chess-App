@@ -1,6 +1,5 @@
 use std::sync::LazyLock;
 use crate::move_command::*;
-use crate::chess_board::*;
 
 // Mask the Irrelevant Bits no in the Diagonal Path
 pub const BISHOP_MASKS: [u64; 64] = {
