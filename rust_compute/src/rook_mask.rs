@@ -75,14 +75,14 @@ pub static ROOK_ATTACKS: LazyLock<Box<[u64; ROOK_ATTACK_SIZE]>> = LazyLock::new(
         let mask = ROOK_MASKS[i];
         let offset = ROOK_OFFSETS[i];
 
-        let mut board = 0u64;
+        let mut board = mask;
         loop {
             let index = (board.wrapping_mul(magic_number)) >> (64 - shift);
             let attack = compute_rook_attacks(i, board);
             rook_attack[(offset + index) as usize] = attack;
 
+            if board == 0 { break; } 
             board = (board.wrapping_sub(mask)) & mask;
-            if board == 0 { break; }
         }
     }
 
@@ -206,17 +206,19 @@ pub fn compute_rook_magic(sq: usize) -> u64 {
         // (Board & Mask) * Magic Number >> (64 - n)
         let mut board = mask;
         loop {
-            let index = ((board & mask).wrapping_mul(magic_candidate)) >> (64 - shift);
+            let index = (board.wrapping_mul(magic_candidate)) >> (64 - shift);
             let attack = compute_rook_attacks(sq, board);
 
-            if results[index as usize] == 0 || results[index as usize] == attack {
+
+            if results[index as usize] == 0 {
                 results[index as usize] = attack;
-            } else {
+            } else if results[index as usize] != attack {
                 found = false;
                 break;
             }
-            board = (board - 1) & mask;
+
             if board == 0 { break; } 
+            board = board.wrapping_sub(1) & mask;
         }
 
         if found {

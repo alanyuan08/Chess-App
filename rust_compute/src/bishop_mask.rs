@@ -1,5 +1,6 @@
 use std::sync::LazyLock;
 use crate::move_command::*;
+use crate::chess_board::*;
 
 // Mask the Irrelevant Bits no in the Diagonal Path
 pub const BISHOP_MASKS: [u64; 64] = {
@@ -65,8 +66,8 @@ const fn bishop_table_size() -> usize {
 // Compute Bishop Attack after Bishop Magic is computed
 pub const BISHOP_ATTACK_SIZE: usize = bishop_table_size();
 
-pub static BISHOP_ATTACKS: LazyLock<[u64; BISHOP_ATTACK_SIZE]> = LazyLock::new(|| {
-    let mut bishop_attack = [0u64; BISHOP_ATTACK_SIZE];
+pub static BISHOP_ATTACKS: LazyLock<Box<[u64; BISHOP_ATTACK_SIZE]>> = LazyLock::new(|| {
+    let mut bishop_attack = Box::new([0u64; BISHOP_ATTACK_SIZE]);
 
     for i in 0..64 {
         let magic_number = BISHOP_MAGIC[i];
@@ -77,13 +78,13 @@ pub static BISHOP_ATTACKS: LazyLock<[u64; BISHOP_ATTACK_SIZE]> = LazyLock::new(|
 
         let mut board = mask;
         loop {
-            let index = ((board & mask).wrapping_mul(magic_number)) >> (64 - shift);
+            let index = (board.wrapping_mul(magic_number)) >> (64 - shift);
             let attack = compute_bishop_attacks(i, board);
 
             bishop_attack[(offset + index) as usize] = attack;
 
-            board = (board - 1) & mask;
             if board == 0 { break; }
+            board = board.wrapping_sub(1) & mask;
         }
     }
 
@@ -98,7 +99,7 @@ pub fn bishop_attack_paths(sq: usize, board: u64) -> u64{
     let mask = BISHOP_MASKS[sq];
     let offset = BISHOP_OFFSETS[sq];
 
-    let index = ((board & mask) * magic_number) >> (64 - shift);
+    let index = ((board & mask).wrapping_mul(magic_number)) >> (64 - shift);
     BISHOP_ATTACKS[(offset + index) as usize]
 }
 
@@ -143,8 +144,8 @@ pub const fn compute_bishop_attacks(sq: usize, occupancy: u64) -> u64 {
 
         while cur_r >= 0 && cur_r <= 7 && cur_f >= 0 && cur_f <= 7 {
             let target_bit = 1u64 << (cur_r * 8 + cur_f);
-
             attacks |= target_bit;
+
             if (occupancy & target_bit) != 0 {
                 break;
             }
@@ -182,17 +183,18 @@ pub fn compute_bishop_magic(sq: usize) -> u64 {
         // (Board & Mask) * Magic Number >> (64 - n)
         let mut board = mask;
         loop {
-            let index = ((board & mask).wrapping_mul(magic_candidate)) >> (64 - shift);
+            let index = (board.wrapping_mul(magic_candidate)) >> (64 - shift);
             let attack = compute_bishop_attacks(sq, board);
 
-            if results[index as usize] == 0 || results[index as usize] == attack {
+            if results[index as usize] == 0 {
                 results[index as usize] = attack;
-            } else {
+            } else if results[index as usize] != attack {
                 found = false;
                 break;
             }
-            board = (board - 1) & mask;
+
             if board == 0 { break; } 
+            board = board.wrapping_sub(1) & mask;
         }
 
         if found {

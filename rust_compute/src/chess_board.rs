@@ -131,6 +131,7 @@ impl ChessBoard {
         // 4. Sliders (Bishops, Rooks, Queens)
         let mut bishops = self.bishops[opp] | self.queens[opp];
         while bishops != 0 {
+            print_board(bishop_attack_paths(bishops.trailing_zeros() as usize, occ), "Bishop attack");
             attacks |= bishop_attack_paths(bishops.trailing_zeros() as usize, occ);
             bishops &= bishops - 1;
         }
@@ -226,11 +227,11 @@ impl ChessBoard {
         self.mailbox[move_command.startSq] = Piece::NONE;
         self.mailbox[move_command.endSq] = move_piece;
 
-        self.all_pieces[player_index] ^= 1u64 << move_command.startSq;
-        self.all_pieces[player_index] ^= 1u64 << move_command.endSq;
+        self.all_pieces[player_index] &= !(1u64 << move_command.startSq);
+        self.all_pieces[player_index] |= (1u64 << move_command.endSq);
 
-        self.occupied ^= 1u64 << move_command.startSq;
-        self.occupied ^= 1u64 << move_command.endSq;
+        self.occupied &= !(1u64 << move_command.startSq);
+        self.occupied |= (1u64 << move_command.endSq);
     }
 
     // helper method for remove piece
@@ -534,8 +535,8 @@ fn get_lsb_indices(board: u64) -> Vec<usize> {
 }
 
 // DEBUG
-fn print_board(board: u64) {
-    println!("PRINT BOARD");
+pub fn print_board(board: u64, debug_string: &str) {
+    println!("{}", debug_string);
     for r in (0..8).rev() {
         for c in 0..8 {
             print!("{}", (board >> (r * 8 + c)) & 1);
@@ -548,9 +549,7 @@ fn print_board(board: u64) {
 pub fn compute_next_move(prev_moves: Vec<String>) {
     let mut chess_board = ChessBoard::new();
     chess_board.init_board();
-
     chess_board.process_moves(prev_moves);
-
     chess_board.generate_moves();
 }
 
