@@ -9,6 +9,7 @@ pub mod rook_mask;
 pub mod move_command;
 pub mod chess_board;
 pub mod chess_game;
+pub mod zobrist_hash;
 
 use crate::chess_game::{init_attack_tables};
 use crate::chess_game::{compute_next_move};

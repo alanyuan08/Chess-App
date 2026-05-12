@@ -4,6 +4,7 @@ use crate::knight_mask::*;
 use crate::pawn_mask::*;
 use crate::rook_mask::*;
 use crate::move_command::*;
+use crate::zobrist_hash::*;
 
 // 0 -> White / 1 -> Black
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -55,7 +56,6 @@ impl ChessBoard {
             total_moves: 0,
 
             mailbox: [Piece::NONE; 64],
-
             zobrist_hash: 0,
         }
     }
@@ -96,7 +96,32 @@ impl ChessBoard {
                                     self.knights[color] | self.bishops[color] | 
                                     self.queens[color] | self.kings[color];
             self.occupied |= self.all_pieces[color];
+
+            // 5. Compute Zobrist
+            self.zobrist_hash = self.compute_init_Zobrit();
         }
+    }
+
+    // Compute Init Zobritist
+    pub fn compute_init_Zobrit(self) -> u64 { 
+        let mut hash = 0u64;
+
+        // If piece_idx is 'Empty', this XORs with 0, which does nothing.
+        for (index, piece) in self.mailbox.iter().enumerate() {
+            let piece_idx = piece_player_zobrist(*piece);
+            hash ^= ZOBRIST_TABLE_MAP[piece_idx][index];
+        }
+
+        // Side to Move
+        hash ^= ZOBRIST_SIDE_TO_MOVE[active_player_zobrist(self.active_player)];
+
+        // Castling
+        hash ^= ZOBRIST_CASTLING[self.castling_rights as usize];
+
+        // En Passant
+        hash ^= ZOBRIST_EN_PASSANT[en_passant_zobrist(self.en_passant)];
+
+        hash
     }
 
     // Return Castle Rights

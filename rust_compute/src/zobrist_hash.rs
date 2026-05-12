@@ -1,97 +1,69 @@
+use std::sync::LazyLock;
 use crate::move_command::*;
-use crate::chess_board::*;
+use rand::prelude::*;
 
 // Standard Piece Map: 6 pieces * 2 colours = 13 total
 // We use indices 1-6 for White (P, N, B, R, Q, K) and 7-12 for Black
-const PIECE_TYPES = 13
-const SQUARES = 64
+const PIECE_TYPES: usize = 13;
+const SQUARES: usize = 64;
+const CASTLING: usize = 16;
 
 // 0-8 map to the files / 9 indiciates no En Passant
-const EN_PASSANT_FILES = 9;
+const EN_PASSANT_FILES: usize = 9;
 
-struct ZobristHashTable {
-    // [piece_type][square]
-    table: [[u64; SQUARES]; PIECE_TYPES], 
+pub static ZOBRIST_TABLE_MAP: LazyLock<Box<[[u64; SQUARES]; PIECE_TYPES]>> = LazyLock::new(|| {
+    let mut table = Box::new([[0u64; SQUARES]; PIECE_TYPES]);
+    let mut rng = rand::rng();
 
-    side_to_move: u64,
-    castling: [u64; 16],
-    en_passant: [u64; 8],
-}
-
-// Generates the Random Numbers for Zobrist hash
-impl ZobristHashTable {
-    fn new() -> Self {
-        Self {
-            table: {
-                let mut table = [[0u64; SQUARES]; PIECE_TYPES];
-                let mut rng = rand::rng();
-                for j in 1..PIECE_TYPES {
-                    for i in 0..SQUARES {
-                        table[i][j] = rng.random();
-                    }
-                }
-                table
-            },
-            side_to_move: [0, rand::random()],
-            castling: {
-                let mut castling = [0u64; 16];
-                let mut rng = rand::rng();
-                for i in 0..16 {
-                        castling[i] = rng.random();
-                }
-                castling
-            },
-            en_passant: {
-                let mut en_passant = [0u64; EN_PASSANT_FILES];
-                let mut rng = rand::rng();
-                for i in 0..8 {
-                        en_passant[i] = rng.random();
-                }
-                en_passant
-            }
+    for j in 1..PIECE_TYPES {
+        for i in 0..SQUARES {
+            table[j][i] = rng.random();
         }
     }
+    table
+});
 
-    fn compute_init_value(self, chess_board: ChessBoard) -> u64 { 
-        let mut hash = 0u64;
+pub static ZOBRIST_EN_PASSANT: LazyLock<Box<[u64; EN_PASSANT_FILES]>> = LazyLock::new(|| {
+    let mut en_passant = Box::new([0u64; EN_PASSANT_FILES]);
+    let mut rng = rand::rng();
 
-        // If piece_idx is 'Empty', this XORs with 0, which does nothing.
-        // If it's a real piece, it XORs the random value.
-        for index in 0..64 {
-            let piece_idx = piece_player(chess_board.mailbox[index]) as usize;
-            hash ^= self.table[piece_idx][index];
-        }
-
-        // Side to Move
-        hash ^= self.side_to_move[active_player(self.active_player)];
-
-        // Castling
-        hash ^= self.castling[self.castling_rights as u64];
-
-        // En Passant
-        hash ^= self.en_passant[get_en_passant_file(self.en_passant)];
-
-        hash
+    for i in 0..(EN_PASSANT_FILES-1){
+        en_passant[i] = rng.random();
     }
-}
+    en_passant
+});
+
+pub static ZOBRIST_CASTLING: LazyLock<Box<[u64; CASTLING]>> = LazyLock::new(|| {
+    let mut castling = Box::new([0u64; CASTLING]);
+    let mut rng = rand::rng();
+
+    for i in 0..CASTLING {
+        castling[i] = rng.random();
+    }
+    castling
+});
+
+pub static ZOBRIST_SIDE_TO_MOVE: LazyLock<Box<[u64; 2]>> = LazyLock::new(|| {
+    Box::new([0, rand::random()])
+});
 
 // Convert Piece Type / Player to hash
-fn active_player(active_player: Side) -> usize {
-    (active_player as u8) as usize;
+pub fn active_player_zobrist(active_player: Side) -> usize {
+    active_player as usize
 }
 
 // Player Index
-fn piece_player(piece_type: Piece) -> usize {
-    (piece_type as u8) as usize;
+pub fn piece_player_zobrist(piece_type: Piece) -> usize {
+    piece_type as usize
 }
 
 // Convert En Passant Square to hash
-fn get_en_passant_file(en_passant: u64) -> usize {
+pub fn en_passant_zobrist(en_passant: u64) -> usize {
     if en_passant == 0 {
         return 0;
     }
 
     let square_index = (en_passant.trailing_zeros() as u8) + 1;
-    (square_index % 8) as usize;
+    (square_index % 8) as usize
 }
 

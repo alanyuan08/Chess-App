@@ -6,6 +6,7 @@ rand = "0.9"
 
 [dependencies]
 const-random = "0.1"
+rand = "0.10.1"
 
 [dependencies.pyo3]
 version = "0.27.0"
