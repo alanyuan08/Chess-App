@@ -98,12 +98,12 @@ impl ChessBoard {
             self.occupied |= self.all_pieces[color];
 
             // 5. Compute Zobrist
-            self.zobrist_hash = self.compute_init_Zobrit();
+            self.zobrist_hash = self.compute_init_Zobrist();
         }
     }
 
     // Compute Init Zobritist
-    pub fn compute_init_Zobrit(self) -> u64 { 
+    pub fn compute_init_Zobrist(self) -> u64 { 
         let mut hash = 0u64;
 
         // If piece_idx is 'Empty', this XORs with 0, which does nothing.
@@ -256,6 +256,13 @@ impl ChessBoard {
             Piece::NONE => {},
         }
 
+        // Update Zobrist
+        let start_piece_type = piece_player_zobrist(self.mailbox[move_command.startSq]);
+        self.zobrist_hash ^= ZOBRIST_TABLE_MAP[start_piece_type][move_command.startSq];
+
+        let end_piece_type = piece_player_zobrist(self.mailbox[move_command.endSq]);
+        self.zobrist_hash ^= ZOBRIST_TABLE_MAP[end_piece_type][move_command.endSq];
+
         self.mailbox[move_command.startSq] = Piece::NONE;
         self.mailbox[move_command.endSq] = move_piece;
 
@@ -294,6 +301,9 @@ impl ChessBoard {
             },
             Piece::NONE => {},
         }
+        // Update Zobrist
+        let remove_piece_type = piece_player_zobrist(self.mailbox[remove_sq]);
+        self.zobrist_hash ^= ZOBRIST_TABLE_MAP[remove_piece_type][remove_sq];
 
         self.mailbox[remove_sq] = Piece::NONE;
         self.all_pieces[player_index] ^= 1u64 << remove_sq;
@@ -329,6 +339,10 @@ impl ChessBoard {
             Piece::NONE => {},
         }
 
+        // Update Zobrist
+        let add_piece_type = piece_player_zobrist(piece_type);
+        self.zobrist_hash ^= ZOBRIST_TABLE_MAP[add_piece_type][place_sq];
+
         self.mailbox[place_sq] = piece_type;
         self.all_pieces[player_index] ^= 1u64 << place_sq;
         self.occupied ^= 1u64 << place_sq;
@@ -352,6 +366,10 @@ impl ChessBoard {
             },
             _ => {},
         }
+        
+        // Zobrist Clear Previous En Passant / Castling
+        hash ^= ZOBRIST_EN_PASSANT[en_passant_zobrist(self.en_passant)];
+        hash ^= ZOBRIST_CASTLING[self.castling_rights as usize];
 
         // Clear the Previous En Passant
         self.en_passant = 0;
@@ -495,19 +513,24 @@ impl ChessBoard {
             Side::BLACK => Side::WHITE,
         };
 
+        // Update Zobrist
+        hash ^= ZOBRIST_SIDE_TO_MOVE[active_player_zobrist(self.active_player)];
+        hash ^= ZOBRIST_EN_PASSANT[en_passant_zobrist(self.en_passant)];
+        hash ^= ZOBRIST_CASTLING[self.castling_rights as usize];
+
         remove_piece
     }
 
     // Undo Move
     pub fn unexecute_move(&mut self, undo_move_cmd: UndoMove) {
-
-        print_board(self.occupied, "UNDO BOARD");
-
         // Swap Active
         self.active_player = match self.active_player {
             Side::WHITE => Side::BLACK,
             Side::BLACK => Side::WHITE,
         };
+
+        // Update Zobrist
+        hash ^= ZOBRIST_SIDE_TO_MOVE[active_player_zobrist(self.active_player)];
         
         // Undo Move
         match undo_move_cmd.moveType {
