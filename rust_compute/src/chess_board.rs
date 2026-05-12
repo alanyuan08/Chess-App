@@ -1,5 +1,3 @@
-use pyo3::prelude::*;
-use std::collections::HashMap;
 use crate::bishop_mask::*;
 use crate::king_mask::*;
 use crate::knight_mask::*;
@@ -9,7 +7,7 @@ use crate::move_command::*;
 
 // 0 -> White / 1 -> Black
 #[derive(Clone, Copy, PartialEq, Eq)]
-struct ChessBoard {
+pub struct ChessBoard {
     pawns: [u64; 2],
     knights: [u64; 2],
     bishops: [u64; 2],
@@ -27,8 +25,8 @@ struct ChessBoard {
 
     mailbox: [Piece; 64],
 
-    history: [Option<UndoMove>; 1024],
-    history_index: usize,
+    // Zobrist Hash
+    zobrist_hash: u64,
 }
 
 pub const WHITE_KINGSIDE: u8 = 0b0001; // 1
@@ -39,7 +37,7 @@ pub const BLACK_QUEENSIDE: u8 = 0b1000; // 8
 impl ChessBoard {
     // A constructor-like associated function
     // [0] - White / [1] - Black
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             pawns: [0, 0],
             knights: [0, 0],
@@ -47,21 +45,22 @@ impl ChessBoard {
             rooks: [0, 0],
             queens: [0, 0],
             kings: [0, 0],
+            
             all_pieces: [0, 0],
             occupied: 0,
-            castling_rights: 0b1111,
 
-            // Stores the Square behind the Pawn 
+            castling_rights: 0b1111,
             en_passant: 0,
             active_player: Side::WHITE,
             total_moves: 0,
+
             mailbox: [Piece::NONE; 64],
-            history: [None; 1024],
-            history_index: 0,
+
+            zobrist_hash: 0,
         }
     }
 
-    fn init_board(&mut self) {
+    pub fn init_board(&mut self) {
         for color in 0..2 {
             // Ranks: White = 0 & 1, Black = 6 & 7
             let piece_rank_offset = if color == 0 { 0 } else { 56 };
@@ -100,6 +99,17 @@ impl ChessBoard {
         }
     }
 
+    // Return Castle Rights
+    pub fn castle_rights(self) -> u8 {   
+        let castle_rights = self.castling_rights.clone();
+        castle_rights
+    }
+
+    pub fn en_passant(self) -> u64 {   
+        let en_passant = self.en_passant.clone();
+        en_passant
+    }
+
     // Used to Calculate Castling / King Safety
     fn opponent_attack_targets(&mut self) -> u64 {
         let mut attacks = 0u64;
@@ -108,7 +118,7 @@ impl ChessBoard {
 
         // 1. Pawns - Print Opponent Attack Pawns
         let pawns = self.pawns[opp];
-        if self.active_player == Side::WHITE {
+        if self.active_player == Side::WHITE {  
             attacks |= black_pawn_attacks(pawns);
         } else {
             attacks |= white_pawn_attacks(pawns);
@@ -145,7 +155,7 @@ impl ChessBoard {
     }
 
     // Generate Pseudo-Moves - Only Validate King Safety for Castle / King Movement
-    fn generate_moves(&mut self) -> Vec<Move> {
+    pub fn generate_moves(&mut self) -> Vec<Move> {
         let mut gen_moves: Vec<Move> = Vec::with_capacity(64);
         let player_index = if self.active_player == Side::WHITE { 0 } else { 1 }; 
         let opp_index = if self.active_player == Side::WHITE { 1 } else { 0 }; 
@@ -299,7 +309,7 @@ impl ChessBoard {
         self.occupied ^= 1u64 << place_sq;
     }
 
-    fn execute_move(&mut self, move_command: Move) {
+    pub fn execute_move(&mut self, move_command: Move) -> Option<Piece> {
         let mut remove_piece = None;
         match move_command.moveType { 
             MoveFlag::CAPTURE | MoveFlag::PROMOTION => {
@@ -317,17 +327,6 @@ impl ChessBoard {
             },
             _ => {},
         }
-        
-        let undo_move = UndoMove {
-            startSq: move_command.startSq,
-            endSq: move_command.endSq,
-            moveType: move_command.moveType,
-            capturedPiece: remove_piece,
-            prevCastleRights: self.castling_rights.clone(),
-            prevEnPassant: self.en_passant.clone(),
-        };
-        self.history[self.history_index] = Some(undo_move);
-        self.history_index += 1;
 
         // Clear the Previous En Passant
         self.en_passant = 0;
@@ -470,14 +469,12 @@ impl ChessBoard {
             Side::WHITE => Side::BLACK,
             Side::BLACK => Side::WHITE,
         };
+
+        remove_piece
     }
 
-
     // Undo Move
-    pub fn unexecute_move(&mut self) {
-        self.history_index -= 1;
-
-        let Some(undo_move_cmd) = self.history[self.history_index] else { return; };
+    pub fn unexecute_move(&mut self, undo_move_cmd: UndoMove) {
 
         // Swap Active
         self.active_player = match self.active_player {
@@ -583,19 +580,6 @@ impl ChessBoard {
         self.total_moves -= 1;
         
     }
-
-    fn process_moves(&mut self, prev_moves: Vec<String>) {
-        for prev_move in &prev_moves {
-            let parsed_move: Move = parse_move(prev_move);
-            self.execute_move(parsed_move);
-        }
-    }
-
-    fn undo_moves(&mut self) {
-        for _ in 0..(self.history_index) {
-            self.unexecute_move();
-        }
-    }
 }
 
 fn piece_player(piece_type: Piece) -> Side {
@@ -611,27 +595,6 @@ fn piece_player(piece_type: Piece) -> Side {
         Piece::NONE => {
             panic!("Passed None");
         },
-    }
-}
-
-fn parse_move(uci_move: &String) -> Move {
-    let map = HashMap::from([
-        ('a', 0), ('b', 1), ('c', 2), ('d', 3),
-        ('e', 4), ('f', 5), ('g', 6), ('h', 7),
-    ]);
-    
-    let result: Vec<u32> = uci_move.chars().map(|c: char| {
-        if c.is_alphabetic() {
-            *map.get(&c).unwrap_or(&0) 
-        } else {
-            c.to_digit(10).unwrap_or(0)
-        }
-    }).collect();
-
-    Move { 
-        startSq: (result[1] * 8 + result[0]) as usize, 
-        endSq: (result[3] * 8 + result[2]) as usize, 
-        moveType: MoveFlag::try_from(result[4]).expect("Corrupted move data"),
     }
 }
 
@@ -658,19 +621,4 @@ pub fn print_board(board: u64, debug_string: &str) {
         }
         println!("");
     }
-}
-
-#[pyfunction]
-pub fn compute_next_move(prev_moves: Vec<String>) {
-    let mut chess_board = ChessBoard::new();
-    chess_board.init_board();
-
-    chess_board.process_moves(prev_moves);
-    chess_board.generate_moves();
-}
-
-#[pyfunction]
-pub fn init_attack_tables() {
-    let _ = *BISHOP_ATTACKS;
-    let _ = *ROOK_ATTACKS;
 }

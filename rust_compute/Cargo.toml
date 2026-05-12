@@ -2,6 +2,7 @@
 name = "rust_compute"
 version = "0.1.0"
 edition = "2021"
+rand = "0.9"
 
 [dependencies]
 const-random = "0.1"

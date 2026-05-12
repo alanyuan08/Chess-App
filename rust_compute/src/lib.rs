@@ -8,9 +8,10 @@ pub mod rook_mask;
 
 pub mod move_command;
 pub mod chess_board;
+pub mod chess_game;
 
-use crate::chess_board::{init_attack_tables};
-use crate::chess_board::{compute_next_move};
+use crate::chess_game::{init_attack_tables};
+use crate::chess_game::{compute_next_move};
 
 #[pymodule]
 fn rust_compute(m: &Bound<'_, PyModule>) -> PyResult<()> {

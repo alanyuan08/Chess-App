@@ -43,12 +43,14 @@ impl TryFrom<u32> for MoveFlag {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[repr(u8)]
 pub enum Side {
     WHITE = 0,
     BLACK = 1,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[repr(u8)]
 pub enum Piece {
     NONE = 0,
 
