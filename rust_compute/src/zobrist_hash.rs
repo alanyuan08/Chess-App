@@ -63,6 +63,6 @@ pub fn en_passant_zobrist(en_passant: u64) -> usize {
         return 0;
     }
 
-    let square_index = (en_passant.trailing_zeros() as u8) + 1;
-    (square_index % 8) as usize
+    let square_index = en_passant.trailing_zeros() as usize;
+    (square_index % 8) + 1
 }

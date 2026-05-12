@@ -219,8 +219,14 @@ impl ChessBoard {
 
     // helper method for move piece
     fn _move_piece(&mut self, move_command: Move) {
-        let move_piece = self.mailbox[move_command.startSq];
+        // Remove Start Piece / Add End Piece
+        let start_piece_type = piece_type_zobrist(self.mailbox[move_command.startSq]);
+        self.zobrist_hash ^= ZOBRIST_TABLE_MAP[start_piece_type][move_command.startSq];
 
+        let end_piece_type = piece_type_zobrist(self.mailbox[move_command.endSq]);
+        self.zobrist_hash ^= ZOBRIST_TABLE_MAP[end_piece_type][move_command.endSq];
+
+        let move_piece = self.mailbox[move_command.startSq];
         let player = piece_player(move_piece);
         let player_index = if player == Side::WHITE { 0 } else { 1 }; 
 
@@ -256,13 +262,6 @@ impl ChessBoard {
             Piece::NONE => {},
         }
 
-        // Remove Start Piece / Add End Piece
-        let start_piece_type = piece_type_zobrist(self.mailbox[move_command.startSq]);
-        self.zobrist_hash ^= ZOBRIST_TABLE_MAP[start_piece_type][move_command.startSq];
-
-        let end_piece_type = piece_type_zobrist(self.mailbox[move_command.endSq]);
-        self.zobrist_hash ^= ZOBRIST_TABLE_MAP[end_piece_type][move_command.endSq];
-
         self.mailbox[move_command.startSq] = Piece::NONE;
         self.mailbox[move_command.endSq] = move_piece;
 
@@ -275,8 +274,11 @@ impl ChessBoard {
 
     // helper method for remove piece
     fn _remove_piece(&mut self, remove_sq: usize) {
-        let remove_piece = self.mailbox[remove_sq];
+        // Update Zobrist
+        let remove_piece_type = piece_type_zobrist(self.mailbox[remove_sq]);
+        self.zobrist_hash ^= ZOBRIST_TABLE_MAP[remove_piece_type][remove_sq];
 
+        let remove_piece = self.mailbox[remove_sq];
         let player = piece_player(remove_piece);
         let player_index = if player == Side::WHITE { 0 } else { 1 }; 
 
@@ -301,16 +303,17 @@ impl ChessBoard {
             },
             Piece::NONE => {},
         }
-        // Update Zobrist
-        let remove_piece_type = piece_type_zobrist(self.mailbox[remove_sq]);
-        self.zobrist_hash ^= ZOBRIST_TABLE_MAP[remove_piece_type][remove_sq];
 
         self.mailbox[remove_sq] = Piece::NONE;
         self.all_pieces[player_index] ^= 1u64 << remove_sq;
         self.occupied ^= 1u64 << remove_sq;
     }
 
-    fn _place_piece(&mut self, place_sq: usize, piece_type: Piece) {        
+    fn _place_piece(&mut self, place_sq: usize, piece_type: Piece) {   
+        // Update Zobrist
+        let add_piece_type = piece_type_zobrist(piece_type);
+        self.zobrist_hash ^= ZOBRIST_TABLE_MAP[add_piece_type][place_sq];
+
         let player = piece_player(piece_type);
         let player_index = if player == Side::WHITE { 0 } else { 1 }; 
 
@@ -338,10 +341,6 @@ impl ChessBoard {
             },
             Piece::NONE => {},
         }
-
-        // Update Zobrist
-        let add_piece_type = piece_type_zobrist(piece_type);
-        self.zobrist_hash ^= ZOBRIST_TABLE_MAP[add_piece_type][place_sq];
 
         self.mailbox[place_sq] = piece_type;
         self.all_pieces[player_index] ^= 1u64 << place_sq;
