@@ -476,6 +476,8 @@ impl ChessBoard {
     // Undo Move
     pub fn unexecute_move(&mut self, undo_move_cmd: UndoMove) {
 
+        print_board(self.occupied, "UNDO BOARD")
+
         // Swap Active
         self.active_player = match self.active_player {
             Side::WHITE => Side::BLACK,
@@ -578,7 +580,6 @@ impl ChessBoard {
         self.en_passant = undo_move_cmd.prevEnPassant;
         self.castling_rights = undo_move_cmd.prevCastleRights;
         self.total_moves -= 1;
-        
     }
 }
 

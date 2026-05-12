@@ -11,7 +11,6 @@ use crate::rook_mask::*;
 struct ChessGame {
     history: [Option<UndoMove>; 1024],
     history_index: usize,
-
     chess_board: ChessBoard,
 }
 
