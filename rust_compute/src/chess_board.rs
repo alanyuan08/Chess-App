@@ -108,7 +108,7 @@ impl ChessBoard {
 
         // If piece_idx is 'Empty', this XORs with 0, which does nothing.
         for (index, piece) in self.mailbox.iter().enumerate() {
-            let piece_idx = piece_player_zobrist(*piece);
+            let piece_idx = piece_type_zobrist(*piece);
             hash ^= ZOBRIST_TABLE_MAP[piece_idx][index];
         }
 
@@ -256,11 +256,11 @@ impl ChessBoard {
             Piece::NONE => {},
         }
 
-        // Update Zobrist
-        let start_piece_type = piece_player_zobrist(self.mailbox[move_command.startSq]);
+        // Remove Start Piece / Add End Piece
+        let start_piece_type = piece_type_zobrist(self.mailbox[move_command.startSq]);
         self.zobrist_hash ^= ZOBRIST_TABLE_MAP[start_piece_type][move_command.startSq];
 
-        let end_piece_type = piece_player_zobrist(self.mailbox[move_command.endSq]);
+        let end_piece_type = piece_type_zobrist(self.mailbox[move_command.endSq]);
         self.zobrist_hash ^= ZOBRIST_TABLE_MAP[end_piece_type][move_command.endSq];
 
         self.mailbox[move_command.startSq] = Piece::NONE;
@@ -302,7 +302,7 @@ impl ChessBoard {
             Piece::NONE => {},
         }
         // Update Zobrist
-        let remove_piece_type = piece_player_zobrist(self.mailbox[remove_sq]);
+        let remove_piece_type = piece_type_zobrist(self.mailbox[remove_sq]);
         self.zobrist_hash ^= ZOBRIST_TABLE_MAP[remove_piece_type][remove_sq];
 
         self.mailbox[remove_sq] = Piece::NONE;
@@ -340,7 +340,7 @@ impl ChessBoard {
         }
 
         // Update Zobrist
-        let add_piece_type = piece_player_zobrist(piece_type);
+        let add_piece_type = piece_type_zobrist(piece_type);
         self.zobrist_hash ^= ZOBRIST_TABLE_MAP[add_piece_type][place_sq];
 
         self.mailbox[place_sq] = piece_type;
@@ -348,7 +348,17 @@ impl ChessBoard {
         self.occupied ^= 1u64 << place_sq;
     }
 
+    // Used Prior / After Execute Move/ Undo
+    fn zobrist_xor(&mut self) {
+        self.zobrist_hash ^= ZOBRIST_SIDE_TO_MOVE[active_player_zobrist(self.active_player)];
+        self.zobrist_hash ^= ZOBRIST_EN_PASSANT[en_passant_zobrist(self.en_passant)];
+        self.zobrist_hash ^= ZOBRIST_CASTLING[self.castling_rights as usize];
+    }
+
     pub fn execute_move(&mut self, move_command: Move) -> Option<Piece> {
+        // XOR the current State for Castle, En Passant and Side to Move
+        self.zobrist_xor();
+
         let mut remove_piece = None;
         match move_command.moveType { 
             MoveFlag::CAPTURE | MoveFlag::PROMOTION => {
@@ -366,10 +376,6 @@ impl ChessBoard {
             },
             _ => {},
         }
-        
-        // Zobrist Clear Previous En Passant / Castling
-        hash ^= ZOBRIST_EN_PASSANT[en_passant_zobrist(self.en_passant)];
-        hash ^= ZOBRIST_CASTLING[self.castling_rights as usize];
 
         // Clear the Previous En Passant
         self.en_passant = 0;
@@ -513,24 +519,22 @@ impl ChessBoard {
             Side::BLACK => Side::WHITE,
         };
 
-        // Update Zobrist
-        hash ^= ZOBRIST_SIDE_TO_MOVE[active_player_zobrist(self.active_player)];
-        hash ^= ZOBRIST_EN_PASSANT[en_passant_zobrist(self.en_passant)];
-        hash ^= ZOBRIST_CASTLING[self.castling_rights as usize];
+        // XOR in current state for Castle, En Passant and Side to Move
+        self.zobrist_xor();
 
         remove_piece
     }
 
     // Undo Move
     pub fn unexecute_move(&mut self, undo_move_cmd: UndoMove) {
+        // XOR the current State for Castle, En Passant and Side to Move
+        self.zobrist_xor();
+
         // Swap Active
         self.active_player = match self.active_player {
             Side::WHITE => Side::BLACK,
             Side::BLACK => Side::WHITE,
         };
-
-        // Update Zobrist
-        hash ^= ZOBRIST_SIDE_TO_MOVE[active_player_zobrist(self.active_player)];
         
         // Undo Move
         match undo_move_cmd.moveType {
@@ -628,6 +632,9 @@ impl ChessBoard {
         self.en_passant = undo_move_cmd.prevEnPassant;
         self.castling_rights = undo_move_cmd.prevCastleRights;
         self.total_moves -= 1;
+
+        // XOR in current state for Castle, En Passant and Side to Move
+        self.zobrist_xor();
     }
 }
 

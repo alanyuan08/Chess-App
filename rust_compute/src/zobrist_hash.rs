@@ -44,7 +44,7 @@ pub static ZOBRIST_CASTLING: LazyLock<Box<[u64; CASTLING]>> = LazyLock::new(|| {
 });
 
 pub static ZOBRIST_SIDE_TO_MOVE: LazyLock<Box<[u64; 2]>> = LazyLock::new(|| {
-    Box::new([0, rand::random()])
+    Box::new([rand::random(), rand::random()])
 });
 
 // Convert Piece Type / Player to hash
@@ -53,7 +53,7 @@ pub fn active_player_zobrist(active_player: Side) -> usize {
 }
 
 // Player Index
-pub fn piece_player_zobrist(piece_type: Piece) -> usize {
+pub fn piece_type_zobrist(piece_type: Piece) -> usize {
     piece_type as usize
 }
 
@@ -66,4 +66,3 @@ pub fn en_passant_zobrist(en_passant: u64) -> usize {
     let square_index = (en_passant.trailing_zeros() as u8) + 1;
     (square_index % 8) as usize
 }
-
