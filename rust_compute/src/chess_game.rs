@@ -43,38 +43,20 @@ impl ChessGame {
                 prevEnPassant: self.chess_board.en_passant(),
             };
 
-            self.history_index += 1;
             self.history[self.history_index] = Some(undo_move);
+            self.history_index += 1;
         }
     }
 
     fn undo_moves(&mut self) {
         for i in (0..self.history_index).rev() {
             let undo_command_history = self.history[i];
-
             if let Some(undo_command) = undo_command_history {
                 self.chess_board.unexecute_move(undo_command);
-
                 self.history_index -= 1;
             }
         }
     }
-}
-
-#[pyfunction]
-pub fn compute_next_move(prev_moves: Vec<String>) {
-    let mut chess_game = ChessGame::new();
-
-    chess_game.process_moves(prev_moves);
-    chess_game.chess_board.generate_moves();
-
-    chess_game.undo_moves();
-}
-
-#[pyfunction]
-pub fn init_attack_tables() {
-    let _ = *BISHOP_ATTACKS;
-    let _ = *ROOK_ATTACKS;
 }
 
 fn parse_move(uci_move: &String) -> Move {
@@ -96,4 +78,20 @@ fn parse_move(uci_move: &String) -> Move {
         endSq: (result[3] * 8 + result[2]) as usize, 
         moveType: MoveFlag::try_from(result[4]).expect("Corrupted move data"),
     }
+}
+
+#[pyfunction]
+pub fn compute_next_move(prev_moves: Vec<String>) {
+    let mut chess_game = ChessGame::new();
+
+    chess_game.process_moves(prev_moves);
+    chess_game.chess_board.generate_moves();
+
+    chess_game.undo_moves();
+}
+
+#[pyfunction]
+pub fn init_attack_tables() {
+    let _ = *BISHOP_ATTACKS;
+    let _ = *ROOK_ATTACKS;
 }
