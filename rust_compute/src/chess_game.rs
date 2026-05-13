@@ -7,11 +7,13 @@ use crate::move_command::*;
 use crate::bishop_mask::*;
 use crate::rook_mask::*;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 struct ChessGame {
     history: [Option<UndoMove>; 1024],
     history_index: usize,
+
     chess_board: ChessBoard,
+    traversed_positions: HashMap<u64, i32>,
 }
 
 impl ChessGame {
@@ -24,36 +26,49 @@ impl ChessGame {
                 let mut chess_board = ChessBoard::new();
                 chess_board.init_board();
                 chess_board
-            }
-
+            },
+            traversed_positions: {
+                HashMap::new()
+            },
         }
     }
 
     fn process_moves(&mut self, prev_moves: Vec<String>) {
         for prev_move in &prev_moves {
-            let move_command: Move = parse_move(prev_move);
-            let remove_piece = self.chess_board.execute_move(move_command);
+            if self.history_index >= 1024 { break; } 
 
+            let move_command: Move = parse_move(prev_move);
+
+            // Store Value prior to Executing Move
+            let prev_castle_rights = self.chess_board.castle_rights(); 
+            let prev_en_passant = self.chess_board.en_passant();
+
+            let remove_piece = self.chess_board.execute_move(move_command);
             let undo_move = UndoMove {
                 startSq: move_command.startSq,
                 endSq: move_command.endSq,
                 moveType: move_command.moveType,
                 capturedPiece: remove_piece,
-                prevCastleRights: self.chess_board.castle_rights(),
-                prevEnPassant: self.chess_board.en_passant(),
+                prevCastleRights: prev_castle_rights,
+                prevEnPassant: prev_en_passant,
             };
+            
+            let hash = self.chess_board.zobrist_hash();
+            let count = self.traversed_positions.entry(hash).or_insert(0);
+            *count += 1;
 
             self.history[self.history_index] = Some(undo_move);
             self.history_index += 1;
         }
     }
 
+    // Debug Only
     fn undo_moves(&mut self) {
-        for i in (0..self.history_index).rev() {
-            let undo_command_history = self.history[i];
-            if let Some(undo_command) = undo_command_history {
+        while self.history_index > 0 {
+            self.history_index -= 1;
+
+            if let Some(undo_command) = self.history[self.history_index].take() {
                 self.chess_board.unexecute_move(undo_command);
-                self.history_index -= 1;
             }
         }
     }
@@ -87,7 +102,6 @@ pub fn compute_next_move(prev_moves: Vec<String>) {
     chess_game.process_moves(prev_moves);
     chess_game.chess_board.generate_moves();
 
-    chess_game.undo_moves();
 }
 
 #[pyfunction]
