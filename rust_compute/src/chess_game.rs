@@ -68,6 +68,7 @@ impl ChessGame {
             self.history_index -= 1;
 
             if let Some(undo_command) = self.history[self.history_index].take() {
+                println!("{}", self.traversed_positions[&self.chess_board.zobrist_hash()]);
                 self.chess_board.unexecute_move(undo_command);
             }
         }
@@ -102,6 +103,7 @@ pub fn compute_next_move(prev_moves: Vec<String>) {
     chess_game.process_moves(prev_moves);
     chess_game.chess_board.generate_moves();
 
+    chess_game.undo_moves();
 }
 
 #[pyfunction]
