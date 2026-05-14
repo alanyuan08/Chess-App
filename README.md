@@ -40,6 +40,6 @@ Alan Yuan
 | Platform | Link | Intent |
 | :--- | :--- | :--- |
 | **Email** | [alan0408yuan@gmail.com](mailto:alan0408yuan@gmail.com) | Direct inquiries & scheduling |
-| **LinkedIn** | [://linkedin.com](https://www.linkedin.com/in/alan-yuan-62301272/) | Professional networking & background |
+| **LinkedIn** | [linkedin.com](https://www.linkedin.com/in/alan-yuan-62301272/) | Professional networking & background |
 
 *Response time: Typically within 24 hours.*
