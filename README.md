@@ -32,3 +32,14 @@ The Chess AI has been tested and defeated bots on Chess.com with ELO 2000+
 - [Win - ELO 1800 Bot](https://www.chess.com/game/computer/519702629)
 - [Win - ELO 2000 Bot](https://www.chess.com/analysis/game/computer/522586927/analysis).
 - [Lose - ELO 2200 Bot](https://www.chess.com/game/computer/522001439)
+
+## Contact
+
+Alan Yuan
+
+| Platform | Link | Intent |
+| :--- | :--- | :--- |
+| **Email** | [alan0408yuan@gmail.com](mailto:alan0408yuan@gmail.com) | Direct inquiries & scheduling |
+| **LinkedIn** | [://linkedin.com](https://www.linkedin.com/in/alan-yuan-62301272/) | Professional networking & background |
+
+*Response time: Typically within 24 hours.*
