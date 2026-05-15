@@ -3,6 +3,7 @@ use crate::king_mask::*;
 use crate::knight_mask::*;
 use crate::pawn_mask::*;
 use crate::rook_mask::*;
+use crate::queen_mask::*;
 use crate::move_command::*;
 use crate::zobrist_hash::*;
 
@@ -191,21 +192,17 @@ impl ChessBoard {
 
         let _opponent_attack_targets = self.opponent_attack_targets();
 
-        let king_positon = get_lsb_indices(self.kings[player_index]);
-        king_moves(king_positon, self.occupied, _opponent_attack_targets,
-        self.active_player, self.castling_rights, self.all_pieces[opp_index], &mut gen_moves);
+        // Generate Moves
+        king_moves(self.kings[player_index], self.occupied, _opponent_attack_targets,
+            self.active_player, self.castling_rights, self.all_pieces[opp_index], &mut gen_moves);
 
-        let knight_positon = get_lsb_indices(self.knights[player_index]);
-        knight_moves(knight_positon, self.occupied, self.all_pieces[opp_index], &mut gen_moves);
+        knight_moves(self.knights[player_index], self.occupied, self.all_pieces[opp_index], &mut gen_moves);
 
-        let rook_position = get_lsb_indices(self.rooks[player_index]);
-        rook_moves(rook_position, self.occupied, self.all_pieces[opp_index], &mut gen_moves);
+        rook_moves(self.rooks[player_index], self.occupied, self.all_pieces[opp_index], &mut gen_moves);
 
-        let bishop_position = get_lsb_indices(self.bishops[player_index]);
-        bishop_moves(bishop_position, self.occupied, self.all_pieces[opp_index], &mut gen_moves);
+        bishop_moves(self.bishops[player_index], self.occupied, self.all_pieces[opp_index], &mut gen_moves);
 
-        let queen_position = get_lsb_indices(self.queens[player_index]);
-        bishop_moves(queen_position, self.occupied, self.all_pieces[opp_index], &mut gen_moves);
+        queen_moves(self.queens[player_index], self.occupied, self.all_pieces[opp_index], &mut gen_moves);
 
         match self.active_player {
             Side::WHITE => {

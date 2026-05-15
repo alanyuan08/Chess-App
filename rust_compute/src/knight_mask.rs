@@ -29,10 +29,11 @@ pub const KNIGHT_ATTACKS: [u64; 64] = {
     knight_attack
 };
 
-pub fn knight_moves(active_knights: Vec<usize>, occupancy: u64, 
+pub fn knight_moves(mut knight_bitboard: u64, occupancy: u64, 
     opponent_pieces: u64, moves: &mut Vec<Move>)  {
 
-    for &knight in &active_knights {
+    while knight_bitboard != 0 {
+        let knight = knight_bitboard.trailing_zeros() as usize;
         let knight_attack_paths = KNIGHT_ATTACKS[knight as usize];
 
         let mut knight_moves = knight_attack_paths & !occupancy;
@@ -49,5 +50,7 @@ pub fn knight_moves(active_knights: Vec<usize>, occupancy: u64,
             moves.push(Move { startSq: knight, endSq: target, moveType: MoveFlag::CAPTURE });
             knight_captures &= knight_captures - 1;
         }
+
+        knight_bitboard &= knight_bitboard - 1;
     }
 }

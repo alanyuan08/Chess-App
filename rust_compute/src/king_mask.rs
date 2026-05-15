@@ -62,13 +62,15 @@ pub const KING_ATTACKS: [u64; 64] = {
     king_attack
 };
 
-pub fn king_moves(active_king: Vec<usize>, occupancy: u64, 
+pub fn king_moves(mut king_bitboard: u64, occupancy: u64, 
     opponent_attacks: u64, active_player: Side, castling_rights: u8,
     opponent_pieces: u64, moves: &mut Vec<Move>)  {
 
     // Check if King Capture / Move goes into Check
-    for &king in &active_king {
+    while king_bitboard != 0 {
+        let king = king_bitboard.trailing_zeros() as usize;
         let king_attack_paths = KING_ATTACKS[king as usize];
+
         let king_safe_squares = king_attack_paths & !opponent_attacks;
 
         let mut king_moves = king_safe_squares & !occupancy;
@@ -123,5 +125,7 @@ pub fn king_moves(active_king: Vec<usize>, occupancy: u64,
                 }
             }
         }
+
+        king_bitboard &= king_bitboard - 1;
     }
 }

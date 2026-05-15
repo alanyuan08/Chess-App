@@ -1,10 +1,13 @@
 use crate::bishop_mask::*;
 use crate::rook_mask::*;
+use crate::move_command::*;
 
-pub fn queen_moves(active_queen: Vec<usize>, occupancy: u64, 
+pub fn queen_moves(mut queen_bitboard: u64, occupancy: u64, 
     opponent_pieces: u64, moves: &mut Vec<Move>)  {
 
-    for &queen in &active_queen {
+    while queen_bitboard != 0 {
+        let queen = queen_bitboard.trailing_zeros() as usize;
+
         let rook_attack_paths = rook_attack_paths(queen, occupancy);
         let bishop_attack_paths = bishop_attack_paths(queen, occupancy);
 
@@ -22,5 +25,7 @@ pub fn queen_moves(active_queen: Vec<usize>, occupancy: u64,
             moves.push(Move { startSq: queen, endSq: target, moveType: MoveFlag::CAPTURE });
             queen_captures &= queen_captures - 1;
         }
+
+        queen_bitboard &= queen_bitboard - 1;
     }
 }
