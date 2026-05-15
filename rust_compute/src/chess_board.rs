@@ -99,12 +99,12 @@ impl ChessBoard {
             self.occupied |= self.all_pieces[color];
 
             // 5. Compute Zobrist
-            self.zobrist_hash = self.compute_init_Zobrist();
+            self.zobrist_hash = self.compute_init_zobrist();
         }
     }
 
     // Compute Init Zobritist
-    pub fn compute_init_Zobrist(self) -> u64 { 
+    pub fn compute_init_zobrist(self) -> u64 { 
         let mut hash = 0u64;
 
         // If piece_idx is 'Empty', this XORs with 0, which does nothing.
@@ -621,6 +621,7 @@ fn piece_player(piece_type: Piece) -> Side {
     }
 }
 
+// DEBUG
 fn get_lsb_indices(board: u64) -> Vec<usize> {
     let mut bitboard = board;
     let mut indices = Vec::new();

@@ -2,6 +2,18 @@
 
 This is a standard Chess-App built using PySide6 Library for the Front End and standard MinMax search with Alpha-Beta Pruning Optimizations.
 
+## 1. Python Presentation & Validation Layer
+
+- PySide6 User Interface: Renders the 2D chessboard, handles player drag-and-drop input, and updates game history. 
+
+## 2. Rust Engine Core
+
+- High-Performance Generation: Computes legal and pseudo-legal move paths across millions of positions per second using native multi-threading. MinMax with Alpha-Beta Pruning: Cuts off unpromising branches early to reduce the total search tree size exponentially.
+
+## 3. Neural Network Evaluation
+
+- NNUE Integration: Uses a custom, pre-trained neural network that updates incrementally as pieces move, bypassing slow, manual heuristic math.
+
 # Search Algorithm 
 
 The Chess App uses the standard MinMax search with Alpha-Beta Pruning for search optimizations; The MinMax algorithm recursives explores all possible moves 4-pry deep for both player and computes the best move, assuming both players play optimially.

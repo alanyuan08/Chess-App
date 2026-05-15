@@ -62,7 +62,7 @@ impl ChessGame {
         }
     }
 
-    // Debug Only
+    // DEBUG
     fn undo_moves(&mut self) {
         while self.history_index > 0 {
             self.history_index -= 1;
@@ -100,10 +100,7 @@ pub fn compute_next_move(prev_moves: Vec<String>) {
     let mut chess_game = ChessGame::new();
 
     chess_game.process_moves(prev_moves);
-    
-    let moves = chess_game.chess_board.generate_moves();
-
-    println!("{:?}", moves);
+    chess_game.chess_board.generate_moves();
 }
 
 #[pyfunction]
