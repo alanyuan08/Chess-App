@@ -100,7 +100,10 @@ pub fn compute_next_move(prev_moves: Vec<String>) {
     let mut chess_game = ChessGame::new();
 
     chess_game.process_moves(prev_moves);
-    chess_game.chess_board.generate_moves();
+    
+    let moves = chess_game.chess_board.generate_moves();
+
+    println!("{:?}", moves);
 }
 
 #[pyfunction]
