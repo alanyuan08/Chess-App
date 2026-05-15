@@ -3,7 +3,7 @@
 This is a standard Chess-App built using PySide6 Library for the Front End and standard MinMax search with Alpha-Beta Pruning Optimizations.
 
 ## 1. Python Presentation & Validation Layer
-
+    
 - PySide6 User Interface: Renders the 2D chessboard, handles player drag-and-drop input. 
 
 ## 2. Rust Engine Core
