@@ -68,3 +68,43 @@ pub enum BoardPiece {
     BQUEEN = 11,
     BKING = 12,
 }
+
+pub fn piece_value(piece_type: BoardPiece) -> i32 {
+    match piece_type {
+        BoardPiece::WPAWN | BoardPiece::BPAWN => {
+            return 100;
+        },
+        BoardPiece::WBISHOP | BoardPiece::BBISHOP |
+        BoardPiece::WKNIGHT | BoardPiece::BKNIGHT => {
+            return 300;
+        },
+        BoardPiece::WROOK | BoardPiece::BROOK => {
+            return 500;
+        },
+        BoardPiece::WQUEEN | BoardPiece::BQUEEN => {
+            return 900;
+        },
+        BoardPiece::WKING | BoardPiece::BKING => {
+            return 10000;
+        },
+        BoardPiece::NONE => {
+            panic!("Passed None");
+        },
+    }
+}
+
+pub fn piece_player(piece_type: BoardPiece) -> Side {
+    match piece_type {
+        BoardPiece::WPAWN | BoardPiece::WBISHOP | BoardPiece::WKNIGHT |
+        BoardPiece::WROOK | BoardPiece::WQUEEN | BoardPiece::WKING => {
+            return Side::WHITE;
+        },
+        BoardPiece::BPAWN | BoardPiece::BBISHOP | BoardPiece::BKNIGHT |
+        BoardPiece::BROOK | BoardPiece::BQUEEN | BoardPiece::BKING => {
+            return Side::BLACK;
+        },
+        BoardPiece::NONE => {
+            panic!("Passed None");
+        },
+    }
+}

@@ -86,6 +86,30 @@ impl ChessGame {
             }
         }
     }
+
+    // Process Next Best Move
+    fn get_move_priority(&self, cmd: &ForwardMove) -> i32 {
+        match cmd.moveType {
+            // 1. Promotions (High Priority)
+            MoveFlag::PROMOTION => 90000,
+
+            // 2. Captures (MVV-LVA)
+            MoveFlag::CAPTURE => {
+                let captured_piece_val=  self.chess_board.index_piece_value(cmd.endSq);
+                let starting_piece_val = self.chess_board.index_piece_value(cmd.startSq);
+
+                (captured_piece_val * 10) - starting_piece_val
+            },
+
+            MoveFlag::ENPASSANT => 100, 
+
+            // 3. Castling (Mid Priority)
+            MoveFlag::KINGSIDECASTLE | MoveFlag::QUEENSIDECASTLE => 50,
+
+            // 4. Standard Moves (Low Priority)
+            _ => 0,
+        }
+    }
 }
 
 fn parse_uci(forward_move: ForwardMove) -> String {

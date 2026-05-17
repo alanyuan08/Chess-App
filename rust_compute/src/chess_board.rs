@@ -159,6 +159,11 @@ impl ChessBoard {
         }
     }
 
+    // Return Piece Value
+    pub fn index_piece_value(&self, index: usize) -> i32 {   
+        piece_value(self.mailbox[index])
+    }
+
     // Undo Time Cat Move
     pub fn timecat_pop_move(&mut self) {
         self.timecat_board.pop();
@@ -628,22 +633,6 @@ impl ChessBoard {
 
         // XOR in current state for Castle, En Passant and Side to Move
         self.zobrist_xor();
-    }
-}
-
-fn piece_player(piece_type: BoardPiece) -> Side {
-    match piece_type {
-        BoardPiece::WPAWN | BoardPiece::WBISHOP | BoardPiece::WKNIGHT |
-        BoardPiece::WROOK | BoardPiece::WQUEEN | BoardPiece::WKING => {
-            return Side::WHITE;
-        },
-        BoardPiece::BPAWN | BoardPiece::BBISHOP | BoardPiece::BKNIGHT |
-        BoardPiece::BROOK | BoardPiece::BQUEEN | BoardPiece::BKING => {
-            return Side::BLACK;
-        },
-        BoardPiece::NONE => {
-            panic!("Passed None");
-        },
     }
 }
 
