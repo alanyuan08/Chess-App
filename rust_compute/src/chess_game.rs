@@ -37,7 +37,8 @@ impl ChessGame {
         for prev_move in &prev_moves {
             if self.history_index >= 1024 { break; } 
 
-            let (move_command, uci_move): (ForwardMove, String) = parse_move_uci(prev_move);
+            let move_command: ForwardMove = parse_forward_move(prev_move);
+            let uci_command: String = parse_uci(move_command);
 
             // Store Value prior to Executing Move
             let prev_castle_rights = self.chess_board.castle_rights(); 
@@ -60,8 +61,8 @@ impl ChessGame {
             self.history[self.history_index] = Some(undo_move);
             self.history_index += 1;
 
-            // Update Move
-            self.chess_board.timecat_push_move(uci_move);
+            // Update Time Cat Move
+            self.chess_board.timecat_push_move(uci_command);
         }
     }
 
@@ -77,32 +78,31 @@ impl ChessGame {
     }
 }
 
-fn parse_move_uci(raw_move: &String) -> (ForwardMove, String) {
+fn parse_uci(forward_move: ForwardMove) -> String {
     let map = HashMap::from([
         (0, 'a'), (1, 'b'), (2, 'c'), (3, 'd'),
         (4, 'e'), (5, 'f'), (6, 'g'), (7, 'h'),
     ]);
-    
+
+    let start_file = *map.get(&(forward_move.startSq % 8)).unwrap_or(&'a'); 
+    let start_rank = (forward_move.startSq / 8) + 1;
+    let end_file = *map.get(&(forward_move.endSq % 8)).unwrap_or(&'a'); 
+    let end_rank = (forward_move.endSq / 8) + 1;
+
+    let promo = if result[4] == 3 { "q" } else { "" };
+    format!("{}{}{}{}{}", start_file, start_rank, end_file, end_rank, promo)
+}
+
+fn parse_forward_move(raw_move: &String) -> ForwardMove {    
     let result: Vec<u32> = raw_move.chars().map(|c: char| {
         c.to_digit(10).unwrap_or(0)
     }).collect();
 
-    let forward_move: ForwardMove = ForwardMove { 
+    ForwardMove { 
         startSq: (result[1] * 8 + result[0]) as usize, 
         endSq: (result[3] * 8 + result[2]) as usize, 
         moveType: MoveFlag::try_from(result[4]).expect("Corrupted move data"),
     };
-
-    let start_file = *map.get(&result[0]).unwrap_or(&'a'); 
-    let start_rank = result[1] + 1;
-    let end_file = *map.get(&result[2]).unwrap_or(&'a'); 
-    let end_rank = result[3] + 1;
-
-    let uci_string = format!("{}{}{}{}", start_file, start_rank, end_file, end_rank);
-
-    // 3. Return both values as a tuple
-    (forward_move, uci_string)
-
 }
 
 #[pyfunction]
