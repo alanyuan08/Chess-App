@@ -8,7 +8,7 @@ use crate::move_command::*;
 use crate::zobrist_hash::*;
 
 // 0 -> White / 1 -> Black
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)] 
 pub struct ChessBoard {
     pawns: [u64; 2],
     knights: [u64; 2],
@@ -25,7 +25,7 @@ pub struct ChessBoard {
     active_player: Side,
     total_moves: i32,
 
-    mailbox: [Piece; 64],
+    mailbox: [BoardPiece; 64],
 
     // Zobrist Hash
     zobrist_hash: u64,
@@ -56,7 +56,7 @@ impl ChessBoard {
             active_player: Side::WHITE,
             total_moves: 0,
 
-            mailbox: [Piece::NONE; 64],
+            mailbox: [BoardPiece::NONE; 64],
             zobrist_hash: 0,
         }
     }
@@ -71,7 +71,7 @@ impl ChessBoard {
             for i in 0..8 {
                 let sq = pawn_rank_offset + i;
                 self.pawns[color] |= 1u64 << sq;
-                self.mailbox[sq] = if color == 0 { Piece::WPAWN } else { Piece::BPAWN };
+                self.mailbox[sq] = if color == 0 { BoardPiece::WPAWN } else { BoardPiece::BPAWN };
             }
 
             // 2. Initialize Major Pieces (Bitboards)
@@ -83,9 +83,11 @@ impl ChessBoard {
 
             // 3. Initialize Major Pieces (Mailbox)
             let pieces = if color == 0 {
-                [Piece::WROOK, Piece::WKNIGHT, Piece::WBISHOP, Piece::WQUEEN, Piece::WKING, Piece::WBISHOP, Piece::WKNIGHT, Piece::WROOK]
+                [BoardPiece::WROOK, BoardPiece::WKNIGHT, BoardPiece::WBISHOP, BoardPiece::WQUEEN, 
+                BoardPiece::WKING, BoardPiece::WBISHOP, BoardPiece::WKNIGHT, BoardPiece::WROOK]
             } else {
-                [Piece::BROOK, Piece::BKNIGHT, Piece::BBISHOP, Piece::BQUEEN, Piece::BKING, Piece::BBISHOP, Piece::BKNIGHT, Piece::BROOK]
+                [BoardPiece::BROOK, BoardPiece::BKNIGHT, BoardPiece::BBISHOP, BoardPiece::BQUEEN, 
+                BoardPiece::BKING, BoardPiece::BBISHOP, BoardPiece::BKNIGHT, BoardPiece::BROOK]
             };
 
             for i in 0..8 {
@@ -104,7 +106,7 @@ impl ChessBoard {
     }
 
     // Compute Init Zobritist
-    pub fn compute_init_zobrist(self) -> u64 { 
+    pub fn compute_init_zobrist(&self) -> u64 { 
         let mut hash = 0u64;
 
         // If piece_idx is 'Empty', this XORs with 0, which does nothing.
@@ -126,17 +128,17 @@ impl ChessBoard {
     }
 
     // Return Castle Rights
-    pub fn castle_rights(self) -> u8 {   
+    pub fn castle_rights(&self) -> u8 {   
         self.castling_rights
     }
 
     // Return En Passant
-    pub fn en_passant(self) -> u64 {   
+    pub fn en_passant(&self) -> u64 {   
         self.en_passant
     }
 
     // Return Zobrist Hash
-    pub fn zobrist_hash(self) -> u64 {   
+    pub fn zobrist_hash(&self) -> u64 {   
         self.zobrist_hash
     }
 
@@ -231,38 +233,38 @@ impl ChessBoard {
         let player_index = if player == Side::WHITE { 0 } else { 1 }; 
 
         match move_piece {
-            Piece::WPAWN => {
+            BoardPiece::WPAWN => {
                 self.pawns[player_index] ^= 1u64 << move_command.startSq;
                 self.pawns[player_index] ^= 1u64 << move_command.endSq;
             },
-            Piece::BPAWN => {
+            BoardPiece::BPAWN => {
                 self.pawns[player_index] ^= 1u64 << move_command.startSq;
                 self.pawns[player_index] ^= 1u64 << move_command.endSq;
             },
-            Piece::WBISHOP | Piece::BBISHOP => {
+            BoardPiece::WBISHOP | BoardPiece::BBISHOP => {
                 self.bishops[player_index] ^= 1u64 << move_command.startSq;
                 self.bishops[player_index] ^= 1u64 << move_command.endSq;
             },
-            Piece::WKNIGHT | Piece::BKNIGHT => {
+            BoardPiece::WKNIGHT | BoardPiece::BKNIGHT => {
                 self.knights[player_index] ^= 1u64 << move_command.startSq;
                 self.knights[player_index] ^= 1u64 << move_command.endSq;
             },
-            Piece::WROOK | Piece::BROOK => {
+            BoardPiece::WROOK | BoardPiece::BROOK => {
                 self.rooks[player_index] ^= 1u64 << move_command.startSq;
                 self.rooks[player_index] ^= 1u64 << move_command.endSq;
             },
-            Piece::WQUEEN | Piece::BQUEEN => {
+            BoardPiece::WQUEEN | BoardPiece::BQUEEN => {
                 self.queens[player_index] ^= 1u64 << move_command.startSq;
                 self.queens[player_index] ^= 1u64 << move_command.endSq;
             },
-            Piece::WKING | Piece::BKING=> {
+            BoardPiece::WKING | BoardPiece::BKING=> {
                 self.kings[player_index] ^= 1u64 << move_command.startSq;
                 self.kings[player_index] ^= 1u64 << move_command.endSq;
             },
-            Piece::NONE => {},
+            BoardPiece::NONE => {},
         }
 
-        self.mailbox[move_command.startSq] = Piece::NONE;
+        self.mailbox[move_command.startSq] = BoardPiece::NONE;
         self.mailbox[move_command.endSq] = move_piece;
 
         self.all_pieces[player_index] &= !(1u64 << move_command.startSq);
@@ -283,33 +285,33 @@ impl ChessBoard {
         let player_index = if player == Side::WHITE { 0 } else { 1 }; 
 
         match remove_piece {
-            Piece::WPAWN | Piece::BPAWN => {
+            BoardPiece::WPAWN | BoardPiece::BPAWN => {
                 self.pawns[player_index] ^= 1u64 << remove_sq;
             },
-            Piece::WBISHOP | Piece::BBISHOP => {
+            BoardPiece::WBISHOP | BoardPiece::BBISHOP => {
                 self.bishops[player_index] ^= 1u64 << remove_sq;
             },
-            Piece::WKNIGHT | Piece::BKNIGHT => {
+            BoardPiece::WKNIGHT | BoardPiece::BKNIGHT => {
                 self.knights[player_index] ^= 1u64 << remove_sq;
             },
-            Piece::WROOK | Piece::BROOK => {
+            BoardPiece::WROOK | BoardPiece::BROOK => {
                 self.rooks[player_index] ^= 1u64 << remove_sq;
             },
-            Piece::WQUEEN | Piece::BQUEEN => {
+            BoardPiece::WQUEEN | BoardPiece::BQUEEN => {
                 self.queens[player_index] ^= 1u64 << remove_sq;
             },
-            Piece::WKING | Piece::BKING=> {
+            BoardPiece::WKING | BoardPiece::BKING=> {
                 self.kings[player_index] ^= 1u64 << remove_sq;
             },
-            Piece::NONE => {},
+            BoardPiece::NONE => {},
         }
 
-        self.mailbox[remove_sq] = Piece::NONE;
+        self.mailbox[remove_sq] = BoardPiece::NONE;
         self.all_pieces[player_index] ^= 1u64 << remove_sq;
         self.occupied ^= 1u64 << remove_sq;
     }
 
-    fn _place_piece(&mut self, place_sq: usize, piece_type: Piece) {   
+    fn _place_piece(&mut self, place_sq: usize, piece_type: BoardPiece) {   
         // Update Zobrist
         let add_piece_type = piece_type_zobrist(piece_type);
         self.zobrist_hash ^= ZOBRIST_TABLE_MAP[add_piece_type][place_sq];
@@ -318,28 +320,28 @@ impl ChessBoard {
         let player_index = if player == Side::WHITE { 0 } else { 1 }; 
 
         match piece_type {
-            Piece::WPAWN => {
+            BoardPiece::WPAWN => {
                 self.pawns[player_index] ^= 1u64 << place_sq;
             },
-            Piece::BPAWN => {
+            BoardPiece::BPAWN => {
                 self.pawns[player_index] ^= 1u64 << place_sq;
             },
-            Piece::WBISHOP | Piece::BBISHOP => {
+            BoardPiece::WBISHOP | BoardPiece::BBISHOP => {
                 self.bishops[player_index] ^= 1u64 << place_sq;
             },
-            Piece::WKNIGHT | Piece::BKNIGHT => {
+            BoardPiece::WKNIGHT | BoardPiece::BKNIGHT => {
                 self.knights[player_index] ^= 1u64 << place_sq;
             },
-            Piece::WROOK | Piece::BROOK => {
+            BoardPiece::WROOK | BoardPiece::BROOK => {
                 self.rooks[player_index] ^= 1u64 << place_sq;
             },
-            Piece::WQUEEN | Piece::BQUEEN => {
+            BoardPiece::WQUEEN | BoardPiece::BQUEEN => {
                 self.queens[player_index] ^= 1u64 << place_sq;
             },
-            Piece::WKING | Piece::BKING=> {
+            BoardPiece::WKING | BoardPiece::BKING=> {
                 self.kings[player_index] ^= 1u64 << place_sq;
             },
-            Piece::NONE => {},
+            BoardPiece::NONE => {},
         }
 
         self.mailbox[place_sq] = piece_type;
@@ -354,7 +356,7 @@ impl ChessBoard {
         self.zobrist_hash ^= ZOBRIST_CASTLING[self.castling_rights as usize];
     }
 
-    pub fn execute_move(&mut self, move_command: Move) -> Option<Piece> {
+    pub fn execute_move(&mut self, move_command: Move) -> Option<BoardPiece> {
         // XOR the current State for Castle, En Passant and Side to Move
         self.zobrist_xor();
 
@@ -362,7 +364,7 @@ impl ChessBoard {
         // Store Removed Piece / No bitboard Operations
         match move_command.moveType { 
             MoveFlag::CAPTURE | MoveFlag::PROMOTION => {
-                if self.mailbox[move_command.endSq] != Piece::NONE {
+                if self.mailbox[move_command.endSq] != BoardPiece::NONE {
                     remove_piece = Some(self.mailbox[move_command.endSq]);
                 }
             },
@@ -404,7 +406,7 @@ impl ChessBoard {
             MoveFlag::MOVE => {
                 // Update En Passant
                 let piece = self.mailbox[move_command.startSq];
-                if (piece == Piece::WPAWN || piece == Piece::BPAWN) && 
+                if (piece == BoardPiece::WPAWN || piece == BoardPiece::BPAWN) && 
                 (move_command.startSq as i8 - move_command.endSq as i8).abs() == 16 {
                     match self.active_player {
                         Side::WHITE => {
@@ -464,10 +466,10 @@ impl ChessBoard {
 
                 match self.active_player {
                     Side::WHITE => {
-                        self._place_piece(move_command.endSq, Piece::WQUEEN);
+                        self._place_piece(move_command.endSq, BoardPiece::WQUEEN);
                     },
                     Side::BLACK => {
-                        self._place_piece(move_command.endSq, Piece::BQUEEN);
+                        self._place_piece(move_command.endSq, BoardPiece::BQUEEN);
                     },
                 }
             },
@@ -563,10 +565,10 @@ impl ChessBoard {
 
                 match self.active_player {
                     Side::WHITE => {
-                        self._place_piece(undo_move_cmd.startSq, Piece::WPAWN);
+                        self._place_piece(undo_move_cmd.startSq, BoardPiece::WPAWN);
                     },
                     Side::BLACK => {
-                        self._place_piece(undo_move_cmd.startSq, Piece::BPAWN);
+                        self._place_piece(undo_move_cmd.startSq, BoardPiece::BPAWN);
                     },
                 }
             },
@@ -605,17 +607,17 @@ impl ChessBoard {
     }
 }
 
-fn piece_player(piece_type: Piece) -> Side {
+fn piece_player(piece_type: BoardPiece) -> Side {
     match piece_type {
-        Piece::WPAWN | Piece::WBISHOP | Piece::WKNIGHT |
-        Piece::WROOK | Piece::WQUEEN | Piece::WKING => {
+        BoardPiece::WPAWN | BoardPiece::WBISHOP | BoardPiece::WKNIGHT |
+        BoardPiece::WROOK | BoardPiece::WQUEEN | BoardPiece::WKING => {
             return Side::WHITE;
         },
-        Piece::BPAWN | Piece::BBISHOP | Piece::BKNIGHT |
-        Piece::BROOK | Piece::BQUEEN | Piece::BKING => {
+        BoardPiece::BPAWN | BoardPiece::BBISHOP | BoardPiece::BKNIGHT |
+        BoardPiece::BROOK | BoardPiece::BQUEEN | BoardPiece::BKING => {
             return Side::BLACK;
         },
-        Piece::NONE => {
+        BoardPiece::NONE => {
             panic!("Passed None");
         },
     }

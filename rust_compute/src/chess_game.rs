@@ -101,6 +101,9 @@ pub fn compute_next_move(prev_moves: Vec<String>) {
 
     chess_game.process_moves(prev_moves);
     chess_game.chess_board.generate_moves();
+
+    // Print
+    // println!("{}", chess_game.chess_board.eval());
 }
 
 #[pyfunction]

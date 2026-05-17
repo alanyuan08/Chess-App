@@ -10,7 +10,7 @@ pub struct UndoMove {
     pub startSq: usize,
     pub endSq: usize,
     pub moveType: MoveFlag,
-    pub capturedPiece: Option<Piece>,
+    pub capturedPiece: Option<BoardPiece>,
     pub prevCastleRights: u8,
     pub prevEnPassant: u64,
 }
@@ -51,7 +51,7 @@ pub enum Side {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[repr(u8)]
-pub enum Piece {
+pub enum BoardPiece {
     NONE = 0,
 
     WPAWN = 1,

@@ -7,6 +7,7 @@ rand = "0.9"
 [dependencies]
 const-random = "0.1"
 rand = "0.10.1"
+timecat = { version = "1.53.0", features = ["inbuilt_nnue", "extras"] }
 
 [dependencies.pyo3]
 version = "0.27.0"

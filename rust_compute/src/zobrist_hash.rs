@@ -53,7 +53,7 @@ pub fn active_player_zobrist(active_player: Side) -> usize {
 }
 
 // Player Index
-pub fn piece_type_zobrist(piece_type: Piece) -> usize {
+pub fn piece_type_zobrist(piece_type: BoardPiece) -> usize {
     piece_type as usize
 }
 
