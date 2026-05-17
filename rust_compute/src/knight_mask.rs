@@ -30,7 +30,7 @@ pub const KNIGHT_ATTACKS: [u64; 64] = {
 };
 
 pub fn knight_moves(mut knight_bitboard: u64, occupancy: u64, 
-    opponent_pieces: u64, moves: &mut Vec<Move>)  {
+    opponent_pieces: u64, moves: &mut Vec<ForwardMove>)  {
 
     while knight_bitboard != 0 {
         let knight = knight_bitboard.trailing_zeros() as usize;
@@ -41,13 +41,17 @@ pub fn knight_moves(mut knight_bitboard: u64, occupancy: u64,
 
         while knight_moves != 0 {
             let target = knight_moves.trailing_zeros() as usize;
-            moves.push(Move { startSq: knight, endSq: target, moveType: MoveFlag::MOVE });
+            moves.push(
+                ForwardMove { startSq: knight, endSq: target, moveType: MoveFlag::MOVE }
+            );
             knight_moves &= knight_moves - 1;
         }
 
         while knight_captures != 0 {
             let target = knight_captures.trailing_zeros() as usize;
-            moves.push(Move { startSq: knight, endSq: target, moveType: MoveFlag::CAPTURE });
+            moves.push(
+                ForwardMove { startSq: knight, endSq: target, moveType: MoveFlag::CAPTURE }
+            );
             knight_captures &= knight_captures - 1;
         }
 

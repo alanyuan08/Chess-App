@@ -202,7 +202,7 @@ pub fn compute_bishop_magic(sq: usize) -> u64 {
 }
 
 pub fn bishop_moves(mut bishop_bitboard: u64, occupancy: u64, 
-    opponent_pieces: u64, moves: &mut Vec<Move>)  {
+    opponent_pieces: u64, moves: &mut Vec<ForwardMove>)  {
 
     while bishop_bitboard != 0 {
         let bishop = bishop_bitboard.trailing_zeros() as usize;
@@ -214,13 +214,13 @@ pub fn bishop_moves(mut bishop_bitboard: u64, occupancy: u64,
 
         while bishop_moves != 0 {
             let target = bishop_moves.trailing_zeros() as usize;
-            moves.push(Move { startSq: bishop, endSq: target, moveType: MoveFlag::MOVE });
+            moves.push(ForwardMove { startSq: bishop, endSq: target, moveType: MoveFlag::MOVE });
             bishop_moves &= bishop_moves - 1;
         }
 
         while bishop_captures != 0 {
             let target = bishop_captures.trailing_zeros() as usize;
-            moves.push(Move { startSq: bishop, endSq: target, moveType: MoveFlag::CAPTURE });
+            moves.push(ForwardMove { startSq: bishop, endSq: target, moveType: MoveFlag::CAPTURE });
             bishop_captures &= bishop_captures - 1;
         }
 

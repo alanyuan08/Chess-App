@@ -39,7 +39,7 @@ class ChessGameModel():
     def computeForsythEdwardsNotation(self) -> str:
         return self.chessBoard.computeForsythEdwardsNotation()
     
-    def returnChessUCIMoves(self) -> list[str]:
+    def returnChessMoves(self) -> list[str]:
         return self.chessBoard.previousMoves
 
     # Move Piece

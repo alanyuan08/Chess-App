@@ -1,5 +1,5 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Move {
+pub struct ForwardMove {
     pub startSq: usize,
     pub endSq: usize,
     pub moveType: MoveFlag,

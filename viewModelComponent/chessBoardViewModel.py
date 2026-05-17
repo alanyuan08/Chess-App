@@ -71,7 +71,7 @@ class ChessBoardViewModel():
             )
 
             # Rust Integration
-            print(rust_compute.compute_next_move(self.chessGameModel.returnChessUCIMoves()))
+            print(rust_compute.compute_next_move(self.chessGameModel.returnChessMoves()))
 
             # Run the compute for the Opponent's Move
             if self.computerTurn():
@@ -82,7 +82,7 @@ class ChessBoardViewModel():
     def takeOpponentTurn(self):
         try:
             # Rust Integration
-            print(rust_compute.compute_next_move(self.chessGameModel.returnChessUCIMoves()))
+            print(rust_compute.compute_next_move(self.chessGameModel.returnChessMoves()))
 
             # Compute Opponent Move
             opponentCmd = self.chessGameModel.computeBestMove()        

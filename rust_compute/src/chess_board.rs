@@ -6,9 +6,10 @@ use crate::rook_mask::*;
 use crate::queen_mask::*;
 use crate::move_command::*;
 use crate::zobrist_hash::*;
+use timecat::prelude::*;
 
 // 0 -> White / 1 -> Black
-#[derive(Debug, Clone, PartialEq, Eq)] 
+#[derive(Debug, Clone)] 
 pub struct ChessBoard {
     pawns: [u64; 2],
     knights: [u64; 2],
@@ -29,6 +30,9 @@ pub struct ChessBoard {
 
     // Zobrist Hash
     zobrist_hash: u64,
+
+    // Time Cat board
+    timecat_board: Board,
 }
 
 pub const WHITE_KINGSIDE: u8 = 0b0001; // 1
@@ -58,6 +62,7 @@ impl ChessBoard {
 
             mailbox: [BoardPiece::NONE; 64],
             zobrist_hash: 0,
+            timecat_board: Board::default(),
         }
     }
 
@@ -142,6 +147,25 @@ impl ChessBoard {
         self.zobrist_hash
     }
 
+    // Return Time Cat Score
+    pub fn eval(&mut self) -> i64 {   
+        self.timecat_board.evaluate() as i64
+    }
+
+    // Forward Time Cat
+    pub fn timecat_push_move(&mut self, uci_input: String) {
+        if self.timecat_board.push_move(&uci_input).expect("INVALID_MOVE").is_none() {
+            panic!("Invalid UCI move or illegal move: {}", uci_input);
+        }
+    }
+
+    // Undo Time Cat Move
+    pub fn timecat_pop_move(&mut self) {
+        self.timecat_board.pop();
+
+        return;
+    }
+
     // Used to Calculate Castling / King Safety
     fn opponent_attack_targets(&mut self) -> u64 {
         let mut attacks = 0u64;
@@ -187,8 +211,8 @@ impl ChessBoard {
     }
 
     // Generate Pseudo-Moves - Only Validate King Safety for Castle / King Movement
-    pub fn generate_moves(&mut self) -> Vec<Move> {
-        let mut gen_moves: Vec<Move> = Vec::with_capacity(64);
+    pub fn generate_moves(&mut self) -> Vec<ForwardMove> {
+        let mut gen_moves: Vec<ForwardMove> = Vec::with_capacity(64);
         let player_index = if self.active_player == Side::WHITE { 0 } else { 1 }; 
         let opp_index = if self.active_player == Side::WHITE { 1 } else { 0 }; 
 
@@ -221,7 +245,7 @@ impl ChessBoard {
     }
 
     // helper method for move piece
-    fn _move_piece(&mut self, move_command: Move) {
+    fn _move_piece(&mut self, move_command: ForwardMove) {
         // Remove Start Piece / Add End Piece
         let piece_type = piece_type_zobrist(self.mailbox[move_command.startSq]);
 
@@ -356,7 +380,7 @@ impl ChessBoard {
         self.zobrist_hash ^= ZOBRIST_CASTLING[self.castling_rights as usize];
     }
 
-    pub fn execute_move(&mut self, move_command: Move) -> Option<BoardPiece> {
+    pub fn execute_move(&mut self, move_command: ForwardMove) -> Option<BoardPiece> {
         // XOR the current State for Castle, En Passant and Side to Move
         self.zobrist_xor();
 
@@ -424,17 +448,17 @@ impl ChessBoard {
             MoveFlag::KINGSIDECASTLE => {
                 match self.active_player {
                     Side::WHITE => {
-                        let king_move_cmd = Move { startSq: 4, endSq: 6, moveType: MoveFlag::MOVE };
+                        let king_move_cmd = ForwardMove { startSq: 4, endSq: 6, moveType: MoveFlag::MOVE };
                         self._move_piece(king_move_cmd);
 
-                        let rook_move_cmd = Move { startSq: 7, endSq: 5, moveType: MoveFlag::MOVE };
+                        let rook_move_cmd = ForwardMove { startSq: 7, endSq: 5, moveType: MoveFlag::MOVE };
                         self._move_piece(rook_move_cmd);
                     },
                     Side::BLACK => {
-                        let king_move_cmd = Move { startSq: 60, endSq: 62, moveType: MoveFlag::MOVE };
+                        let king_move_cmd = ForwardMove { startSq: 60, endSq: 62, moveType: MoveFlag::MOVE };
                         self._move_piece(king_move_cmd);
 
-                        let rook_move_cmd = Move { startSq: 63, endSq: 61, moveType: MoveFlag::MOVE };
+                        let rook_move_cmd = ForwardMove { startSq: 63, endSq: 61, moveType: MoveFlag::MOVE };
                         self._move_piece(rook_move_cmd);
                     },
                 }
@@ -442,17 +466,17 @@ impl ChessBoard {
             MoveFlag::QUEENSIDECASTLE => {
                 match self.active_player {
                     Side::WHITE => {
-                        let king_move_cmd = Move { startSq: 4, endSq: 2, moveType: MoveFlag::MOVE };
+                        let king_move_cmd = ForwardMove { startSq: 4, endSq: 2, moveType: MoveFlag::MOVE };
                         self._move_piece(king_move_cmd);
 
-                        let rook_move_cmd = Move { startSq: 0, endSq: 3, moveType: MoveFlag::MOVE };
+                        let rook_move_cmd = ForwardMove { startSq: 0, endSq: 3, moveType: MoveFlag::MOVE };
                         self._move_piece(rook_move_cmd);
                     },
                     Side::BLACK => {
-                        let king_move_cmd = Move { startSq: 60, endSq: 58, moveType: MoveFlag::MOVE };
+                        let king_move_cmd = ForwardMove { startSq: 60, endSq: 58, moveType: MoveFlag::MOVE };
                         self._move_piece(king_move_cmd);
 
-                        let rook_move_cmd = Move { startSq: 56, endSq: 59, moveType: MoveFlag::MOVE };
+                        let rook_move_cmd = ForwardMove { startSq: 56, endSq: 59, moveType: MoveFlag::MOVE };
                         self._move_piece(rook_move_cmd);
                     },
                 }
@@ -516,7 +540,7 @@ impl ChessBoard {
         // Undo Move
         match undo_move_cmd.moveType {
             MoveFlag::MOVE | MoveFlag::CAPTURE => {
-                let undo_command = Move { 
+                let undo_command = ForwardMove { 
                     startSq: undo_move_cmd.endSq, 
                     endSq: undo_move_cmd.startSq, 
                     moveType: MoveFlag::MOVE 
@@ -527,17 +551,17 @@ impl ChessBoard {
             MoveFlag::KINGSIDECASTLE => {
                 match self.active_player {
                     Side::WHITE => {
-                        let king_move_cmd = Move { startSq: 6, endSq: 4, moveType: MoveFlag::MOVE };
+                        let king_move_cmd = ForwardMove { startSq: 6, endSq: 4, moveType: MoveFlag::MOVE };
                         self._move_piece(king_move_cmd);
 
-                        let rook_move_cmd = Move { startSq: 5, endSq: 7, moveType: MoveFlag::MOVE };
+                        let rook_move_cmd = ForwardMove { startSq: 5, endSq: 7, moveType: MoveFlag::MOVE };
                         self._move_piece(rook_move_cmd);
                     },
                     Side::BLACK => {
-                        let king_move_cmd = Move { startSq: 62, endSq: 60, moveType: MoveFlag::MOVE };
+                        let king_move_cmd = ForwardMove { startSq: 62, endSq: 60, moveType: MoveFlag::MOVE };
                         self._move_piece(king_move_cmd);
 
-                        let rook_move_cmd = Move { startSq: 61, endSq: 63, moveType: MoveFlag::MOVE };
+                        let rook_move_cmd = ForwardMove { startSq: 61, endSq: 63, moveType: MoveFlag::MOVE };
                         self._move_piece(rook_move_cmd);
                     },
                 }
@@ -545,17 +569,17 @@ impl ChessBoard {
             MoveFlag::QUEENSIDECASTLE => {
                 match self.active_player {
                     Side::WHITE => {
-                        let king_move_cmd = Move { startSq: 2, endSq: 4, moveType: MoveFlag::MOVE };
+                        let king_move_cmd = ForwardMove { startSq: 2, endSq: 4, moveType: MoveFlag::MOVE };
                         self._move_piece(king_move_cmd);
 
-                        let rook_move_cmd = Move { startSq: 3, endSq: 0, moveType: MoveFlag::MOVE };
+                        let rook_move_cmd = ForwardMove { startSq: 3, endSq: 0, moveType: MoveFlag::MOVE };
                         self._move_piece(rook_move_cmd);
                     },
                     Side::BLACK => {
-                        let king_move_cmd = Move { startSq: 58, endSq: 60, moveType: MoveFlag::MOVE };
+                        let king_move_cmd = ForwardMove { startSq: 58, endSq: 60, moveType: MoveFlag::MOVE };
                         self._move_piece(king_move_cmd);
 
-                        let rook_move_cmd = Move { startSq: 59, endSq: 56, moveType: MoveFlag::MOVE };
+                        let rook_move_cmd = ForwardMove { startSq: 59, endSq: 56, moveType: MoveFlag::MOVE };
                         self._move_piece(rook_move_cmd);
                     },
                 }
@@ -573,7 +597,7 @@ impl ChessBoard {
                 }
             },
             MoveFlag::ENPASSANT => {
-                let undo_command = Move { 
+                let undo_command = ForwardMove { 
                     startSq: undo_move_cmd.endSq, 
                     endSq: undo_move_cmd.startSq, 
                     moveType: MoveFlag::MOVE 

@@ -7,7 +7,7 @@ use crate::move_command::*;
 use crate::bishop_mask::*;
 use crate::rook_mask::*;
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone)]
 struct ChessGame {
     history: [Option<UndoMove>; 1024],
     history_index: usize,
@@ -37,7 +37,7 @@ impl ChessGame {
         for prev_move in &prev_moves {
             if self.history_index >= 1024 { break; } 
 
-            let move_command: Move = parse_move(prev_move);
+            let (move_command, uci_move): (ForwardMove, String) = parse_move_uci(prev_move);
 
             // Store Value prior to Executing Move
             let prev_castle_rights = self.chess_board.castle_rights(); 
@@ -59,6 +59,9 @@ impl ChessGame {
 
             self.history[self.history_index] = Some(undo_move);
             self.history_index += 1;
+
+            // Update Move
+            self.chess_board.timecat_push_move(uci_move);
         }
     }
 
@@ -74,25 +77,32 @@ impl ChessGame {
     }
 }
 
-fn parse_move(uci_move: &String) -> Move {
+fn parse_move_uci(raw_move: &String) -> (ForwardMove, String) {
     let map = HashMap::from([
-        ('a', 0), ('b', 1), ('c', 2), ('d', 3),
-        ('e', 4), ('f', 5), ('g', 6), ('h', 7),
+        (0, 'a'), (1, 'b'), (2, 'c'), (3, 'd'),
+        (4, 'e'), (5, 'f'), (6, 'g'), (7, 'h'),
     ]);
     
-    let result: Vec<u32> = uci_move.chars().map(|c: char| {
-        if c.is_alphabetic() {
-            *map.get(&c).unwrap_or(&0) 
-        } else {
-            c.to_digit(10).unwrap_or(0)
-        }
+    let result: Vec<u32> = raw_move.chars().map(|c: char| {
+        c.to_digit(10).unwrap_or(0)
     }).collect();
 
-    Move { 
+    let forward_move: ForwardMove = ForwardMove { 
         startSq: (result[1] * 8 + result[0]) as usize, 
         endSq: (result[3] * 8 + result[2]) as usize, 
         moveType: MoveFlag::try_from(result[4]).expect("Corrupted move data"),
-    }
+    };
+
+    let start_file = *map.get(&result[0]).unwrap_or(&'a'); 
+    let start_rank = result[1] + 1;
+    let end_file = *map.get(&result[2]).unwrap_or(&'a'); 
+    let end_rank = result[3] + 1;
+
+    let uci_string = format!("{}{}{}{}", start_file, start_rank, end_file, end_rank);
+
+    // 3. Return both values as a tuple
+    (forward_move, uci_string)
+
 }
 
 #[pyfunction]
@@ -103,7 +113,7 @@ pub fn compute_next_move(prev_moves: Vec<String>) {
     chess_game.chess_board.generate_moves();
 
     // Print
-    // println!("{}", chess_game.chess_board.eval());
+    println!("{}", chess_game.chess_board.eval());
 }
 
 #[pyfunction]

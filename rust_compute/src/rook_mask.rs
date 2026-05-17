@@ -227,7 +227,7 @@ pub fn compute_rook_magic(sq: usize) -> u64 {
 }
 
 pub fn rook_moves(mut rook_bitboard: u64, occupancy: u64, 
-    opponent_pieces: u64, moves: &mut Vec<Move>)  {
+    opponent_pieces: u64, moves: &mut Vec<ForwardMove>)  {
 
     while rook_bitboard != 0 {
         let rook = rook_bitboard.trailing_zeros() as usize;
@@ -239,13 +239,13 @@ pub fn rook_moves(mut rook_bitboard: u64, occupancy: u64,
 
         while rook_moves != 0 {
             let target = rook_moves.trailing_zeros() as usize;
-            moves.push(Move { startSq: rook, endSq: target, moveType: MoveFlag::MOVE });
+            moves.push(ForwardMove { startSq: rook, endSq: target, moveType: MoveFlag::MOVE });
             rook_moves &= rook_moves - 1;
         }
 
         while rook_captures != 0 {
             let target = rook_captures.trailing_zeros() as usize;
-            moves.push(Move { startSq: rook, endSq: target, moveType: MoveFlag::CAPTURE });
+            moves.push(ForwardMove { startSq: rook, endSq: target, moveType: MoveFlag::CAPTURE });
             rook_captures &= rook_captures - 1;
         }
 

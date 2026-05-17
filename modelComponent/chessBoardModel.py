@@ -407,9 +407,6 @@ class ChessBoardModel():
         # Update Board Position
         self.forwardPosition()
 
-        # Update UCI
-        colArray = ["a", "b", "c", "d", "e", "f", "g", "h"]
-
         moveAction = 0
         match cmd.moveType:
             case MoveCommandType.MOVE | MoveCommandType.PAWNOPENMOVE:
@@ -426,7 +423,7 @@ class ChessBoardModel():
                 moveAction = 5
 
         self.previousMoves.append(
-            colArray[cmd.startCol] + str(cmd.startRow) + colArray[cmd.endCol] + str(cmd.endRow) + str(moveAction)
+            str(cmd.startCol) + str(cmd.startRow) + str(cmd.endCol) + str(cmd.endRow) + str(moveAction)
         )
 
         # Create a new copy of the removed Piece

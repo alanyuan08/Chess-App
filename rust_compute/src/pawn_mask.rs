@@ -31,13 +31,15 @@ pub fn black_pawn_attacks(black_pawns: u64) -> u64 {
 }
 
 pub fn white_pawn_moves(white_pawns: u64, occupancy: u64, black_pieces: u64, 
-    en_passant_board: u64, moves: &mut Vec<Move>)  {
+    en_passant_board: u64, moves: &mut Vec<ForwardMove>)  {
 
     // --- Aggregating Single Pushes (No Promotion) ---
     let mut one_move = ((white_pawns & !RANK_7) << 8) & !occupancy;
     while one_move != 0 {
         let target = one_move.trailing_zeros() as usize;
-        moves.push(Move { startSq: target - 8, endSq: target, moveType: MoveFlag::MOVE });
+        moves.push(
+            ForwardMove { startSq: target - 8, endSq: target, moveType: MoveFlag::MOVE }
+        );
         one_move &= one_move - 1;
     }
 
@@ -45,7 +47,9 @@ pub fn white_pawn_moves(white_pawns: u64, occupancy: u64, black_pieces: u64,
     let mut promotion_move = ((white_pawns & RANK_7) << 8) & !occupancy;
     while promotion_move != 0 {
         let target = promotion_move.trailing_zeros() as usize;
-        moves.push(Move { startSq: target - 8, endSq: target, moveType: MoveFlag::PROMOTION });
+        moves.push(
+            ForwardMove { startSq: target - 8, endSq: target, moveType: MoveFlag::PROMOTION }
+        );
         promotion_move &= promotion_move - 1;
     }
 
@@ -54,7 +58,9 @@ pub fn white_pawn_moves(white_pawns: u64, occupancy: u64, black_pieces: u64,
     let mut double_move = (single_move << 8) & !occupancy;
     while double_move != 0 {
         let target = double_move.trailing_zeros() as usize;
-        moves.push(Move { startSq: target - 8 * 2, endSq: target, moveType: MoveFlag::MOVE });
+        moves.push(
+            ForwardMove { startSq: target - 8 * 2, endSq: target, moveType: MoveFlag::MOVE }
+        );
         double_move &= double_move - 1;
     }
 
@@ -65,14 +71,18 @@ pub fn white_pawn_moves(white_pawns: u64, occupancy: u64, black_pieces: u64,
     let mut left_capture_no_promotion = left_captures & !RANK_8;
     while left_capture_no_promotion != 0 {
         let target = left_capture_no_promotion.trailing_zeros() as usize;
-        moves.push(Move { startSq: target - 7, endSq: target, moveType: MoveFlag::CAPTURE });
+        moves.push(
+            ForwardMove { startSq: target - 7, endSq: target, moveType: MoveFlag::CAPTURE }
+        );
         left_capture_no_promotion &= left_capture_no_promotion - 1;
     }
 
     let mut right_capture_no_promotion = right_captures & !RANK_8;
     while right_capture_no_promotion != 0 {
         let target = right_capture_no_promotion.trailing_zeros() as usize;
-        moves.push(Move { startSq: target - 9, endSq: target, moveType: MoveFlag::CAPTURE });
+        moves.push(
+            ForwardMove { startSq: target - 9, endSq: target, moveType: MoveFlag::CAPTURE }
+        );
         right_capture_no_promotion &= right_capture_no_promotion - 1;
     }
 
@@ -80,14 +90,18 @@ pub fn white_pawn_moves(white_pawns: u64, occupancy: u64, black_pieces: u64,
     let mut left_capture_promotion = left_captures & RANK_8;
     while left_capture_promotion != 0 {
         let target = left_capture_promotion.trailing_zeros() as usize;
-        moves.push(Move { startSq: target - 7, endSq: target, moveType: MoveFlag::PROMOTION });
+        moves.push(
+            ForwardMove { startSq: target - 7, endSq: target, moveType: MoveFlag::PROMOTION }
+        );
         left_capture_promotion &= left_capture_promotion - 1;
     }
 
     let mut right_capture_promotion = right_captures & RANK_8;
     while right_capture_promotion != 0 {
         let target = right_capture_promotion.trailing_zeros() as usize;
-        moves.push(Move { startSq: target - 9, endSq: target, moveType: MoveFlag::PROMOTION });
+        moves.push(
+            ForwardMove { startSq: target - 9, endSq: target, moveType: MoveFlag::PROMOTION }
+        );
         right_capture_promotion &= right_capture_promotion - 1;
     }
 
@@ -95,26 +109,32 @@ pub fn white_pawn_moves(white_pawns: u64, occupancy: u64, black_pieces: u64,
     let mut left_attackers = (en_passant_board >> 9) & NOT_H_FILE & white_pawns;
     while left_attackers != 0 {
         let from = left_attackers.trailing_zeros() as usize;
-        moves.push(Move { startSq: from, endSq: from + 9, moveType: MoveFlag::ENPASSANT });
+        moves.push(
+            ForwardMove { startSq: from, endSq: from + 9, moveType: MoveFlag::ENPASSANT }
+        );
         left_attackers &= left_attackers - 1;
     }
 
     let mut right_attackers = (en_passant_board >> 7) & NOT_A_FILE & white_pawns;
     while right_attackers != 0 {
         let from = right_attackers.trailing_zeros() as usize;
-        moves.push(Move { startSq: from, endSq: from + 7, moveType: MoveFlag::ENPASSANT });
+        moves.push(
+            ForwardMove { startSq: from, endSq: from + 7, moveType: MoveFlag::ENPASSANT }
+        );
         right_attackers &= right_attackers - 1;
     }
 }
 
 pub fn black_pawn_moves(black_pawns: u64, occupancy: u64, white_pieces: u64, 
-    en_passant_board: u64, moves: &mut Vec<Move>)  {
+    en_passant_board: u64, moves: &mut Vec<ForwardMove>)  {
 
     // --- Aggregating Single Pushes (No Promotion) ---
     let mut one_move = ((black_pawns & !RANK_2) >> 8) & !occupancy;
     while one_move != 0 {
         let target = one_move.trailing_zeros() as usize;
-        moves.push(Move { startSq: target + 8, endSq: target, moveType: MoveFlag::MOVE });
+        moves.push(
+            ForwardMove { startSq: target + 8, endSq: target, moveType: MoveFlag::MOVE }
+        );
         one_move &= one_move - 1;
     }
 
@@ -122,7 +142,9 @@ pub fn black_pawn_moves(black_pawns: u64, occupancy: u64, white_pieces: u64,
     let mut promotion_move = ((black_pawns & RANK_2) >> 8) & !occupancy;
     while promotion_move != 0 {
         let target = promotion_move.trailing_zeros() as usize;
-        moves.push(Move { startSq: target + 8, endSq: target, moveType: MoveFlag::PROMOTION });
+        moves.push(
+            ForwardMove { startSq: target + 8, endSq: target, moveType: MoveFlag::PROMOTION }
+        );
         promotion_move &= promotion_move - 1;
     }
 
@@ -131,7 +153,9 @@ pub fn black_pawn_moves(black_pawns: u64, occupancy: u64, white_pieces: u64,
     let mut double_move = (single_move >> 8) & !occupancy;
     while double_move != 0 {
         let target = double_move.trailing_zeros() as usize;
-        moves.push(Move { startSq: target + 8 * 2, endSq: target, moveType: MoveFlag::MOVE });
+        moves.push(
+            ForwardMove { startSq: target + 8 * 2, endSq: target, moveType: MoveFlag::MOVE }
+        );
         double_move &= double_move - 1;
     }
 
@@ -142,14 +166,18 @@ pub fn black_pawn_moves(black_pawns: u64, occupancy: u64, white_pieces: u64,
     let mut left_capture_no_promotion = left_captures & !RANK_1;
     while left_capture_no_promotion != 0 {
         let target = left_capture_no_promotion.trailing_zeros() as usize;
-        moves.push(Move { startSq: target + 9, endSq: target, moveType: MoveFlag::CAPTURE });
+        moves.push(
+            ForwardMove { startSq: target + 9, endSq: target, moveType: MoveFlag::CAPTURE }
+        );
         left_capture_no_promotion &= left_capture_no_promotion - 1;
     }
 
     let mut right_capture_no_promotion = right_captures & !RANK_1;
     while right_capture_no_promotion != 0 {
         let target = right_capture_no_promotion.trailing_zeros() as usize;
-        moves.push(Move { startSq: target + 7, endSq: target, moveType: MoveFlag::CAPTURE });
+        moves.push(
+            ForwardMove { startSq: target + 7, endSq: target, moveType: MoveFlag::CAPTURE }
+        );
         right_capture_no_promotion &= right_capture_no_promotion - 1;
     }
 
@@ -157,14 +185,18 @@ pub fn black_pawn_moves(black_pawns: u64, occupancy: u64, white_pieces: u64,
     let mut left_capture_promotion = left_captures & RANK_1;
     while left_capture_promotion != 0 {
         let target = left_capture_promotion.trailing_zeros() as usize;
-        moves.push(Move { startSq: target + 9, endSq: target, moveType: MoveFlag::PROMOTION });
+        moves.push(
+            ForwardMove { startSq: target + 9, endSq: target, moveType: MoveFlag::PROMOTION }
+        );
         left_capture_promotion &= left_capture_promotion - 1;
     }
 
     let mut right_capture_promotion = right_captures & RANK_1;
     while right_capture_promotion != 0 {
         let target = right_capture_promotion.trailing_zeros() as usize;
-        moves.push(Move { startSq: target + 7, endSq: target, moveType: MoveFlag::PROMOTION });
+        moves.push(
+            ForwardMove { startSq: target + 7, endSq: target, moveType: MoveFlag::PROMOTION }
+        );
         right_capture_promotion &= right_capture_promotion - 1;
     }
 
@@ -172,14 +204,18 @@ pub fn black_pawn_moves(black_pawns: u64, occupancy: u64, white_pieces: u64,
     let mut left_attackers = (en_passant_board << 7) & NOT_H_FILE & black_pawns;
     while left_attackers != 0 {
         let target = left_attackers.trailing_zeros() as usize;
-        moves.push(Move { startSq: target, endSq: target - 7, moveType: MoveFlag::ENPASSANT });
+        moves.push(
+            ForwardMove { startSq: target, endSq: target - 7, moveType: MoveFlag::ENPASSANT }
+        );
         left_attackers &= left_attackers - 1;
     }
 
     let mut right_attackers = (en_passant_board << 9) & NOT_A_FILE & black_pawns;
     while right_attackers != 0 {
         let target = right_attackers.trailing_zeros() as usize;
-        moves.push(Move { startSq: target, endSq: target - 9, moveType: MoveFlag::ENPASSANT });
+        moves.push(
+            ForwardMove { startSq: target, endSq: target - 9, moveType: MoveFlag::ENPASSANT }
+        );
         right_attackers &= right_attackers - 1;
     }
 }
