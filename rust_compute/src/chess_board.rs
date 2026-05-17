@@ -154,7 +154,7 @@ impl ChessBoard {
 
     // Forward Time Cat
     pub fn timecat_push_move(&mut self, uci_input: String) {
-        if self.timecat_board.push_move(&uci_input).expect("INVALID_MOVE").is_none() {
+        if self.timecat_board.push_move(&uci_input).is_none() {
             panic!("Invalid UCI move or illegal move: {}", uci_input);
         }
     }
