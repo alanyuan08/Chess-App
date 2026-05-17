@@ -38,32 +38,42 @@ impl ChessGame {
             if self.history_index >= 1024 { break; } 
 
             let move_command: ForwardMove = parse_forward_move(prev_move);
-            let uci_command: String = parse_uci(move_command);
-
-            // Store Value prior to Executing Move
-            let prev_castle_rights = self.chess_board.castle_rights(); 
-            let prev_en_passant = self.chess_board.en_passant();
-
-            let remove_piece = self.chess_board.execute_move(move_command);
-            let undo_move = UndoMove {
-                startSq: move_command.startSq,
-                endSq: move_command.endSq,
-                moveType: move_command.moveType,
-                capturedPiece: remove_piece,
-                prevCastleRights: prev_castle_rights,
-                prevEnPassant: prev_en_passant,
-            };
-            
-            let hash = self.chess_board.zobrist_hash();
-            let count = self.traversed_positions.entry(hash).or_insert(0);
-            *count += 1;
-
-            self.history[self.history_index] = Some(undo_move);
-            self.history_index += 1;
-
-            // Update Time Cat Move
-            self.chess_board.timecat_push_move(uci_command);
+            self.process_forward_move(move_command);
         }
+    }
+
+    fn process_forward_move(&mut self, forward_move: ForwardMove) {
+        let uci_command: String = parse_uci(forward_move);
+
+        // Store Value prior to Executing Move
+        let prev_castle_rights = self.chess_board.castle_rights(); 
+        let prev_en_passant = self.chess_board.en_passant();
+
+        let remove_piece = self.chess_board.execute_move(forward_move);
+        let undo_move = UndoMove {
+            startSq: forward_move.startSq,
+            endSq: forward_move.endSq,
+            moveType: forward_move.moveType,
+            capturedPiece: remove_piece,
+            prevCastleRights: prev_castle_rights,
+            prevEnPassant: prev_en_passant,
+        };
+        
+        let hash = self.chess_board.zobrist_hash();
+        let count = self.traversed_positions.entry(hash).or_insert(0);
+        *count += 1;
+
+        self.history[self.history_index] = Some(undo_move);
+        self.history_index += 1;
+
+        // Update Time Cat Move
+        self.chess_board.timecat_push_move(uci_command);
+    }
+
+    fn process_backward_move(&mut self) {
+        self.chess_board.timecat_pop_move();
+
+        return;
     }
 
     // DEBUG
@@ -89,7 +99,10 @@ fn parse_uci(forward_move: ForwardMove) -> String {
     let end_file = *map.get(&(forward_move.endSq % 8)).unwrap_or(&'a'); 
     let end_rank = (forward_move.endSq / 8) + 1;
 
-    let promo = if result[4] == 3 { "q" } else { "" };
+    let promo = match forward_move.moveType {
+        MoveFlag::PROMOTION => "q",
+        _ => "",
+    };
     format!("{}{}{}{}{}", start_file, start_rank, end_file, end_rank, promo)
 }
 
@@ -102,7 +115,7 @@ fn parse_forward_move(raw_move: &String) -> ForwardMove {
         startSq: (result[1] * 8 + result[0]) as usize, 
         endSq: (result[3] * 8 + result[2]) as usize, 
         moveType: MoveFlag::try_from(result[4]).expect("Corrupted move data"),
-    };
+    }
 }
 
 #[pyfunction]

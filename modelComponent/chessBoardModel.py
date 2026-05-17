@@ -99,7 +99,6 @@ class ChessBoardModel():
 
         return "".join(returnString)
 
-
     # Compute Board Value - White is Positive/ Black is Negative
     def _computeBoardValue(self) -> int:
         returnValue = 0

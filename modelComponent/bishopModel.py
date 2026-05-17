@@ -15,39 +15,6 @@ class BishopModel(ChessPieceModel):
 		self.type = PieceType.BISHOP
 		self.moves = 0
 
-	# Bishop Value Table Black 
-	bishopValueTable = [
-	    [-20, -10, -10, -10, -10, -10, -10, -20],
-	    [-10,   5,   0,   0,   0,   0,   5, -10],
-	    [-10,  10,  10,  10,  10,  10,  10, -10],
-	    [-10,   0,  10,  10,  10,  10,   0, -10],
-	    [-10,   5,   5,  10,  10,   5,   5, -10],
-	    [-10,   0,   5,  10,  10,   5,   0, -10],
-	    [-10,   0,   0,   0,   0,   0,   0, -10],
-	    [-20, -10, -10, -10, -10, -10, -10, -20]
-	]
-
-	def fenValue(self) -> str:
-		if self.player == Player.BLACK:
-			return "b"
-		else:
-			return "B"
-
-	def phaseWeight(self) -> int:
-		return 1
-
-	def pieceValue(self) -> int:
-		return 300
-
-	def computedValue(self, chessBoard: ChessBoardProtocal, phaseWeight: int) -> int:
-		row = 0
-		if self.player == Player.BLACK:
-			row = self.row
-		else:
-			row = 7 - self.row
-
-		return self.pieceValue() + self.bishopValueTable[row][self.col]
-
 	# List all Possible Moves from Location
 	def possibleMoves(self, chessboard: ChessBoardProtocal) -> list[MoveCommand]:
 		returnMoves = []
@@ -94,3 +61,38 @@ class BishopModel(ChessPieceModel):
 					break
 
 		return returnMoves
+
+#### -> Not in Use 
+
+	# Bishop Value Table Black 
+	bishopValueTable = [
+	    [-20, -10, -10, -10, -10, -10, -10, -20],
+	    [-10,   5,   0,   0,   0,   0,   5, -10],
+	    [-10,  10,  10,  10,  10,  10,  10, -10],
+	    [-10,   0,  10,  10,  10,  10,   0, -10],
+	    [-10,   5,   5,  10,  10,   5,   5, -10],
+	    [-10,   0,   5,  10,  10,   5,   0, -10],
+	    [-10,   0,   0,   0,   0,   0,   0, -10],
+	    [-20, -10, -10, -10, -10, -10, -10, -20]
+	]
+
+	def fenValue(self) -> str:
+		if self.player == Player.BLACK:
+			return "b"
+		else:
+			return "B"
+
+	def phaseWeight(self) -> int:
+		return 1
+
+	def pieceValue(self) -> int:
+		return 300
+
+	def computedValue(self, chessBoard: ChessBoardProtocal, phaseWeight: int) -> int:
+		row = 0
+		if self.player == Player.BLACK:
+			row = self.row
+		else:
+			row = 7 - self.row
+
+		return self.pieceValue() + self.bishopValueTable[row][self.col]
