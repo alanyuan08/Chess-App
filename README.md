@@ -43,7 +43,6 @@ The Chess AI has been tested and defeated bots on Chess.com with ELO 2000+
 
 - [Win - ELO 1800 Bot](https://www.chess.com/game/computer/519702629)
 - [Win - ELO 2000 Bot](https://www.chess.com/analysis/game/computer/522586927/analysis).
-- [Lose - ELO 2200 Bot](https://www.chess.com/game/computer/522001439)
 
 ## Contact
 
