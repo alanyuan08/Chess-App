@@ -71,9 +71,24 @@ impl ChessGame {
     }
 
     fn process_backward_move(&mut self) {
-        self.chess_board.timecat_pop_move();
+        if self.history_index == 0 {
+            return;
+        }
 
-        return;
+        self.history_index -= 1;
+        if let Some(undo_move) = self.history[self.history_index].take() {
+            let hash = self.chess_board.zobrist_hash();
+            if let Some(count) = self.traversed_positions.get_mut(&hash) {
+                if *count > 1 {
+                    *count -= 1;
+                } else {
+                    self.traversed_positions.remove(&hash);
+                }
+            }
+
+            self.chess_board.timecat_pop_move();
+            self.chess_board.unexecute_move(undo_move);
+        }
     }
 
     // DEBUG
