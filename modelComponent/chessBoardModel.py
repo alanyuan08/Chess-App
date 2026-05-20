@@ -406,23 +406,10 @@ class ChessBoardModel():
         # Update Board Position
         self.forwardPosition()
 
-        moveAction = 0
-        match cmd.moveType:
-            case MoveCommandType.MOVE | MoveCommandType.PAWNOPENMOVE:
-                moveAction = 0 
-            case MoveCommandType.KINGSIDECASTLE:
-                moveAction = 1
-            case MoveCommandType.QUEENSIDECASTLE:
-                moveAction = 2
-            case MoveCommandType.PROMOTE:
-                moveAction = 3
-            case MoveCommandType.ENPASSANT:
-                moveAction = 4
-            case MoveCommandType.CAPTURE:
-                moveAction = 5
-
+        # Append Previous Position
         self.previousMoves.append(
-            str(cmd.startCol) + str(cmd.startRow) + str(cmd.endCol) + str(cmd.endRow) + str(moveAction)
+            str(cmd.startCol) + str(cmd.startRow) + str(cmd.endCol) + \
+                + str(cmd.endRow) + str(cmd.moveType.value)
         )
 
         # Create a new copy of the removed Piece

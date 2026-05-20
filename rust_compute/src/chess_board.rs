@@ -24,7 +24,6 @@ pub struct ChessBoard {
     castling_rights: u8,
     en_passant: u64,
     active_player: Side,
-    total_moves: i32,
 
     mailbox: [BoardPiece; 64],
 
@@ -58,7 +57,6 @@ impl ChessBoard {
             castling_rights: 0b1111,
             en_passant: 0,
             active_player: Side::WHITE,
-            total_moves: 0,
 
             mailbox: [BoardPiece::NONE; 64],
             zobrist_hash: 0,
@@ -132,6 +130,30 @@ impl ChessBoard {
         hash
     }
 
+    // Return Opponent 
+    pub fn opponent_player(&self) -> Side {
+        match self.active_player {
+            Side::WHITE => {
+                return Side::BLACK;
+            },
+            Side::BLACK => {
+                return Side::WHITE;
+            }
+        }
+    }
+
+    // Return Index
+    pub fn player_index(&self, player_side: Side) -> usize {
+        match player_side {
+            Side::WHITE => {
+                return 0;
+            },
+            Side::BLACK => {
+                return 1;
+            }
+        }
+    }
+
     // Return Castle Rights
     pub fn castle_rights(&self) -> u8 {   
         self.castling_rights
@@ -148,8 +170,8 @@ impl ChessBoard {
     }
 
     // Return Time Cat Score
-    pub fn eval(&mut self) -> i64 {   
-        self.timecat_board.evaluate() as i64
+    pub fn eval(&mut self) -> i32 {   
+        self.timecat_board.evaluate() as i32
     }
 
     // Forward Time Cat
@@ -172,13 +194,14 @@ impl ChessBoard {
     }
 
     // Used to Calculate Castling / King Safety
-    fn opponent_attack_targets(&mut self) -> u64 {
+    pub fn compute_attack_targets(&self, attacking_side: Side) -> u64 {
         let mut attacks = 0u64;
-        let opp = if self.active_player == Side::WHITE { 1 } else { 0 };
+        let index = self.player_index(attacking_side);
+        
         let occ = self.occupied;
 
-        // 1. Pawns - Print Opponent Attack Pawns
-        let pawns = self.pawns[opp];
+        // 1. Pawns
+        let pawns = self.pawns[index];
         if self.active_player == Side::WHITE {  
             attacks |= black_pawn_attacks(pawns);
         } else {
@@ -186,27 +209,27 @@ impl ChessBoard {
         }
 
         // 2. Knights
-        let mut knights = self.knights[opp];
+        let mut knights = self.knights[index];
         while knights != 0 {
             attacks |= KNIGHT_ATTACKS[knights.trailing_zeros() as usize];
             knights &= knights - 1;
         }
 
         // 3. Kings
-        let mut kings = self.kings[opp];
+        let mut kings = self.kings[index];
         while kings != 0 {
             attacks |= KING_ATTACKS[kings.trailing_zeros() as usize];
             kings &= kings - 1;
         }
 
         // 4. Sliders (Bishops, Rooks, Queens)
-        let mut bishops = self.bishops[opp] | self.queens[opp];
+        let mut bishops = self.bishops[index] | self.queens[index];
         while bishops != 0 {
             attacks |= bishop_attack_paths(bishops.trailing_zeros() as usize, occ);
             bishops &= bishops - 1;
         }
 
-        let mut rooks = self.rooks[opp] | self.queens[opp];
+        let mut rooks = self.rooks[index] | self.queens[index];
         while rooks != 0 {
             attacks |= rook_attack_paths(rooks.trailing_zeros() as usize, occ);
             rooks &= rooks - 1;
@@ -215,13 +238,21 @@ impl ChessBoard {
         attacks
     }
 
+    // Check if current player can capture opponent King
+    pub fn is_previous_player_king_in_check(&mut self) -> bool {
+        let _curr_attack_targets = self.compute_attack_targets(self.active_player);
+
+        let opponent_index = self.player_index(self.opponent_player());
+        (self.kings[opponent_index] & _curr_attack_targets) != 0
+    }
+
     // Generate Pseudo-Moves - Only Validate King Safety for Castle / King Movement
     pub fn generate_moves(&mut self) -> Vec<ForwardMove> {
-        let mut gen_moves: Vec<ForwardMove> = Vec::with_capacity(64);
-        let player_index = if self.active_player == Side::WHITE { 0 } else { 1 }; 
-        let opp_index = if self.active_player == Side::WHITE { 1 } else { 0 }; 
+        let mut gen_moves: Vec<ForwardMove> = Vec::with_capacity(218);
+        let player_index = self.player_index(self.active_player);
 
-        let _opponent_attack_targets = self.opponent_attack_targets();
+        let opp_index = self.player_index(self.opponent_player());
+        let _opponent_attack_targets = self.compute_attack_targets(self.opponent_player());
 
         // Generate Moves
         king_moves(self.kings[player_index], self.occupied, _opponent_attack_targets,
@@ -258,8 +289,7 @@ impl ChessBoard {
         self.zobrist_hash ^= ZOBRIST_TABLE_MAP[piece_type][move_command.endSq];
 
         let move_piece = self.mailbox[move_command.startSq];
-        let player = piece_player(move_piece);
-        let player_index = if player == Side::WHITE { 0 } else { 1 }; 
+        let player_index = self.player_index(piece_player(move_piece));
 
         match move_piece {
             BoardPiece::WPAWN => {
@@ -310,8 +340,7 @@ impl ChessBoard {
         self.zobrist_hash ^= ZOBRIST_TABLE_MAP[remove_piece_type][remove_sq];
 
         let remove_piece = self.mailbox[remove_sq];
-        let player = piece_player(remove_piece);
-        let player_index = if player == Side::WHITE { 0 } else { 1 }; 
+        let player_index = self.player_index(piece_player(remove_piece));
 
         match remove_piece {
             BoardPiece::WPAWN | BoardPiece::BPAWN => {
@@ -345,8 +374,7 @@ impl ChessBoard {
         let add_piece_type = piece_type_zobrist(piece_type);
         self.zobrist_hash ^= ZOBRIST_TABLE_MAP[add_piece_type][place_sq];
 
-        let player = piece_player(piece_type);
-        let player_index = if player == Side::WHITE { 0 } else { 1 }; 
+        let player_index = self.player_index(piece_player(piece_type));
 
         match piece_type {
             BoardPiece::WPAWN => {
@@ -392,7 +420,9 @@ impl ChessBoard {
         let mut remove_piece = None;
         // Store Removed Piece / No bitboard Operations
         match move_command.moveType { 
-            MoveFlag::CAPTURE | MoveFlag::PROMOTION => {
+            MoveFlag::CAPTURE | MoveFlag::PROMOTIONQUEEN |
+            MoveFlag::PROMOTIONROOK | MoveFlag::PROMOTIONBISHOP | 
+            MoveFlag::PROMOTIONKNIGHT => {
                 if self.mailbox[move_command.endSq] != BoardPiece::NONE {
                     remove_piece = Some(self.mailbox[move_command.endSq]);
                 }
@@ -433,6 +463,9 @@ impl ChessBoard {
 
         match move_command.moveType {
             MoveFlag::MOVE => {
+                self._move_piece(move_command);
+            },
+            MoveFlag::PAWNOPENMOVE => {
                 // Update En Passant
                 let piece = self.mailbox[move_command.startSq];
                 if (piece == BoardPiece::WPAWN || piece == BoardPiece::BPAWN) && 
@@ -448,7 +481,6 @@ impl ChessBoard {
                 }
                 
                 self._move_piece(move_command);
-          
             },
             MoveFlag::KINGSIDECASTLE => {
                 match self.active_player {
@@ -486,7 +518,8 @@ impl ChessBoard {
                     },
                 }
             },
-            MoveFlag::PROMOTION => {
+            MoveFlag::PROMOTIONQUEEN | MoveFlag::PROMOTIONROOK |
+            MoveFlag::PROMOTIONBISHOP | MoveFlag::PROMOTIONKNIGHT => {
                 self._remove_piece(move_command.startSq);
 
                 if remove_piece.is_some() {
@@ -495,10 +528,14 @@ impl ChessBoard {
 
                 match self.active_player {
                     Side::WHITE => {
-                        self._place_piece(move_command.endSq, BoardPiece::WQUEEN);
+                        self._place_piece(move_command.endSq, 
+                            white_promotion_piece(move_command.moveType)
+                        );
                     },
                     Side::BLACK => {
-                        self._place_piece(move_command.endSq, BoardPiece::BQUEEN);
+                        self._place_piece(move_command.endSq, 
+                            black_promotion_piece(move_command.moveType)
+                        );
                     },
                 }
             },
@@ -517,13 +554,10 @@ impl ChessBoard {
                 self._remove_piece(move_command.endSq);
                 self._move_piece(move_command);
             },
+            MoveFlag::NULL => {},
         }
 
-        self.total_moves += 1;
-        self.active_player = match self.active_player {
-            Side::WHITE => Side::BLACK,
-            Side::BLACK => Side::WHITE,
-        };
+        self.active_player = self.opponent_player();
 
         // XOR in current state for Castle, En Passant and Side to Move
         self.zobrist_xor();
@@ -537,14 +571,11 @@ impl ChessBoard {
         self.zobrist_xor();
 
         // Swap Active
-        self.active_player = match self.active_player {
-            Side::WHITE => Side::BLACK,
-            Side::BLACK => Side::WHITE,
-        };
+        self.active_player = self.opponent_player();
         
         // Undo Move
         match undo_move_cmd.moveType {
-            MoveFlag::MOVE | MoveFlag::CAPTURE => {
+            MoveFlag::MOVE | MoveFlag::CAPTURE | MoveFlag::PAWNOPENMOVE => {
                 let undo_command = ForwardMove { 
                     startSq: undo_move_cmd.endSq, 
                     endSq: undo_move_cmd.startSq, 
@@ -589,7 +620,8 @@ impl ChessBoard {
                     },
                 }
             },
-            MoveFlag::PROMOTION => {
+            MoveFlag::PROMOTIONQUEEN | MoveFlag::PROMOTIONROOK | 
+            MoveFlag::PROMOTIONBISHOP | MoveFlag::PROMOTIONKNIGHT => {
                 self._remove_piece(undo_move_cmd.endSq);
 
                 match self.active_player {
@@ -609,12 +641,15 @@ impl ChessBoard {
                 };
                 self._move_piece(undo_command);
             },
+            MoveFlag::NULL => {},
         }
 
         // Restore Piece only if one was actually captured
         if let Some(piece) = undo_move_cmd.capturedPiece {
             match undo_move_cmd.moveType { 
-                MoveFlag::CAPTURE | MoveFlag::PROMOTION => {
+                MoveFlag::CAPTURE | MoveFlag::PROMOTIONQUEEN | 
+                MoveFlag::PROMOTIONROOK | MoveFlag::PROMOTIONBISHOP | 
+                MoveFlag::PROMOTIONKNIGHT => {
                     self._place_piece(undo_move_cmd.endSq, piece);
                 },
                 MoveFlag::ENPASSANT => {
@@ -629,7 +664,6 @@ impl ChessBoard {
         // Restore En Passant
         self.en_passant = undo_move_cmd.prevEnPassant;
         self.castling_rights = undo_move_cmd.prevCastleRights;
-        self.total_moves -= 1;
 
         // XOR in current state for Castle, En Passant and Side to Move
         self.zobrist_xor();

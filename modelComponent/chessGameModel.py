@@ -1,17 +1,10 @@
-# Import Factory
-from modelFactory.chessBoardFactory import ChessBoardFactory
-
 # Model
 from modelComponent.chessBoardModel import ChessBoardModel
 from modelComponent.moveCommand import MoveCommand
 from modelComponent.openingMoveProtocal import OpeningMoveNodeProtocal
-from modelComponent.chessBoardZobrist import ChessBoardZobrist
-
-# Factory
-from modelFactory.chessPieceFactory import ChessPieceFactory
 
 # Enum
-from appEnums import PieceType, Player, MoveCommandType, GameState, TTBoundType
+from appEnums import Player, GameState
 
 # Multi Process
 import multiprocessing
@@ -146,9 +139,6 @@ class ChessGameModel():
         validMoves = self.chessBoard.allValidMoves()
         validMoves.sort(key=lambda move: self.chessBoard._getMovePriority(move), reverse=True)
 
-        # Store Original Alpha 
-        originalAlpha = alpha
-
         # Three Move Repetition Draw
         if self.chessBoard.checkThreeMoveRepetiton():
             return 0
@@ -164,8 +154,6 @@ class ChessGameModel():
             maxEval = float('-inf')
 
             for cmd in validMoves:
-                prevzobristHash = self.chessBoard.zobristHash
-
                 removedPiece, prevEnPassant = self.chessBoard.movePiece(cmd)
                 score = (-1) * self._negamax(depth - 1, (-1) * beta, (-1) * alpha, ply + 1)
                 self.chessBoard.undoMove(cmd, removedPiece, prevEnPassant)

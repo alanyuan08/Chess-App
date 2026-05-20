@@ -7,6 +7,9 @@ use crate::move_command::*;
 use crate::bishop_mask::*;
 use crate::rook_mask::*;
 
+pub const INFINITY: i32 = 3000000;
+pub const DEPTH: i32 = 6;
+
 #[derive(Clone)]
 struct ChessGame {
     history: [Option<UndoMove>; 1024],
@@ -43,11 +46,13 @@ impl ChessGame {
     }
 
     fn process_forward_move(&mut self, forward_move: ForwardMove) {
-        let uci_command: String = parse_uci(forward_move);
-
         // Store Value prior to Executing Move
         let prev_castle_rights = self.chess_board.castle_rights(); 
         let prev_en_passant = self.chess_board.en_passant();
+
+        let hash = self.chess_board.zobrist_hash();
+        let count = self.traversed_positions.entry(hash).or_insert(0);
+        *count += 1;
 
         let remove_piece = self.chess_board.execute_move(forward_move);
         let undo_move = UndoMove {
@@ -58,14 +63,13 @@ impl ChessGame {
             prevCastleRights: prev_castle_rights,
             prevEnPassant: prev_en_passant,
         };
-        
-        let hash = self.chess_board.zobrist_hash();
-        let count = self.traversed_positions.entry(hash).or_insert(0);
-        *count += 1;
 
         self.history[self.history_index] = Some(undo_move);
         self.history_index += 1;
+    }
 
+    fn process_time_cat_forward(&mut self, forward_move: ForwardMove) {
+        let uci_command: String = parse_uci(forward_move);
         self.chess_board.timecat_push_move(uci_command);
     }
 
@@ -85,9 +89,15 @@ impl ChessGame {
                 }
             }
 
-            self.chess_board.timecat_pop_move();
             self.chess_board.unexecute_move(undo_move);
         }
+    }
+
+    pub fn check_three_move_repetition(&self) -> bool {
+        let hash = self.chess_board.zobrist_hash();
+        
+        // Check if the current position has been reached 3 times
+        self.traversed_positions.get(&hash).copied().unwrap_or(0) == 3
     }
 
     // DEBUG
@@ -101,10 +111,156 @@ impl ChessGame {
         }
     }
 
+    fn best_move(&mut self) -> ForwardMove {
+        let mut alpha = -INFINITY;
+        let beta = INFINITY;
+
+        let mut best_score = -INFINITY;
+        let mut best_move = ForwardMove {
+            startSq: 0, endSq: 0, moveType: MoveFlag::NULL,
+        };
+
+        let valid_moves = self.all_valid_moves();
+        for forward_move in valid_moves {
+            self.process_forward_move(forward_move);
+
+            if self.chess_board.is_previous_player_king_in_check() {
+                self.process_backward_move();
+                continue;
+            }
+
+            self.process_time_cat_forward(forward_move);
+
+            let score = -self.negamax(DEPTH, -beta, -alpha);
+
+            self.process_backward_move();
+            self.chess_board.timecat_pop_move();
+
+            // Track maximum evaluations
+            if score > best_score {
+                best_score = score;
+                best_move = forward_move;
+
+            }
+            alpha = alpha.max(score);
+
+            // Alpha-Beta Pruning Cutoff
+            if alpha >= beta {
+                break;
+            }
+        }
+
+        best_move
+    }
+ 
+    // Process Negamax
+    fn negamax(&mut self, depth: i32, mut alpha: i32, beta: i32) -> i32 {
+        let valid_moves = self.all_valid_moves();
+
+        println!("{:?}", valid_moves);
+
+        // Three Move Repetition Draw
+        if self.check_three_move_repetition() {
+            return 0;
+        }
+
+        // Leaf Node Condition -> Drop into Quiescence Search
+        if depth == 0 {
+            return self.quiescence_search(alpha, beta, 0);
+        }
+
+        let mut max_eval = i32::MIN;
+
+        for forward_move in valid_moves {
+            self.process_forward_move(forward_move);
+
+            if self.chess_board.is_previous_player_king_in_check() {
+                self.process_backward_move();
+                continue;
+            }
+
+            self.process_time_cat_forward(forward_move);
+
+            // Recursive Negamax Call
+            let score = -self.negamax(depth - 1, -beta, -alpha);
+
+            self.process_backward_move();
+            self.chess_board.timecat_pop_move();
+
+            // Track maximum evaluations
+            max_eval = max_eval.max(score);
+            alpha = alpha.max(score);
+
+            // Alpha-Beta Pruning Cutoff
+            if alpha >= beta {
+                break;
+            }
+        }
+
+        max_eval
+    }
+
+    // Quiescence Search 
+    fn quiescence_search(&mut self, mut alpha: i32, beta: i32, depth: i32) -> i32 {
+        let static_eval = self.chess_board.eval();
+
+        if depth > 50 {
+            return static_eval;
+        }
+
+        // Three Move Repetition Draw
+        if self.check_three_move_repetition() {
+            return 0;
+        }
+
+        // Beta cutoff
+        if static_eval >= beta {
+            return beta;
+        }
+
+        // Update alpha (standing pat)
+        if static_eval > alpha {
+            alpha = static_eval;
+        }
+
+        // Generate and sort moves
+        let valid_moves = self.all_valid_moves();
+
+        // Filter and iterate through quiescence moves
+        for forward_move in self.all_quiescence_moves(valid_moves) {
+            // Push move (handles UCI, board state, hash, and history internally)
+            self.process_forward_move(forward_move);
+            
+            if self.chess_board.is_previous_player_king_in_check() {
+                self.process_backward_move();
+                continue;
+            }
+
+            self.process_time_cat_forward(forward_move);
+
+            // Negamax search call
+            let score = -self.quiescence_search(-beta, -alpha, depth + 1);
+            
+            self.process_backward_move();
+            self.chess_board.timecat_pop_move();
+
+            // Alpha-Beta pruning checks
+            if score >= beta {
+                return beta; 
+            }
+            if score > alpha {
+                alpha = score;
+            }
+        }
+
+        alpha
+    }
+
     // Process Next Best Move
     fn get_move_priority(&self, cmd: &ForwardMove) -> i32 {
         match cmd.moveType {
-            MoveFlag::PROMOTION => 90000,
+            MoveFlag::PROMOTIONQUEEN | MoveFlag::PROMOTIONROOK |
+            MoveFlag::PROMOTIONBISHOP | MoveFlag::PROMOTIONKNIGHT => 90000,
             MoveFlag::CAPTURE => {
                 let captured_piece_val=  self.chess_board.index_piece_value(cmd.endSq);
                 let starting_piece_val = self.chess_board.index_piece_value(cmd.startSq);
@@ -115,6 +271,27 @@ impl ChessGame {
             MoveFlag::KINGSIDECASTLE | MoveFlag::QUEENSIDECASTLE => 50,
             _ => 0,
         }
+    }
+
+    // Filter all Capture & Promotion Moves
+    fn all_quiescence_moves(&self, valid_moves: Vec<ForwardMove>) -> Vec<ForwardMove> {
+        valid_moves
+            .into_iter()
+            .filter(|cmd| {
+                matches!(
+                    cmd.moveType,
+                    MoveFlag::MOVE | MoveFlag::CAPTURE | MoveFlag::ENPASSANT
+                )
+            })
+            .collect()
+    }
+
+    // All Valid Modes
+    fn all_valid_moves(&mut self) -> Vec<ForwardMove> {
+        let mut valid_moves = self.chess_board.generate_moves();
+        valid_moves.sort_by_cached_key(|mov| -self.get_move_priority(mov));
+
+        valid_moves
     }
 }
 
@@ -130,7 +307,10 @@ fn parse_uci(forward_move: ForwardMove) -> String {
     let end_rank = (forward_move.endSq / 8) + 1;
 
     let promo = match forward_move.moveType {
-        MoveFlag::PROMOTION => "q",
+        MoveFlag::PROMOTIONQUEEN => "q",
+        MoveFlag::PROMOTIONROOK => "r",
+        MoveFlag::PROMOTIONBISHOP => "b",
+        MoveFlag::PROMOTIONKNIGHT => "n",
         _ => "",
     };
     format!("{}{}{}{}{}", start_file, start_rank, end_file, end_rank, promo)
@@ -154,9 +334,7 @@ pub fn compute_next_move(prev_moves: Vec<String>) {
 
     chess_game.process_moves(prev_moves);
     chess_game.chess_board.generate_moves();
-
-    // Print
-    println!("{}", chess_game.chess_board.eval());
+    println!("{:?}", chess_game.best_move());
 }
 
 #[pyfunction]

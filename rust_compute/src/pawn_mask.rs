@@ -47,9 +47,11 @@ pub fn white_pawn_moves(white_pawns: u64, occupancy: u64, black_pieces: u64,
     let mut promotion_move = ((white_pawns & RANK_7) << 8) & !occupancy;
     while promotion_move != 0 {
         let target = promotion_move.trailing_zeros() as usize;
-        moves.push(
-            ForwardMove { startSq: target - 8, endSq: target, moveType: MoveFlag::PROMOTION }
-        );
+        for promotion_flag in PROMOTION_FLAGS.iter().copied() {
+            moves.push(
+                ForwardMove { startSq: target - 8, endSq: target, moveType: promotion_flag }
+            );
+        }
         promotion_move &= promotion_move - 1;
     }
 
@@ -59,7 +61,7 @@ pub fn white_pawn_moves(white_pawns: u64, occupancy: u64, black_pieces: u64,
     while double_move != 0 {
         let target = double_move.trailing_zeros() as usize;
         moves.push(
-            ForwardMove { startSq: target - 8 * 2, endSq: target, moveType: MoveFlag::MOVE }
+            ForwardMove { startSq: target - 8 * 2, endSq: target, moveType: MoveFlag::PAWNOPENMOVE }
         );
         double_move &= double_move - 1;
     }
@@ -90,18 +92,22 @@ pub fn white_pawn_moves(white_pawns: u64, occupancy: u64, black_pieces: u64,
     let mut left_capture_promotion = left_captures & RANK_8;
     while left_capture_promotion != 0 {
         let target = left_capture_promotion.trailing_zeros() as usize;
-        moves.push(
-            ForwardMove { startSq: target - 7, endSq: target, moveType: MoveFlag::PROMOTION }
-        );
+        for promotion_flag in PROMOTION_FLAGS.iter().copied() {
+            moves.push(
+                ForwardMove { startSq: target - 8, endSq: target, moveType: promotion_flag }
+            );
+        }
         left_capture_promotion &= left_capture_promotion - 1;
     }
 
     let mut right_capture_promotion = right_captures & RANK_8;
     while right_capture_promotion != 0 {
         let target = right_capture_promotion.trailing_zeros() as usize;
-        moves.push(
-            ForwardMove { startSq: target - 9, endSq: target, moveType: MoveFlag::PROMOTION }
-        );
+        for promotion_flag in PROMOTION_FLAGS.iter().copied() {
+            moves.push(
+                ForwardMove { startSq: target - 8, endSq: target, moveType: promotion_flag }
+            );
+        }
         right_capture_promotion &= right_capture_promotion - 1;
     }
 
@@ -142,9 +148,11 @@ pub fn black_pawn_moves(black_pawns: u64, occupancy: u64, white_pieces: u64,
     let mut promotion_move = ((black_pawns & RANK_2) >> 8) & !occupancy;
     while promotion_move != 0 {
         let target = promotion_move.trailing_zeros() as usize;
-        moves.push(
-            ForwardMove { startSq: target + 8, endSq: target, moveType: MoveFlag::PROMOTION }
-        );
+        for promotion_flag in PROMOTION_FLAGS.iter().copied() {
+            moves.push(
+                ForwardMove { startSq: target - 8, endSq: target, moveType: promotion_flag }
+            );
+        }
         promotion_move &= promotion_move - 1;
     }
 
@@ -154,7 +162,7 @@ pub fn black_pawn_moves(black_pawns: u64, occupancy: u64, white_pieces: u64,
     while double_move != 0 {
         let target = double_move.trailing_zeros() as usize;
         moves.push(
-            ForwardMove { startSq: target + 8 * 2, endSq: target, moveType: MoveFlag::MOVE }
+            ForwardMove { startSq: target + 8 * 2, endSq: target, moveType: MoveFlag::PAWNOPENMOVE }
         );
         double_move &= double_move - 1;
     }
@@ -185,18 +193,22 @@ pub fn black_pawn_moves(black_pawns: u64, occupancy: u64, white_pieces: u64,
     let mut left_capture_promotion = left_captures & RANK_1;
     while left_capture_promotion != 0 {
         let target = left_capture_promotion.trailing_zeros() as usize;
-        moves.push(
-            ForwardMove { startSq: target + 9, endSq: target, moveType: MoveFlag::PROMOTION }
-        );
+        for promotion_flag in PROMOTION_FLAGS.iter().copied() {
+            moves.push(
+                ForwardMove { startSq: target - 8, endSq: target, moveType: promotion_flag }
+            );
+        }
         left_capture_promotion &= left_capture_promotion - 1;
     }
 
     let mut right_capture_promotion = right_captures & RANK_1;
     while right_capture_promotion != 0 {
         let target = right_capture_promotion.trailing_zeros() as usize;
-        moves.push(
-            ForwardMove { startSq: target + 7, endSq: target, moveType: MoveFlag::PROMOTION }
-        );
+        for promotion_flag in PROMOTION_FLAGS.iter().copied() {
+            moves.push(
+                ForwardMove { startSq: target - 8, endSq: target, moveType: promotion_flag }
+            );
+        }
         right_capture_promotion &= right_capture_promotion - 1;
     }
 

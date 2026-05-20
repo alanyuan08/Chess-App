@@ -19,11 +19,64 @@ pub struct UndoMove {
 #[repr(u32)]
 pub enum MoveFlag {
     MOVE = 0,
-    KINGSIDECASTLE = 1,
+    PAWNOPENMOVE = 1,
     QUEENSIDECASTLE = 2,
-    PROMOTION = 3,
+    KINGSIDECASTLE = 3,
     ENPASSANT = 4,
     CAPTURE = 5,
+    NULL = 6,
+
+    PROMOTIONQUEEN = 7,
+    PROMOTIONROOK = 8,
+    PROMOTIONBISHOP = 9,
+    PROMOTIONKNIGHT = 10,
+}
+
+pub const PROMOTION_FLAGS: [MoveFlag; 4] = [
+    MoveFlag::PROMOTIONQUEEN,
+    MoveFlag::PROMOTIONROOK,
+    MoveFlag::PROMOTIONBISHOP,
+    MoveFlag::PROMOTIONKNIGHT,
+];
+
+pub fn white_promotion_piece(promotion_flag: MoveFlag) -> BoardPiece {
+    match promotion_flag {
+        MoveFlag::PROMOTIONQUEEN => {
+            return BoardPiece::WQUEEN;
+        },
+        MoveFlag::PROMOTIONROOK => {
+            return BoardPiece::WROOK;
+        },
+        MoveFlag::PROMOTIONBISHOP => {
+            return BoardPiece::WBISHOP;
+        },
+        MoveFlag::PROMOTIONKNIGHT => {
+            return BoardPiece::WKNIGHT;
+        },
+        _ => {
+            panic!("Invalid Promotion Flag");
+        },
+    }
+}
+
+pub fn black_promotion_piece(promotion_flag: MoveFlag) -> BoardPiece {
+    match promotion_flag {
+        MoveFlag::PROMOTIONQUEEN => {
+            return BoardPiece::BQUEEN;
+        },
+        MoveFlag::PROMOTIONROOK => {
+            return BoardPiece::BROOK;
+        },
+        MoveFlag::PROMOTIONBISHOP => {
+            return BoardPiece::BBISHOP;
+        },
+        MoveFlag::PROMOTIONKNIGHT => {
+            return BoardPiece::BKNIGHT;
+        },
+        _ => {
+            panic!("Invalid Promotion Flag");
+        },
+    }
 }
 
 impl TryFrom<u32> for MoveFlag {
@@ -32,11 +85,17 @@ impl TryFrom<u32> for MoveFlag {
     fn try_from(v: u32) -> Result<Self, Self::Error> {
         match v {
             0 => Ok(MoveFlag::MOVE),
-            1 => Ok(MoveFlag::KINGSIDECASTLE),
+            1 => Ok(MoveFlag::PAWNOPENMOVE),
             2 => Ok(MoveFlag::QUEENSIDECASTLE),
-            3 => Ok(MoveFlag::PROMOTION),
+            3 => Ok(MoveFlag::KINGSIDECASTLE),
             4 => Ok(MoveFlag::ENPASSANT),
             5 => Ok(MoveFlag::CAPTURE),
+            6 => Ok(MoveFlag::NULL),
+
+            7 => Ok(MoveFlag::PROMOTIONQUEEN),
+            8 => Ok(MoveFlag::PROMOTIONROOK),
+            9 => Ok(MoveFlag::PROMOTIONBISHOP),
+            10 => Ok(MoveFlag::PROMOTIONKNIGHT),
             _ => Err(()),
         }
     }
@@ -95,12 +154,14 @@ pub fn piece_value(piece_type: BoardPiece) -> i32 {
 
 pub fn piece_player(piece_type: BoardPiece) -> Side {
     match piece_type {
-        BoardPiece::WPAWN | BoardPiece::WBISHOP | BoardPiece::WKNIGHT |
-        BoardPiece::WROOK | BoardPiece::WQUEEN | BoardPiece::WKING => {
+        BoardPiece::WPAWN | BoardPiece::WBISHOP |
+        BoardPiece::WKNIGHT | BoardPiece::WROOK |
+        BoardPiece::WQUEEN | BoardPiece::WKING  => {
             return Side::WHITE;
         },
-        BoardPiece::BPAWN | BoardPiece::BBISHOP | BoardPiece::BKNIGHT |
-        BoardPiece::BROOK | BoardPiece::BQUEEN | BoardPiece::BKING => {
+        BoardPiece::BPAWN | BoardPiece::BBISHOP |
+        BoardPiece::BKNIGHT | BoardPiece::BROOK |
+        BoardPiece::BQUEEN | BoardPiece::BKING  => {
             return Side::BLACK;
         },
         BoardPiece::NONE => {

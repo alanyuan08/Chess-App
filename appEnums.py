@@ -19,15 +19,20 @@ class GameState(Enum):
 	DRAW = 4
 
 class MoveCommandType(Enum):
-    MOVE = 1
+    MOVE = 0
+    PAWNOPENMOVE = 1
     QUEENSIDECASTLE = 2
     KINGSIDECASTLE = 3
-    CAPTURE = 4
-    ENPASSANT = 5
-    PAWNOPENMOVE = 6
-    PROMOTE = 7
+    ENPASSANT = 4
+    CAPTURE = 5
+    NULL = 6
+
+    PROMOTION_QUEEN = 7
+    PROMOTION_ROOK = 8
+    PROMOTION_BISHOP = 9
+    PROMOTION_KNIGHT = 10
  
 class TTBoundType(Enum):
- 	EXACT = 1
- 	UPPERBOUND = 2
- 	LOWERBOUND = 3
+    EXACT = 1
+    UPPERBOUND = 2
+    LOWERBOUND = 3
