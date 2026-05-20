@@ -202,7 +202,7 @@ impl ChessBoard {
 
         // 1. Pawns
         let pawns = self.pawns[index];
-        if self.active_player == Side::WHITE {  
+        if attacking_side == Side::BLACK {  
             attacks |= black_pawn_attacks(pawns);
         } else {
             attacks |= white_pawn_attacks(pawns);

@@ -280,7 +280,9 @@ impl ChessGame {
             .filter(|cmd| {
                 matches!(
                     cmd.moveType,
-                    MoveFlag::MOVE | MoveFlag::CAPTURE | MoveFlag::ENPASSANT
+                    MoveFlag::PROMOTIONQUEEN | MoveFlag::PROMOTIONROOK |
+                    MoveFlag::PROMOTIONBISHOP | MoveFlag::PROMOTIONKNIGHT | 
+                    MoveFlag::CAPTURE | MoveFlag::ENPASSANT
                 )
             })
             .collect()
