@@ -39,6 +39,12 @@ pub const PROMOTION_FLAGS: [MoveFlag; 4] = [
     MoveFlag::PROMOTIONKNIGHT,
 ];
 
+#[derive(Clone, Copy)]
+pub struct SearchResult {
+    pub score: i32,
+    pub best_move: Option<ForwardMove>,
+}
+
 pub fn white_promotion_piece(promotion_flag: MoveFlag) -> BoardPiece {
     match promotion_flag {
         MoveFlag::PROMOTIONQUEEN => {

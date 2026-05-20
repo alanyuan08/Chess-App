@@ -246,6 +246,14 @@ impl ChessBoard {
         (self.kings[opponent_index] & _curr_attack_targets) != 0
     }
 
+    // Check if current board is in check
+    pub fn is_in_check(&mut self) -> bool {
+        let _curr_opp_attack_targets = self.compute_attack_targets(self.opponent_player());
+
+        let current_player_index = self.player_index(self.active_player);
+        (self.kings[current_player_index] & _curr_opp_attack_targets) != 0
+    }
+
     // Generate Pseudo-Moves - Only Validate King Safety for Castle / King Movement
     pub fn generate_moves(&mut self) -> Vec<ForwardMove> {
         let mut gen_moves: Vec<ForwardMove> = Vec::with_capacity(218);

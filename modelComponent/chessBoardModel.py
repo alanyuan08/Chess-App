@@ -408,8 +408,7 @@ class ChessBoardModel():
 
         # Append Previous Position
         self.previousMoves.append(
-            str(cmd.startCol) + str(cmd.startRow) + str(cmd.endCol) + \
-                + str(cmd.endRow) + str(cmd.moveType.value)
+            f"{cmd.startCol}{cmd.startRow}{cmd.endCol}{cmd.endRow}{cmd.moveType.value}"
         )
 
         # Create a new copy of the removed Piece
