@@ -75,8 +75,5 @@ class ChessGameModel():
         if self.currOpeningMove and self.currOpeningMove.hasSubsequentCmd():
             return self.currOpeningMove.randomSubsequentCmd()
         
-        # Rust Integration
-        dict_result = rust_compute.compute_next_move(self.returnChessMoves())
-
-        # Compute Opponent Move
-        return MoveCommand.from_dict(dict_result)
+        # Rust Compute Next Move
+        return rust_compute.compute_next_move(self.returnChessMoves())

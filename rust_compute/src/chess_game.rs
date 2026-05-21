@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::PyTuple;    
 
 use crate::chess_board::*;
 use crate::move_command::*;
@@ -273,6 +273,14 @@ impl ChessGame {
         }
     }
 
+    // The move does not confirm if it introduces a discovered check
+    fn all_pseudo_legal_moves(&mut self) -> Vec<ForwardMove> {
+        let mut valid_moves = self.chess_board.generate_moves();
+        valid_moves.sort_unstable_by_key(|mov| -self.get_move_priority(mov));
+
+        valid_moves
+    }
+
     // Filter all Capture & Promotion Moves
     fn all_psuedo_legal_quiescence_moves(&mut self) -> Vec<ForwardMove> {
         let pseudo_legal_moves = self.all_pseudo_legal_moves();
@@ -290,13 +298,6 @@ impl ChessGame {
             .collect()
     }
 
-    // The move does not confirm if it introduces a discovered check
-    fn all_pseudo_legal_moves(&mut self) -> Vec<ForwardMove> {
-        let mut valid_moves = self.chess_board.generate_moves();
-        valid_moves.sort_by_cached_key(|mov| -self.get_move_priority(mov));
-
-        valid_moves
-    }
 }
 
 fn parse_uci(forward_move: ForwardMove) -> String {
@@ -333,24 +334,34 @@ fn parse_forward_move(raw_move: &String) -> ForwardMove {
 }
 
 #[pyfunction]
-pub fn compute_next_move<'py>(py: Python<'py>, prev_moves: Vec<String>) -> PyResult<Bound<'py, PyDict>> {
+pub fn compute_next_move<'py>(py: Python<'py>, prev_moves: Vec<String>) -> PyResult<Bound<'py, PyAny>> {
     let mut chess_game = ChessGame::new();
-
     chess_game.process_moves(prev_moves);
     let best_move = chess_game.root_search(DEPTH);
     
-    let dict = PyDict::new(py);
-    if let Some(mv) = best_move {
-        dict.set_item("startRow", mv.startSq / 8)?;
-        dict.set_item("startCol", mv.startSq % 8)?;
-        dict.set_item("endRow", mv.endSq / 8)?;
-        dict.set_item("endCol", mv.endSq % 8)?;
-        dict.set_item("moveType", mv.moveType as i32)?;
-    } else {
-        dict.set_item("isTerminal", true)?;
-    }
+    let module = py.import("modelComponent.moveCommand")?;
+    let move_command_class = module.getattr("MoveCommand")?;
 
-    Ok(dict)
+    let enum_mod = py.import("appEnums")?;
+    let move_command_type_enum = enum_mod.getattr("MoveCommandType")?;
+
+    if let Some(mv) = best_move {
+        let move_type_value = mv.moveType as i32;
+        let enum_instance = move_command_type_enum.call1((move_type_value,))?;
+
+        let args = (
+            (mv.startSq / 8) as i32,
+            (mv.startSq % 8) as i32,
+            (mv.endSq / 8) as i32,
+            (mv.endSq % 8) as i32,
+            enum_instance,
+        ).into_pyobject(py)?;
+
+        let move_command_instance = move_command_class.call1(args)?;
+        Ok(move_command_instance)
+    } else {
+        Ok(py.None().into_bound(py))
+    }
 }
 
 #[pyfunction]
