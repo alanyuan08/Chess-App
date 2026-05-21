@@ -94,7 +94,7 @@ pub fn white_pawn_moves(white_pawns: u64, occupancy: u64, black_pieces: u64,
         let target = left_capture_promotion.trailing_zeros() as usize;
         for promotion_flag in PROMOTION_FLAGS.iter().copied() {
             moves.push(
-                ForwardMove { startSq: target - 8, endSq: target, moveType: promotion_flag }
+                ForwardMove { startSq: target - 7, endSq: target, moveType: promotion_flag }
             );
         }
         left_capture_promotion &= left_capture_promotion - 1;
@@ -105,7 +105,7 @@ pub fn white_pawn_moves(white_pawns: u64, occupancy: u64, black_pieces: u64,
         let target = right_capture_promotion.trailing_zeros() as usize;
         for promotion_flag in PROMOTION_FLAGS.iter().copied() {
             moves.push(
-                ForwardMove { startSq: target - 8, endSq: target, moveType: promotion_flag }
+                ForwardMove { startSq: target - 9, endSq: target, moveType: promotion_flag }
             );
         }
         right_capture_promotion &= right_capture_promotion - 1;
@@ -150,7 +150,7 @@ pub fn black_pawn_moves(black_pawns: u64, occupancy: u64, white_pieces: u64,
         let target = promotion_move.trailing_zeros() as usize;
         for promotion_flag in PROMOTION_FLAGS.iter().copied() {
             moves.push(
-                ForwardMove { startSq: target - 8, endSq: target, moveType: promotion_flag }
+                ForwardMove { startSq: target + 8, endSq: target, moveType: promotion_flag }
             );
         }
         promotion_move &= promotion_move - 1;
@@ -195,7 +195,7 @@ pub fn black_pawn_moves(black_pawns: u64, occupancy: u64, white_pieces: u64,
         let target = left_capture_promotion.trailing_zeros() as usize;
         for promotion_flag in PROMOTION_FLAGS.iter().copied() {
             moves.push(
-                ForwardMove { startSq: target - 8, endSq: target, moveType: promotion_flag }
+                ForwardMove { startSq: target + 9, endSq: target, moveType: promotion_flag }
             );
         }
         left_capture_promotion &= left_capture_promotion - 1;
@@ -206,7 +206,7 @@ pub fn black_pawn_moves(black_pawns: u64, occupancy: u64, white_pieces: u64,
         let target = right_capture_promotion.trailing_zeros() as usize;
         for promotion_flag in PROMOTION_FLAGS.iter().copied() {
             moves.push(
-                ForwardMove { startSq: target - 8, endSq: target, moveType: promotion_flag }
+                ForwardMove { startSq: target + 7, endSq: target, moveType: promotion_flag }
             );
         }
         right_capture_promotion &= right_capture_promotion - 1;
