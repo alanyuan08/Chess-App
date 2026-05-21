@@ -9,3 +9,13 @@ class MoveCommand:
     endRow: int
     endCol: int
     moveType: MoveCommandType
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "MoveCommand":
+        return cls(
+            data["startRow"],
+            data["startCol"],
+            data["endRow"],
+            data["endCol"],
+            MoveCommandType(data["moveType"])
+        )

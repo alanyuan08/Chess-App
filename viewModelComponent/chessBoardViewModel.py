@@ -3,6 +3,7 @@ from communicatorProxy import CommunicatorProxy
 
 # Models
 from modelComponent.chessBoardModel import ChessBoardModel
+from modelComponent.moveCommand import MoveCommand
 
 # QTCore
 from PySide6.QtCore import QRunnable, QThreadPool, Slot
@@ -10,7 +11,6 @@ from PySide6.QtCore import QRunnable, QThreadPool, Slot
 # Enum
 from appEnums import Player, GameState
 
-import rust_compute
 import traceback
 
 # Controller 
@@ -78,11 +78,8 @@ class ChessBoardViewModel():
 
     def takeOpponentTurn(self):
         try:
-            # Rust Integration
-            print(rust_compute.compute_next_move(self.chessGameModel.returnChessMoves()))
-
             # Compute Opponent Move
-            opponentCmd = self.chessGameModel.computeBestMove()        
+            opponentCmd = self.chessGameModel.computeBestMove()
 
             # Move the Chess Piece
             self.chessGameModel.movePiece(opponentCmd)

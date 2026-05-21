@@ -158,8 +158,7 @@ impl ChessGame {
 
             // Recursive Negamax Call
             let negamax_result = self.negamax(depth - 1, -beta, -alpha);
-            let score = negamax_result.score;
-            let result = -score;
+            let score = -negamax_result.score;
 
             // Undo Move + TimeCat
             self.chess_board.timecat_pop_move();
@@ -187,7 +186,8 @@ impl ChessGame {
                 // Checkmate
                 return SearchResult { 
                     score: -MATE_VALUE + depth, 
-                    best_move: None };
+                    best_move: None 
+                };
             } else {
                 // Stalemate
                 return SearchResult { 
@@ -335,18 +335,19 @@ fn parse_forward_move(raw_move: &String) -> ForwardMove {
 #[pyfunction]
 pub fn compute_next_move<'py>(py: Python<'py>, prev_moves: Vec<String>) -> PyResult<Bound<'py, PyDict>> {
     let mut chess_game = ChessGame::new();
-    println!("{:?}", prev_moves);
 
     chess_game.process_moves(prev_moves);
-    let best_move = chess_game.root_search(DEPTH));
+    let best_move = chess_game.root_search(DEPTH);
     
     let dict = PyDict::new(py);
-    if let Some(mv) = maybe_move {
+    if let Some(mv) = best_move {
         dict.set_item("startRow", mv.startSq / 8)?;
         dict.set_item("startCol", mv.startSq % 8)?;
         dict.set_item("endRow", mv.endSq / 8)?;
         dict.set_item("endCol", mv.endSq % 8)?;
-        dict.set_item("moveType", mv.moveType)?;
+        dict.set_item("moveType", mv.moveType as i32)?;
+    } else {
+        dict.set_item("isTerminal", true)?;
     }
 
     Ok(dict)

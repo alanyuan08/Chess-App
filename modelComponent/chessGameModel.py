@@ -7,8 +7,7 @@ from modelComponent.openingMoveProtocal import OpeningMoveNodeProtocal
 from appEnums import Player, GameState
 
 # Multi Process
-import multiprocessing
-import concurrent.futures
+import rust_compute
 
 # Controller 
 class ChessGameModel():
@@ -61,6 +60,7 @@ class ChessGameModel():
                     self.gameState = GameState.WHITEWIN
                 else:
                     self.gameState = self.gameState.DRAW
+
     # Validate Move
     def validateMove(self, initRow: int, initCol: int, targetRow: int, 
         targetCol: int, player: Player) -> MoveCommand:
@@ -74,94 +74,9 @@ class ChessGameModel():
     def computeBestMove(self) -> MoveCommand:
         if self.currOpeningMove and self.currOpeningMove.hasSubsequentCmd():
             return self.currOpeningMove.randomSubsequentCmd()
-
-        commandList = self.chessBoard.allValidMoves()
-        commandList.sort(key=lambda move: self.chessBoard._getMovePriority(move), reverse=True)
-
-        alpha = float('-inf')
-        beta = float('inf')
-
-        bestScore = float('-inf')
-        bestMove = None
-
-        if len(commandList) == 0:
-            return None
-
-        # Younger Brother Best Move
-        initMove = commandList[0]
-        for depth in [3, 4]:
-
-            # Compute the most optimal search move            
-            if bestMove != None:
-                initMove = bestMove
-
-            removedPiece, prevEnPassant = self.chessBoard.movePiece(initMove)
-            # Search the first move normally to get a strong alpha value quickly
-            score = (-1) * self._negamax(depth, (-1) * beta, (-1) * alpha) 
-            self.chessBoard.undoMove(initMove, removedPiece, prevEnPassant)
-
-            # Older Brother 
-            bestScore = score
-            bestMove = initMove
-            alpha = score # Establish the strong alpha
-
-            # Younger Brother Parallel Search
-            remaining_moves = [item for item in commandList if item != initMove]
-            
-            with concurrent.futures.ProcessPoolExecutor(max_workers=multiprocessing.cpu_count() - 1) as executor:
-                futures = [
-                    executor.submit(self._negamaxWorker, cmd, alpha, beta, depth) 
-                    for cmd in remaining_moves
-                ]
-                
-                for future in concurrent.futures.as_completed(futures):
-                    move, score = future.result()
-                    if score > bestScore:
-                        bestScore = score
-                        bestMove = move
-
-        return bestMove
-
-    # -----
-
-    # This worker runs in a separate process
-    def _negamaxWorker(self, cmd: MoveCommand, currAlpha: int, currBeta: int, 
-            depth: int) -> (MoveCommand, int):
-        removedPiece, prevEnPassant = self.chessBoard.movePiece(cmd)
         
-        # Negamx search for Best Position
-        score = (-1) * self._negamax(depth - 1, (-1) * currBeta, (-1) * currAlpha)
-                
-        return cmd, score
+        # Rust Integration
+        dict_result = rust_compute.compute_next_move(self.returnChessMoves())
 
-    # MinMaxSearch -> General
-    def _negamax(self, depth: int, alpha: int, beta: int, ply: int = 0) -> int:
-        validMoves = self.chessBoard.allValidMoves()
-        validMoves.sort(key=lambda move: self.chessBoard._getMovePriority(move), reverse=True)
-
-        # Three Move Repetition Draw
-        if self.chessBoard.checkThreeMoveRepetiton():
-            return 0
-
-        # No Valid Moves = Lose / Draw
-        if len(validMoves) == 0:
-            return self.chessBoard.resolveEndGame(ply)
-
-        # Termination Condition
-        if depth == 0:
-            return self.chessBoard._quiesceneSearch(alpha, beta)
-        else:
-            maxEval = float('-inf')
-
-            for cmd in validMoves:
-                removedPiece, prevEnPassant = self.chessBoard.movePiece(cmd)
-                score = (-1) * self._negamax(depth - 1, (-1) * beta, (-1) * alpha, ply + 1)
-                self.chessBoard.undoMove(cmd, removedPiece, prevEnPassant)
-
-                maxEval = max(maxEval, score)
-                alpha = max(alpha, score)
-                
-                if alpha >= beta:
-                    break
-
-            return maxEval
+        # Compute Opponent Move
+        return MoveCommand.from_dict(dict_result)
