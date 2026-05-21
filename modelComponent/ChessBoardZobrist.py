@@ -167,6 +167,39 @@ class ChessBoardZobrist():
         chessBoard.zobristHash ^= ChessBoardZobrist.TABLE[queenIndex][endSq]
 
     @staticmethod
+    def addRook(chessBoard: ChessBoardProtocal, row: int, col: int):
+        rookIndex = 0
+        if chessBoard.playerTurn == Player.WHITE:
+            rookIndex = 3
+        else:
+            rookIndex = 9
+
+        endSq = row * 8 + col
+        chessBoard.zobristHash ^= ChessBoardZobrist.TABLE[rookIndex][endSq]
+
+    @staticmethod
+    def addBishop(chessBoard: ChessBoardProtocal, row: int, col: int):
+        bishopIndex = 0
+        if chessBoard.playerTurn == Player.WHITE:
+            bishopIndex = 5
+        else:
+            bishopIndex = 11
+
+        endSq = row * 8 + col
+        chessBoard.zobristHash ^= ChessBoardZobrist.TABLE[bishopIndex][endSq]
+
+    @staticmethod
+    def addKnight(chessBoard: ChessBoardProtocal, row: int, col: int):
+        knightIndex = 0
+        if chessBoard.playerTurn == Player.WHITE:
+            knightIndex = 2
+        else:
+            knightIndex = 8
+
+        endSq = row * 8 + col
+        chessBoard.zobristHash ^= ChessBoardZobrist.TABLE[knightIndex][endSq]
+
+    @staticmethod
     def forwardUpdate(chessBoard: ChessBoardProtocal, cmd: MoveCommand, prevEnPassant: int):
 
         match cmd.moveType:
@@ -213,13 +246,23 @@ class ChessBoardZobrist():
                     chessBoard, cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
 
             # Promote Pawn
-            case MoveCommandType.PROMOTE:
+            case (MoveCommandType.PROMOTION_QUEEN | 
+                MoveCommandType.PROMOTION_ROOK | 
+                MoveCommandType.PROMOTION_BISHOP | 
+                MoveCommandType.PROMOTION_KNIGHT):
                 # Promote MAY be a capture or a move
                 if chessBoard.board[cmd.endRow][cmd.endCol]:
                     ChessBoardZobrist.removePiece(chessBoard, cmd.endRow, cmd.endCol)
 
-                # Promote Piece Type is provided from above
-                ChessBoardZobrist.addQueen(chessBoard, cmd.endRow, cmd.endCol)
+                match cmd.moveType:
+                    case MoveCommandType.PROMOTION_QUEEN:
+                        ChessBoardZobrist.addQueen(chessBoard, cmd.endRow, cmd.endCol)
+                    case MoveCommandType.PROMOTION_ROOK:
+                        ChessBoardZobrist.addRook(chessBoard, cmd.endRow, cmd.endCol)
+                    case MoveCommandType.PROMOTION_BISHOP:
+                        ChessBoardZobrist.addBishop(chessBoard, cmd.endRow, cmd.endCol)
+                    case MoveCommandType.PROMOTION_KNIGHT:
+                        ChessBoardZobrist.addKnight(chessBoard, cmd.endRow, cmd.endCol)
 
                 ChessBoardZobrist.removePiece(chessBoard, cmd.startRow, cmd.startCol)
 
@@ -280,7 +323,10 @@ class ChessBoardZobrist():
                     chessBoard, cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
 
             # Promote Pawn
-            case MoveCommandType.PROMOTE:
+            case (MoveCommandType.PROMOTION_QUEEN | 
+                MoveCommandType.PROMOTION_ROOK | 
+                MoveCommandType.PROMOTION_BISHOP | 
+                MoveCommandType.PROMOTION_KNIGHT):
                 # Remove Queen
                 ChessBoardZobrist.removePiece(chessBoard, cmd.endRow, cmd.endCol)
 

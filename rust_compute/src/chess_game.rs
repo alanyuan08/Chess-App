@@ -42,6 +42,8 @@ impl ChessGame {
 
             let move_command: ForwardMove = parse_forward_move(prev_move);
             self.process_forward_move(move_command);
+            
+            self.process_time_cat_forward(move_command);
         }
     }
 
@@ -159,8 +161,8 @@ impl ChessGame {
             let result = -score;
 
             // Undo Move + TimeCat
-            self.process_backward_move();
             self.chess_board.timecat_pop_move();
+            self.process_backward_move();
 
             // Track maximum evaluations
             if score > max_score {
@@ -238,8 +240,8 @@ impl ChessGame {
             let score = -self.quiescence_search(-beta, -alpha, depth + 1);
             
             // Undo Move + TimeCat
-            self.process_backward_move();
             self.chess_board.timecat_pop_move();
+            self.process_backward_move();
 
             // Alpha-Beta pruning checks
             if score >= beta {
@@ -332,9 +334,9 @@ fn parse_forward_move(raw_move: &String) -> ForwardMove {
 #[pyfunction]
 pub fn compute_next_move(prev_moves: Vec<String>) {
     let mut chess_game = ChessGame::new();
+    println!("{:?}", prev_moves);
 
     chess_game.process_moves(prev_moves);
-    chess_game.chess_board.generate_moves();
     println!("{:?}", chess_game.root_search(DEPTH));
 }
 

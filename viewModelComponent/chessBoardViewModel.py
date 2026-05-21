@@ -70,9 +70,6 @@ class ChessBoardViewModel():
                 self.chessGameModel.gamePlayerTurn
             )
 
-            # Rust Integration
-            print(rust_compute.compute_next_move(self.chessGameModel.returnChessMoves()))
-
             # Run the compute for the Opponent's Move
             if self.computerTurn():
                 self.threadpool.start(Worker(

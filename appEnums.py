@@ -1,4 +1,5 @@
 from enum import Enum
+from typing import Final
 
 class PieceType(Enum):
 	KING = 1
@@ -36,3 +37,10 @@ class TTBoundType(Enum):
     EXACT = 1
     UPPERBOUND = 2
     LOWERBOUND = 3
+	
+PROMOTION_MAP: Final[dict[MoveCommandType, PieceType]] = {
+    MoveCommandType.PROMOTION_QUEEN: PieceType.QUEEN,
+    MoveCommandType.PROMOTION_ROOK: PieceType.ROOK,
+    MoveCommandType.PROMOTION_BISHOP: PieceType.BISHOP,
+    MoveCommandType.PROMOTION_KNIGHT: PieceType.KNIGHT,
+}

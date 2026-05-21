@@ -6,7 +6,7 @@ from PySide6.QtGui import QPixmap
 import sys
 
 # Import Enums
-from appEnums import PieceType, Player, MoveCommandType
+from appEnums import PieceType, Player, MoveCommandType, PROMOTION_MAP
 
 # Import Model
 from modelComponent.chessPieceModel import ChessPieceModel
@@ -68,12 +68,12 @@ class ChessBoardView(QGraphicsPixmapItem):
 				if item.row == row and item.col == col:
 					self.scene.removeItem(item)
 
-	def promotePiece(self, row: int, col: int):
+	def promotePiece(self, row: int, col: int, type: PieceType):
 		for item in self.childItems():
 			if isinstance(item, ChessPieceView):
 				if item.row == row and item.col == col:
 					item.setPixmap(
-						QPixmap(ChessPieceView.returnQueenURL(item.player))
+						QPixmap(ChessPieceView.returnPieceURL(item.player, type))
 					)
 
 	def movePieceToLocation(self, startRow: int, startCol: int, endRow: int, endCol: int):
@@ -110,10 +110,16 @@ class ChessBoardView(QGraphicsPixmapItem):
 				self.movePieceToLocation(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
 
 			# Promote
-			case MoveCommandType.PROMOTE:
+			case (MoveCommandType.PROMOTION_QUEEN | 
+                MoveCommandType.PROMOTION_ROOK | 
+                MoveCommandType.PROMOTION_BISHOP | 
+                MoveCommandType.PROMOTION_KNIGHT):
+	
 				self.deletePieceAtLocation(cmd.endRow, cmd.endCol)
 				self.movePieceToLocation(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
-				self.promotePiece(cmd.endRow, cmd.endCol)
+				
+				promote_piece = PROMOTION_MAP.get(cmd.moveType, None)
+				self.promotePiece(cmd.endRow, cmd.endCol, promote_piece)
 
 			# Queen Side Castle
 			case MoveCommandType.QUEENSIDECASTLE:

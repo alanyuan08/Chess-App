@@ -71,7 +71,7 @@ class ChessPieceView(QGraphicsPixmapItem):
 		return url + ".svg"
 
 	@staticmethod
-	def returnQueenURL(player: Player):
+	def returnPieceURL(player: Player, piece_type: PieceType):
 		url = "img/"
 		match player:
 			case Player.WHITE:
@@ -79,7 +79,15 @@ class ChessPieceView(QGraphicsPixmapItem):
 			case Player.BLACK:
 				url += "black"
 
-		return url + "Queen.svg"
+		match piece_type:
+			case PieceType.QUEEN:
+				return url + "Queen.svg"
+			case PieceType.ROOK:
+				return url + "Rook.svg"
+			case PieceType.BISHOP:
+				return url + "Bishop.svg"
+			case PieceType.KNIGHT:
+				return url + "Knight.svg"
 
 	def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent):
 		super().mouseReleaseEvent(event)

@@ -76,21 +76,28 @@ class PawnModel(ChessPieceModel):
 				if self.col > 0:
 					target = chessBoard.board[self.row-1][self.col-1]
 					if target != None and target.player != self.player:
-						returnMoves.append(
-							MoveCommand(self.row, self.col, self.row-1, self.col-1, MoveCommandType.PROMOTE)
-						)
+						for promote_type in [MoveCommandType.PROMOTION_QUEEN, MoveCommandType.PROMOTION_ROOK, \
+                			MoveCommandType.PROMOTION_BISHOP, MoveCommandType.PROMOTION_KNIGHT]:
+							returnMoves.append(
+								MoveCommand(self.row, self.col, self.row-1, self.col-1, promote_type)
+							)
 
 				if self.col < 7:
 					target = chessBoard.board[self.row-1][self.col+1]
 					if target != None and target.player != self.player:
-						returnMoves.append(
-							MoveCommand(self.row, self.col, self.row-1, self.col+1, MoveCommandType.PROMOTE)
-						)
+						for promote_type in [MoveCommandType.PROMOTION_QUEEN, MoveCommandType.PROMOTION_ROOK, \
+                			MoveCommandType.PROMOTION_BISHOP, MoveCommandType.PROMOTION_KNIGHT]:
+							returnMoves.append(
+								MoveCommand(self.row, self.col, self.row-1, self.col+1, promote_type)
+							)
 
 				if chessBoard.board[self.row-1][self.col] == None:
-					returnMoves.append(
-						MoveCommand(self.row, self.col, self.row-1, self.col, MoveCommandType.PROMOTE)
-					)
+					for promote_type in [MoveCommandType.PROMOTION_QUEEN, MoveCommandType.PROMOTION_ROOK, \
+                		MoveCommandType.PROMOTION_BISHOP, MoveCommandType.PROMOTION_KNIGHT]:
+						returnMoves.append(
+							MoveCommand(self.row, self.col, self.row-1, self.col, promote_type)
+						)
+
 			elif self.row > 1:
 				# Double Pawn Move
 				if self.row == 6:
@@ -139,21 +146,27 @@ class PawnModel(ChessPieceModel):
 				if self.col > 0:
 					target = chessBoard.board[self.row+1][self.col-1]
 					if target != None and target.player != self.player:
-						returnMoves.append(
-							MoveCommand(self.row, self.col, self.row+1, self.col-1, MoveCommandType.PROMOTE)
-						)
+						for promote_type in [MoveCommandType.PROMOTION_QUEEN, MoveCommandType.PROMOTION_ROOK, \
+                			MoveCommandType.PROMOTION_BISHOP, MoveCommandType.PROMOTION_KNIGHT]:
+							returnMoves.append(
+								MoveCommand(self.row, self.col, self.row+1, self.col-1, promote_type)
+							)
 
 				if self.col < 7:
 					target = chessBoard.board[self.row+1][self.col+1]
 					if target != None and target.player != self.player:
-						returnMoves.append(
-							MoveCommand(self.row, self.col, self.row+1, self.col+1, MoveCommandType.PROMOTE)
-						)
+						for promote_type in [MoveCommandType.PROMOTION_QUEEN, MoveCommandType.PROMOTION_ROOK, \
+                			MoveCommandType.PROMOTION_BISHOP, MoveCommandType.PROMOTION_KNIGHT]:
+							returnMoves.append(
+								MoveCommand(self.row, self.col, self.row+1, self.col+1, promote_type)
+							)
 
 				if chessBoard.board[self.row+1][self.col] == None:
-					returnMoves.append(
-						MoveCommand(self.row, self.col, self.row+1, self.col, MoveCommandType.PROMOTE)
-					)
+					for promote_type in [MoveCommandType.PROMOTION_QUEEN, MoveCommandType.PROMOTION_ROOK, \
+                			MoveCommandType.PROMOTION_BISHOP, MoveCommandType.PROMOTION_KNIGHT]:
+						returnMoves.append(
+							MoveCommand(self.row, self.col, self.row+1, self.col, promote_type)
+						)
 
 			elif self.row < 6:
 				# Double Pawn Move

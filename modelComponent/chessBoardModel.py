@@ -1,5 +1,5 @@
 # Enum 
-from appEnums import PieceType, Player, MoveCommandType
+from appEnums import PieceType, Player, MoveCommandType, PROMOTION_MAP
 
 # Model 
 from modelComponent.moveCommand import MoveCommand
@@ -174,7 +174,9 @@ class ChessBoardModel():
     # Return all Capture Moves
     def _allQuiesceneMoves(self, validMoves: list[MoveCommand]) -> list[MoveCommand]:
         # QuiescenceMoves
-        quiescenceMoveCmd = [MoveCommandType.PROMOTE, MoveCommandType.CAPTURE, \
+        quiescenceMoveCmd = [MoveCommandType.PROMOTION_QUEEN,
+            MoveCommandType.PROMOTION_ROOK, MoveCommandType.PROMOTION_BISHOP, \
+            MoveCommandType.PROMOTION_KNIGHT, MoveCommandType.CAPTURE, \
             MoveCommandType.ENPASSANT]
 
         return list(filter(
@@ -231,7 +233,8 @@ class ChessBoardModel():
     # Compute Move Priority
     def _getMovePriority(self, cmd: MoveCommand) -> int:
         # 1. Promotions (High Priority)
-        if cmd.moveType == MoveCommandType.PROMOTE:
+        if cmd.moveType in [MoveCommandType.PROMOTION_QUEEN, MoveCommandType.PROMOTION_ROOK, \
+                            MoveCommandType.PROMOTION_BISHOP, MoveCommandType.PROMOTION_QUEEN]:
             return 90000 # Treat as Queen value
         
         # 2. Captures (MVV-LVA)
@@ -369,13 +372,18 @@ class ChessBoardModel():
                 self.enPassant = cmd.endCol
 
             # Promote Pawn
-            case MoveCommandType.PROMOTE:
+            case (MoveCommandType.PROMOTION_QUEEN | 
+                MoveCommandType.PROMOTION_ROOK | 
+                MoveCommandType.PROMOTION_BISHOP | 
+                MoveCommandType.PROMOTION_KNIGHT):
                 # Promote MAY be a capture or a move
                 removedPiece = self.board[cmd.endRow][cmd.endCol]
 
+                promote_piece = PROMOTION_MAP.get(cmd.moveType, None)
+
                 # Promote Piece Type is provided from above
                 self.board[cmd.endRow][cmd.endCol] = ChessPieceFactory.createChessPiece(
-                    PieceType.QUEEN, self.playerTurn, cmd.endRow, cmd.endCol)
+                    promote_piece, self.playerTurn, cmd.endRow, cmd.endCol)
 
                 # Remove Pawn
                 self.board[cmd.startRow][cmd.startCol] = None
@@ -476,7 +484,10 @@ class ChessBoardModel():
                 self._undoMoveOnBoard(cmd.startRow, cmd.startCol, cmd.endRow, cmd.endCol)
 
             # Promote Pawn
-            case MoveCommandType.PROMOTE:
+            case (MoveCommandType.PROMOTION_QUEEN | 
+                MoveCommandType.PROMOTION_ROOK | 
+                MoveCommandType.PROMOTION_BISHOP | 
+                MoveCommandType.PROMOTION_KNIGHT):
                 # Promote the Pawn to a Queen
                 self.board[cmd.endRow][cmd.endCol] = restorePiece
 
