@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 
 use crate::chess_board::*;
 use crate::move_command::*;
@@ -332,12 +333,23 @@ fn parse_forward_move(raw_move: &String) -> ForwardMove {
 }
 
 #[pyfunction]
-pub fn compute_next_move(prev_moves: Vec<String>) {
+pub fn compute_next_move<'py>(py: Python<'py>, prev_moves: Vec<String>) -> PyResult<Bound<'py, PyDict>> {
     let mut chess_game = ChessGame::new();
     println!("{:?}", prev_moves);
 
     chess_game.process_moves(prev_moves);
-    println!("{:?}", chess_game.root_search(DEPTH));
+    let best_move = chess_game.root_search(DEPTH));
+    
+    let dict = PyDict::new(py);
+    if let Some(mv) = maybe_move {
+        dict.set_item("startRow", mv.startSq / 8)?;
+        dict.set_item("startCol", mv.startSq % 8)?;
+        dict.set_item("endRow", mv.endSq / 8)?;
+        dict.set_item("endCol", mv.endSq % 8)?;
+        dict.set_item("moveType", mv.moveType)?;
+    }
+
+    Ok(dict)
 }
 
 #[pyfunction]
