@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use pyo3::prelude::*;
-use pyo3::types::PyTuple;    
 
 use crate::chess_board::*;
 use crate::move_command::*;
@@ -8,7 +7,7 @@ use crate::move_command::*;
 use crate::bishop_mask::*;
 use crate::rook_mask::*;
 
-pub const DEPTH: i32 = 6;
+pub const DEPTH: i32 = 7;
 pub const MATE_VALUE: i32 = 3000000;
 
 #[derive(Clone)]
@@ -116,12 +115,12 @@ impl ChessGame {
 
     // Root Entrypoint
     pub fn root_search(&mut self, depth: i32) -> Option<ForwardMove> {
-        let result = self.negamax(depth, i32::MIN + 1, i32::MAX - 1);
+        let result = self.negamax(depth, 0, i32::MIN + 1, i32::MAX - 1);
         result.best_move
     }
  
     // Process Negamax
-    fn negamax(&mut self, depth: i32, mut alpha: i32, beta: i32) -> SearchResult {
+    fn negamax(&mut self, depth: i32, ply: i32, mut alpha: i32, beta: i32) -> SearchResult {
         // Three Move Repetition Draw
         if self.check_three_move_repetition() {
             return SearchResult {
@@ -157,7 +156,7 @@ impl ChessGame {
             self.process_time_cat_forward(forward_move);
 
             // Recursive Negamax Call
-            let negamax_result = self.negamax(depth - 1, -beta, -alpha);
+            let negamax_result = self.negamax(depth - 1, ply + 1, -beta, -alpha);
             let score = -negamax_result.score;
 
             // Undo Move + TimeCat
@@ -170,8 +169,8 @@ impl ChessGame {
                 best_move = Some(forward_move);
             }
 
-            if max_score > alpha {
-                alpha = max_score;
+            if score > alpha {
+                alpha = score;
             }
 
             // Alpha-Beta Pruning Cutoff
@@ -185,7 +184,7 @@ impl ChessGame {
             if self.chess_board.is_in_check() {
                 // Checkmate
                 return SearchResult { 
-                    score: -MATE_VALUE + depth, 
+                    score: -MATE_VALUE + ply, 
                     best_move: None 
                 };
             } else {
@@ -202,7 +201,10 @@ impl ChessGame {
 
     // Quiescence Search 
     fn quiescence_search(&mut self, mut alpha: i32, beta: i32, depth: i32) -> i32 {
-        let static_eval = self.chess_board.eval();
+        let mut static_eval = self.chess_board.eval();
+        if self.chess_board.active_player() == Side::BLACK {
+            static_eval = -static_eval;
+        }
 
         if depth > 50 {
             return static_eval;
@@ -267,7 +269,7 @@ impl ChessGame {
 
                 (captured_piece_val * 10) - starting_piece_val
             },
-            MoveFlag::ENPASSANT => 100, 
+            MoveFlag::ENPASSANT => 900,
             MoveFlag::KINGSIDECASTLE | MoveFlag::QUEENSIDECASTLE => 50,
             _ => 0,
         }
@@ -276,7 +278,7 @@ impl ChessGame {
     // The move does not confirm if it introduces a discovered check
     fn all_pseudo_legal_moves(&mut self) -> Vec<ForwardMove> {
         let mut valid_moves = self.chess_board.generate_moves();
-        valid_moves.sort_unstable_by_key(|mov| -self.get_move_priority(mov));
+        valid_moves.sort_unstable_by_key(|mov| std::cmp::Reverse(self.get_move_priority(mov)));
 
         valid_moves
     }
@@ -337,6 +339,9 @@ fn parse_forward_move(raw_move: &String) -> ForwardMove {
 pub fn compute_next_move<'py>(py: Python<'py>, prev_moves: Vec<String>) -> PyResult<Bound<'py, PyAny>> {
     let mut chess_game = ChessGame::new();
     chess_game.process_moves(prev_moves);
+
+    // chess_game.chess_board.timecat_print_fen();
+    // println!("{:?}", chess_game.all_pseudo_legal_moves());
     let best_move = chess_game.root_search(DEPTH);
     
     let module = py.import("modelComponent.moveCommand")?;

@@ -169,6 +169,11 @@ impl ChessBoard {
         self.zobrist_hash
     }
 
+    // Return Active Player
+    pub fn active_player(&self) -> Side {   
+        self.active_player
+    }
+
     // Return Time Cat Score
     pub fn eval(&mut self) -> i32 {   
         self.timecat_board.evaluate() as i32
@@ -179,6 +184,11 @@ impl ChessBoard {
         if self.timecat_board.push_move(&uci_input).expect("ValidOrNullMove").is_none() {
             panic!("Invalid UCI move or illegal move: {}", uci_input);
         }
+    }
+
+    // Timecat FEN 
+    pub fn timecat_print_fen(&mut self) {
+        println!("{}", self.timecat_board);
     }
 
     // Return Piece Value
@@ -328,7 +338,9 @@ impl ChessBoard {
                 self.kings[player_index] ^= 1u64 << move_command.startSq;
                 self.kings[player_index] ^= 1u64 << move_command.endSq;
             },
-            BoardPiece::NONE => {},
+            BoardPiece::NONE => {
+                println!("Tried to move empty");
+            },
         }
 
         self.mailbox[move_command.startSq] = BoardPiece::NONE;
@@ -369,7 +381,9 @@ impl ChessBoard {
             BoardPiece::WKING | BoardPiece::BKING=> {
                 self.kings[player_index] ^= 1u64 << remove_sq;
             },
-            BoardPiece::NONE => {},
+            BoardPiece::NONE => {
+                println!("Tried to remove empty");
+            },
         }
 
         self.mailbox[remove_sq] = BoardPiece::NONE;
@@ -583,7 +597,7 @@ impl ChessBoard {
         
         // Undo Move
         match undo_move_cmd.moveType {
-            MoveFlag::MOVE | MoveFlag::CAPTURE | MoveFlag::PAWNOPENMOVE => {
+            MoveFlag::MOVE | MoveFlag::CAPTURE | MoveFlag::PAWNOPENMOVE | MoveFlag::ENPASSANT=> {
                 let undo_command = ForwardMove { 
                     startSq: undo_move_cmd.endSq, 
                     endSq: undo_move_cmd.startSq, 
@@ -640,14 +654,6 @@ impl ChessBoard {
                         self._place_piece(undo_move_cmd.startSq, BoardPiece::BPAWN);
                     },
                 }
-            },
-            MoveFlag::ENPASSANT => {
-                let undo_command = ForwardMove { 
-                    startSq: undo_move_cmd.endSq, 
-                    endSq: undo_move_cmd.startSq, 
-                    moveType: MoveFlag::MOVE 
-                };
-                self._move_piece(undo_command);
             },
             MoveFlag::NULL => {},
         }
