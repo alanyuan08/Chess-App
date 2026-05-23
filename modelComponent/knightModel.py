@@ -15,40 +15,6 @@ class KnightModel(ChessPieceModel):
 		self.type = PieceType.KNIGHT
 		self.moves = 0
 
-	# Knight Value Table White
-	knightValueTable = [
-	    [-50, -40, -30, -30, -30, -30, -40, -50],
-	    [-40, -20,   0,   5,   5,   0, -20, -40],
-	    [-30,   5,  10,  15,  15,  10,   5, -30],
-	    [-30,   0,  15,  20,  20,  15,   0, -30],
-	    [-30,   5,  15,  20,  20,  15,   5, -30],
-	    [-30,   0,  10,  15,  15,  10,   0, -30], 
-	    [-40, -20,   0,   0,   0,   0, -20, -40],
-	    [-50, -40, -30, -30, -30, -30, -40, -50]
-	]
-
-	def fenValue(self) -> str:
-		if self.player == Player.BLACK:
-			return "n"
-		else:
-			return "N"
-
-
-	def phaseWeight(self) -> int:
-		return 1
-
-	def pieceValue(self) -> int:
-		return 300
-
-	def computedValue(self, chessBoard: ChessBoardProtocal, phaseWeight: int) -> int:
-		row = 0
-		if self.player == Player.BLACK:
-			row = self.row
-		else:
-			row = 7 - self.row
-
-		return self.pieceValue() + self.knightValueTable[row][self.col]
-
 	def possibleMoves(self, chessBoard: ChessBoardProtocal) -> list[MoveCommand]:
 		returnMoves = []
 		

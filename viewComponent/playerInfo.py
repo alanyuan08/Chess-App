@@ -1,16 +1,7 @@
 from PySide6.QtWidgets import QGraphicsPixmapItem, QGraphicsTextItem
 
 # Import Enums
-from appEnums import PieceType, Player, GameState
-
-# Import Model
-from modelComponent.chessPieceModel import ChessPieceModel
-from modelComponent.chessBoardModel import ChessBoardModel
-from modelComponent.moveCommand import MoveCommand
-
-# Import View
-from viewComponent.chessPieceView import ChessPieceView
-
+from appEnums import Player, GameState
 
 # QGraphics for ChessBoard
 class PlayerInfo(QGraphicsPixmapItem):
@@ -40,9 +31,16 @@ class PlayerInfo(QGraphicsPixmapItem):
 		if gameState == GameState.PLAYING:
 			if self.playerTurn:
 				newText += "Active Turn"
-		elif (self.player == Player.WHITE and gameState == GameState.WHITEWIN) or \
-			(self.player == Player.BLACK and gameState == GameState.BLACKWIN):
-			newText += "Player Win"
+		elif self.player == Player.WHITE:
+			if gameState == GameState.WHITEWIN:
+				newText += "Player Win"
+			else:
+				newText += "Player Lose"
+		elif self.player == Player.BLACK:
+			if gameState == GameState.BLACKWIN:
+				newText += "Player Win"
+			else:
+				newText += "Player Lose"
 		elif GameState.DRAW:
 			newText += "Draw"
 

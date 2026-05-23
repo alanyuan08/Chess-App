@@ -31,18 +31,12 @@ The Board Evaluation is handcrafted based on heuristics provided online.
 Playing as [black|white]
 - /run.sh [black|white]
 
-# Improvements
-
-- The AI currently does not have a opening hand book and uses a stop-gap function to play one of four moves
-- The AI does not have an endgame table and is suspectible to draws if there isn't sufficient material 
-
-
 # Playing Level
 
 The Chess AI has been tested and defeated bots on Chess.com with ELO 2000+
 
-- [Win - ELO 2000 Bot](https://www.chess.com/analysis/game/computer/522586927/analysis)
-- [Win - ELO 2400 Bot](https://www.chess.com/analysis/game/computer/1393583077/analysis)
+- [Win - ELO 2300 Bot](https://www.chess.com/analysis/game/computer/1397423175/review)
+- [Win - ELO 2300 Bot](https://www.chess.com/analysis/game/computer/1393583077/analysis)
 
 ## Contact
 

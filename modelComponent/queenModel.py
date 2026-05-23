@@ -18,55 +18,6 @@ class QueenModel(ChessPieceModel):
 		self.type = PieceType.QUEEN
 		self.moves = 0
 
-	# Queen Value Table White
-	queenValueTableEarlyGame = [
-	    [-20, -15, -15, -10, -10, -15, -15, -20],
-	    [-10,  -5,  -5,   0,   0,  -5,  -5, -10],
-	    [ -5,   0,   0,   5,   5,   0,   0,  -5],
-	    [ -5,   0,   5,  10,  10,   5,   0,  -5],
-	    [ -5,   0,   5,  10,  10,   5,   0,  -5],
-	    [ -5,   5,   5,   5,   5,   5,   5,  -5],
-	    [  0,   5,  10,  10,  10,  10,   5,   0],
-	    [ -5,  -5,   0,  10,   0,   0,  -5,  -5]
-    ]
-
-	queenValueTableEndGame = [
-	    [-10,  -5,  -5,  -5,  -5,  -5,  -5, -10],
-	    [ -5,   0,   5,   5,   5,   5,   0,  -5],
-	    [  0,   5,  10,  15,  15,  10,   5,   0],
-	    [  5,  10,  20,  30,  30,  20,  10,   5],
-	    [  5,  10,  20,  30,  30,  20,  10,   5],
-	    [  0,   5,  10,  15,  15,  10,   5,   0],
-	    [ -5,   0,   5,   5,   5,   5,   0,  -5],
-	    [-20, -15, -10,  -5,  -5, -10, -15, -20]
-	]
-
-	def fenValue(self) -> str:
-		if self.player == Player.BLACK:
-			return "q"
-		else:
-			return "Q"
-
-	def pieceValue(self) -> int:
-		return 900
-
-	def phaseWeight(self) -> int:
-		return 4
-
-	def computedValue(self, chessBoard: ChessBoardProtocal, phaseWeight: int) -> int:
-		row = 0
-		if self.player == Player.BLACK:
-			row = self.row
-		else:
-			row = 7 - self.row
-
-		earlyGame = self.queenValueTableEarlyGame[row][self.col]
-		endGame = self.queenValueTableEndGame[row][self.col]
-
-		computedPhase = earlyGame * phaseWeight + endGame * (24 - phaseWeight) 
-
-		return self.pieceValue() + math.ceil(computedPhase / 24)
-
 	# List all Possible Moves from Location
 	def possibleMoves(self, chessBoard: ChessBoardProtocal) -> list[MoveCommand]:
 		returnMoves = []

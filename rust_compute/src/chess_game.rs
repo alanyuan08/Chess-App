@@ -102,18 +102,7 @@ impl ChessGame {
         self.traversed_positions.get(&hash).copied().unwrap_or(0) == 3
     }
 
-    // DEBUG
-    fn undo_moves(&mut self) {
-        while self.history_index > 0 {
-            self.history_index -= 1;
-
-            if let Some(undo_command) = self.history[self.history_index].take() {
-                self.chess_board.unexecute_move(undo_command);
-            }
-        }
-    }
-
-    // Root Entrypoint
+    // Search Entry Point
     pub fn root_search(&mut self, depth: i32) -> Option<ForwardMove> {
         let result = self.negamax(depth, 0, i32::MIN + 1, i32::MAX - 1);
         result.best_move

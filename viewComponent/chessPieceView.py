@@ -1,11 +1,9 @@
-from PySide6.QtCore import Signal, QObject
-from PySide6.QtWidgets import QWidget, QGraphicsScene, QGraphicsView, QApplication, QGraphicsItem, QGraphicsPixmapItem, QGraphicsSceneMouseEvent
+from PySide6.QtWidgets import QGraphicsItem, QGraphicsPixmapItem, QGraphicsSceneMouseEvent
 from PySide6.QtGui import QPixmap
-import sys
 
 # Import Enums
-from appEnums import PieceType, Player, MoveCommandType
-from communicatorProxy import MoveCommand, CommunicatorProxy
+from communicatorProxy import CommunicatorProxy
+from appEnums import Player
 
 # Import Model
 from modelComponent.chessPieceModel import ChessPieceModel

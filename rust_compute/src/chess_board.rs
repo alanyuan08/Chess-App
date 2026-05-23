@@ -683,29 +683,3 @@ impl ChessBoard {
         self.zobrist_xor();
     }
 }
-
-// DEBUG
-fn get_lsb_indices(board: u64) -> Vec<usize> {
-    let mut bitboard = board;
-    let mut indices = Vec::new();
-    
-    while bitboard != 0 {
-        let lsb_index = bitboard.trailing_zeros();
-        indices.push(lsb_index as usize);
-        
-        bitboard &= bitboard - 1;
-    }
-    
-    indices
-}
-
-// DEBUG
-pub fn print_board(board: u64, debug_string: &str) {
-    println!("{}", debug_string);
-    for r in (0..8).rev() {
-        for c in 0..8 {
-            print!("{}", (board >> (r * 8 + c)) & 1);
-        }
-        println!("");
-    }
-}

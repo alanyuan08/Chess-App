@@ -1,6 +1,5 @@
 # Impoprt
 import secrets
-import math
 
 # Enum
 from appEnums import Player, MoveCommandType, PieceType

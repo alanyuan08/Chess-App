@@ -15,39 +15,6 @@ class RookModel(ChessPieceModel):
 		self.type = PieceType.ROOK
 		self.moves = 0
 
-	# Rook Value Table White
-	rookValueTable = [
-	    [ 0,  0,  0,  5,  5,  0,  0,  0],
-	    [ 5, 10, 10, 10, 10, 10, 10,  5],
-	    [-5,  0,  0,  0,  0,  0,  0, -5],
-	    [-5,  0,  0,  0,  0,  0,  0, -5],
-	    [-5,  0,  0,  0,  0,  0,  0, -5],
-	    [-5,  0,  0,  0,  0,  0,  0, -5],
-	    [-5,  0,  0,  0,  0,  0,  0, -5],
-	    [ 0,  0,  0,  5,  5,  0,  0,  0] 
-	]
-
-	def fenValue(self) -> str:
-		if self.player == Player.BLACK:
-			return "r"
-		else:
-			return "R"
-
-	def phaseWeight(self) -> int:
-		return 2
-
-	def pieceValue(self) -> int:
-		return 500
-
-	def computedValue(self, chessBoard: ChessBoardProtocal, phaseWeight: int) -> int:
-		row = 0
-		if self.player == Player.BLACK:
-			row = self.row
-		else:
-			row = 7 - self.row
-
-		return self.pieceValue() + self.rookValueTable[row][self.col]
-
 	# List all Possible Moves from Location
 	def possibleMoves(self, chessBoard: ChessBoardProtocal) -> list[MoveCommand]:
 		returnMoves = []

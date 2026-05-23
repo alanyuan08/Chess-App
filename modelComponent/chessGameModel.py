@@ -4,7 +4,7 @@ from modelComponent.moveCommand import MoveCommand
 from modelComponent.openingMoveProtocal import OpeningMoveNodeProtocal
 
 # Enum
-from appEnums import Player, GameState
+from appEnums import Player, GameState, MoveCommandType
 
 # Multi Process
 import rust_compute
@@ -26,22 +26,21 @@ class ChessGameModel():
 
         # Opening Handbook - Node Represents Current Move
         self.currOpeningMove = openingHandBook
-
-    # Return Forsyth-Edwards Notation (FEN)
-    def computeForsythEdwardsNotation(self) -> str:
-        return self.chessBoard.computeForsythEdwardsNotation()
     
+    # Return Moves in UCI for Rust Computations
     def returnChessMoves(self) -> list[str]:
         return self.chessBoard.previousMoves
 
     # Move Piece
     def movePiece(self, cmd: MoveCommand):
         # Move the Chess Piece
-        self.chessBoard.movePiece(cmd)
+        if cmd.moveType != MoveCommandType.NULL: 
+            self.chessBoard.movePiece(cmd)
 
         if self.currOpeningMove:
             self.currOpeningMove = self.currOpeningMove.stepForward(cmd)
 
+        # Compute EndGame
         self.gamePlayerTurn = ChessBoardModel.opponent(self.gamePlayerTurn)
 
         # Three Move Repetition Draw

@@ -16,18 +16,6 @@ class ChessPieceModel(ABC):
 		pass
 
 	@abstractmethod
-	def phaseWeight(self) -> int:
-		pass
-
-	@abstractmethod
-	def pieceValue(self) -> int:
-		pass
-
-	@abstractmethod
-	def computedValue(self, chessBoard: ChessBoardProtocal, phaseWeight: int) -> int:
-		pass
-
-	@abstractmethod
 	def possibleMoves(self, chessBoard: ChessBoardProtocal) -> list[MoveCommand]:
 		pass
 

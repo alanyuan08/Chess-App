@@ -20,71 +20,9 @@ class KingModel(ChessPieceModel):
 
 		self.castled = False
 
-	# King Value Table White
-	kingValueTableEarlyGame = [
-	    [-50, -40, -40, -50, -50, -40, -40, -50],
-	    [-30, -30, -30, -30, -30, -30, -30, -30],
-	    [-30, -30, -30, -30, -30, -30, -30, -30],
-	    [-30, -30, -30, -30, -30, -30, -30, -30],
-	    [-20, -20, -20, -20, -20, -20, -20, -20],
-	    [-10, -10, -10, -10, -10, -10, -10, -10],
-	    [ 10,  10,   0,   0,   0,   0,  10,  10],
-	    [ 20,  30,  10,   0,   0,  10,  30,  20]
-	]
-
-	kingValueTableEndGame = [
-	    [-50, -30, -30, -30, -30, -30, -30, -50],
-	    [-30, -10,   0,   0,   0,   0, -10, -30], 
-	    [-30,   0,  15,  20,  20,  15,   0, -30],
-	    [-30,   0,  30,  40,  40,  30,   0, -30],
-	    [-30,   0,  30,  40,  40,  30,   0, -30],
-	    [-30,   0,  15,  20,  20,  15,   0, -30],
-	    [-30, -10,   0,   0,   0,   0, -10, -30],
-	    [-50, -30, -30, -30, -30, -30, -30, -50] 
-	]
-
-	def fenValue(self) -> str:
-		if self.player == Player.BLACK:
-			return "k"
-		else:
-			return "K"
-
 	# Update Castle
 	def updateCastle(self, castled: bool):
 		self.castled = castled
-
-	# King is not part of phase calculations
-	def phaseWeight(self) -> int:
-		return 0
-
-	def pieceValue(self) -> int:
-		return 10000
-
-	def computedValue(self, chessBoard: ChessBoardProtocal, phaseWeight: int) -> int:
-		returnScore = self.pieceValue()
-
-		# Castle Bonus
-		if self.castled:
-			returnScore += 50
-		else:
-			if not self.canQueenSideCastle(chessBoard):
-				returnScore -= 20
-			elif not self.canKingSideCastle(chessBoard):
-				returnScore -= 20
-
-		# Value Table Bonus
-		row = 0
-		if self.player == Player.BLACK:
-			row = self.row
-		else:
-			row = 7 - self.row
-
-		earlyGame = self.kingValueTableEarlyGame[row][self.col]
-		endGame = self.kingValueTableEndGame[row][self.col]
-
-		computedPhase = earlyGame * phaseWeight + endGame * (24 - phaseWeight) 
-
-		return returnScore + math.ceil(computedPhase / 24)
 
 	# List all Possible Moves from Location
 	def possibleMoves(self, chessBoard: ChessBoardProtocal) -> list[MoveCommand]:

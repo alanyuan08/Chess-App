@@ -18,54 +18,6 @@ class PawnModel(ChessPieceModel):
 		self.type = PieceType.PAWN
 		self.moves = 0
 
-	pawnValueTableEarlyGame = [
-	    [  0,   0,   0,   0,   0,   0,   0,   0], 
-	    [ 50,  50,  50,  50,  50,  50,  50,  50],
-	    [ 10,  10,  20,  30,  30,  20,  10,  10], 
-	    [  5,   5,  10,  25,  25,  10,   5,   5],
-	    [  0,   0,   0,  30,  30,   0,   0,   0],
-	    [  5,   3,  -2,   8,   8,  -2,   3,   5],
-	    [  5,   0,   0, -30, -30,   0,   0,    5],
-	    [  0,   0,   0,   0,   0,   0,   0,   0]
-	]
-
-	pawnValueTableEndGame = [
-	    [  0,   0,   0,   0,   0,   0,   0,   0],
-	    [150, 150, 150, 150, 150, 150, 150, 150],
-	    [ 80,  80,  80,  80,  80,  80,  80,  80],
-	    [ 50,  50,  50,  50,  50,  50,  50,  50],
-	    [ 30,  30,  30,  30,  30,  30,  30,  30],
-	    [ 20,  20,  20,  20,  20,  20,  20,  20],
-	    [  0,   0,   0,   0,   0,   0,   0,   0],
-	    [  0,   0,   0,   0,   0,   0,   0,   0]
-	]
-
-	def fenValue(self) -> str:
-		if self.player == Player.BLACK:
-			return "p"
-		else:
-			return "P"
-
-	# Pawn isn't part of Phase Weights
-	def phaseWeight(self) -> int:
-		return 0
-
-	def pieceValue(self) -> int:
-		return 100
-
-	def computedValue(self, chessBoard: ChessBoardProtocal, phaseWeight: int) -> int:
-		row = 0
-		if self.player == Player.BLACK:
-			row = self.row
-		else:
-			row = 7 - self.row
-
-		earlyGame = self.pawnValueTableEarlyGame[row][self.col]
-		endGame = self.pawnValueTableEndGame[row][self.col]
-
-		computedPhase = earlyGame * phaseWeight + endGame * (24 - phaseWeight) 
-		return self.pieceValue() + math.ceil(computedPhase / 24)
-
 	def possibleMoves(self, chessBoard: ChessBoardProtocal) -> list[MoveCommand]:
 		returnMoves = []
 
