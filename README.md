@@ -10,7 +10,7 @@ Engineered a hybrid desktop application pairing a PySide6 presentation layer wit
 
 - High-Performance Generation: Computes all pseudo-legal move paths across millions of positions per second using Bitboards for Move Generation. It uses Min-Max combined with Alpha-Beta Pruning for pruning unpromising branches early and Quiescence for extending unstable searches beyond the search horiozn. 
 
-It uses Iterative Deepening combined with Principal Variations to search 10+ ply deep. In addition, the engine uses Transposition Table to store previously evaluated board positions and for coordinating results from Lock-Free Concurrent Tree Search (Lazy SMP).
+- It uses Iterative Deepening combined with Principal Variations to search 10+ ply deep. In addition, the engine uses Transposition Table to store previously evaluated board positions and for coordinating results from Lock-Free Concurrent Tree Search (Lazy SMP).
 
 ## 3. Neural Network Evaluation
 
