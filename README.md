@@ -1,30 +1,20 @@
 # Chess App
 
-This is a standard Chess-App built using PySide6 Library for the Front End and standard MinMax search with Alpha-Beta Pruning Optimizations.
+This is a standard Chess-App built using PySide6 Library (Python) for the FrontEnd and Rust Multi-Threading for the computation heavy steps of move generation, board evaluation and search. 
 
 ## 1. Python Presentation & Validation Layer
     
-- PySide6 User Interface: Renders the 2D chessboard, handles player drag-and-drop input. 
+- PySide6 User Interface: Renders the 2D chessboard, handles player drag-and-drop input in addition to Move Validation. It also handles the Three-Fold Repetition using a Zobrist Hash and maintains an opening handbook of the most commonly played moves. 
 
 ## 2. Rust Engine Core
 
-- High-Performance Generation: Computes legal and pseudo-legal move paths across millions of positions per second using native multi-threading. MinMax with Alpha-Beta Pruning: Cuts off unpromising branches early to reduce the total search tree size exponentially.
+- High-Performance Generation: Computes all pseudo-legal move paths across millions of positions per second using Bitboards for Move Generation. It uses Min-Max combined with Alpha-Beta Pruning for pruning unpromising branches early and Quiescence for extending unstable searches beyond the search horiozn. 
+
+It uses Iterative Deepening combined with Principal Variations to search 10+ ply deep. In addition, the engine uses Transposition Table to store previously evaluated board positions and for coordinating results from Lock-Free Concurrent Tree Search (Lazy SMP).
 
 ## 3. Neural Network Evaluation
 
-- NNUE Integration: Uses a custom, pre-trained neural network that updates incrementally as pieces move, bypassing slow, manual heuristic math.
-
-# Search Algorithm 
-
-The Chess App uses the standard MinMax search with Alpha-Beta Pruning for search optimizations; The MinMax algorithm recursives explores all possible moves 4-pry deep for both player and computes the best move, assuming both players play optimially.
-
-The Alpha-Beta Pruning allows the MinMax algorithm to stop pruning a branch of the search tree if it determined that the current position is already worse than a position it has found elsewhere.
-
-Furthermore, the algorithm uses Quiescence Search at the nodes of the search depths to ensure the algorithm isn't suspectiable to the "Horizon Effect".
-
-Finally, the algorithm  uses the Younger Brother Parallel Search such that it first searches the most likely promising move to produce a suitable alpha cutoff that is passed to the subsequent processors to be searched in parallel.
-
-The Board Evaluation is handcrafted based on heuristics provided online.
+- NNUE Integration: Uses a custom, pre-trained neural network that updates incrementally using Chess UCI. This will be replaced by a self-trained NNUE as the timecat NNUE does not evaluate pseudo positions requred for Null-Move Pruning. 
 
 # Running the App
 
