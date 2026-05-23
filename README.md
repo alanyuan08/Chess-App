@@ -1,6 +1,6 @@
 # Chess App
 
-This is a standard Chess-App built using PySide6 Library (Python) for the FrontEnd and Rust Multi-Threading for the computation heavy steps of move generation, board evaluation and search. 
+Engineered a hybrid desktop application pairing a PySide6 presentation layer with a high-performance Rust engine core, evaluating millions of positions per second.
 
 ## 1. Python Presentation & Validation Layer
     
