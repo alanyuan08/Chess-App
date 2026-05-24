@@ -111,7 +111,7 @@ impl ChessGame {
     pub fn root_search(&mut self) -> Option<ForwardMove> {
         // Search Time
         let start_time = Instant::now();
-        let time_limit = Duration::from_secs(20);
+        let time_limit = Duration::from_secs(25);
 
         let mut gen_moves: Vec<ForwardMove> = Vec::with_capacity(40);
         let mut best_move_overall: Option<ForwardMove> = None;
@@ -304,14 +304,26 @@ impl ChessGame {
         gen_moves: &'a mut Vec<ForwardMove>
     ) ->  &'a mut Vec<ForwardMove> {
         let pseudo_legal_moves = self.all_pseudo_legal_moves(gen_moves, None);
-        
+
         pseudo_legal_moves.retain(|cmd| {
-            matches!(
+            // 1. First, check if it's a capture or promotion
+            let is_tactical = matches!(
                 cmd.move_type,
                 MoveFlag::PROMOTIONQUEEN | MoveFlag::PROMOTIONROOK |
                 MoveFlag::PROMOTIONBISHOP | MoveFlag::PROMOTIONKNIGHT | 
                 MoveFlag::CAPTURE | MoveFlag::ENPASSANT
-            )
+            );
+
+            if !is_tactical {
+                return false;
+            }
+
+            // 2. Validate legality using your king safety function
+            self.process_forward_move(*cmd);
+            let is_king_safe = !self.chess_board.is_previous_player_king_in_check();
+            self.process_backward_move();
+
+            is_king_safe
         });
 
         pseudo_legal_moves
