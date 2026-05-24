@@ -10,7 +10,7 @@ source .venv/bin/activate
 pip install .
 
 # Build Rust
-# maturin develop 
+RUSTFLAGS="-C target-cpu=native" maturin develop --release
 
 # 3. Run your main script
 python chessApp.py $1

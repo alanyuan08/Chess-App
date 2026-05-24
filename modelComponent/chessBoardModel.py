@@ -32,7 +32,7 @@ class ChessBoardModel():
         self.blackKingSquareRow = 7
         self.blackKingSquareCol = 4
 
-        # Used to Store previous Moves in UCI Format
+        # Used to Store previous Moves in 
         self.previousMoves = []
 
         # Use for Zobrist Hash
@@ -57,8 +57,6 @@ class ChessBoardModel():
             return True
 
         return False
-
-    # --------
 
     def forwardPosition(self):
         self.traversedPositions[self.zobristHash] = \

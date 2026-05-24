@@ -42,7 +42,7 @@ pub fn knight_moves(mut knight_bitboard: u64, occupancy: u64,
         while knight_moves != 0 {
             let target = knight_moves.trailing_zeros() as usize;
             moves.push(
-                ForwardMove { startSq: knight, endSq: target, moveType: MoveFlag::MOVE }
+                ForwardMove { start_sq: knight, end_sq: target, move_type: MoveFlag::MOVE }
             );
             knight_moves &= knight_moves - 1;
         }
@@ -50,7 +50,7 @@ pub fn knight_moves(mut knight_bitboard: u64, occupancy: u64,
         while knight_captures != 0 {
             let target = knight_captures.trailing_zeros() as usize;
             moves.push(
-                ForwardMove { startSq: knight, endSq: target, moveType: MoveFlag::CAPTURE }
+                ForwardMove { start_sq: knight, end_sq: target, move_type: MoveFlag::CAPTURE }
             );
             knight_captures &= knight_captures - 1;
         }

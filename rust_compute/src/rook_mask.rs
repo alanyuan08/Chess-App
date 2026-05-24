@@ -239,13 +239,13 @@ pub fn rook_moves(mut rook_bitboard: u64, occupancy: u64,
 
         while rook_moves != 0 {
             let target = rook_moves.trailing_zeros() as usize;
-            moves.push(ForwardMove { startSq: rook, endSq: target, moveType: MoveFlag::MOVE });
+            moves.push(ForwardMove { start_sq: rook, end_sq: target, move_type: MoveFlag::MOVE });
             rook_moves &= rook_moves - 1;
         }
 
         while rook_captures != 0 {
             let target = rook_captures.trailing_zeros() as usize;
-            moves.push(ForwardMove { startSq: rook, endSq: target, moveType: MoveFlag::CAPTURE });
+            moves.push(ForwardMove { start_sq: rook, end_sq: target, move_type: MoveFlag::CAPTURE });
             rook_captures &= rook_captures - 1;
         }
 

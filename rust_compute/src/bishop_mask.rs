@@ -214,13 +214,13 @@ pub fn bishop_moves(mut bishop_bitboard: u64, occupancy: u64,
 
         while bishop_moves != 0 {
             let target = bishop_moves.trailing_zeros() as usize;
-            moves.push(ForwardMove { startSq: bishop, endSq: target, moveType: MoveFlag::MOVE });
+            moves.push(ForwardMove { start_sq: bishop, end_sq: target, move_type: MoveFlag::MOVE });
             bishop_moves &= bishop_moves - 1;
         }
 
         while bishop_captures != 0 {
             let target = bishop_captures.trailing_zeros() as usize;
-            moves.push(ForwardMove { startSq: bishop, endSq: target, moveType: MoveFlag::CAPTURE });
+            moves.push(ForwardMove { start_sq: bishop, end_sq: target, move_type: MoveFlag::CAPTURE });
             bishop_captures &= bishop_captures - 1;
         }
 

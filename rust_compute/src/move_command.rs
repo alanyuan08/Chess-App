@@ -1,18 +1,18 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ForwardMove {
-    pub startSq: usize,
-    pub endSq: usize,
-    pub moveType: MoveFlag,
+    pub start_sq: usize,
+    pub end_sq: usize,
+    pub move_type: MoveFlag,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UndoMove {
-    pub startSq: usize,
-    pub endSq: usize,
-    pub moveType: MoveFlag,
-    pub capturedPiece: Option<BoardPiece>,
-    pub prevCastleRights: u8,
-    pub prevEnPassant: u64,
+    pub start_sq: usize,
+    pub end_sq: usize,
+    pub move_type: MoveFlag,
+    pub captured_piece: Option<BoardPiece>,
+    pub prev_castle_rights: u8,
+    pub prev_en_passant: u64,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

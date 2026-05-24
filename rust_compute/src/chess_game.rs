@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Instant;
 use std::collections::HashMap;
 use pyo3::prelude::*;
 
@@ -10,13 +12,14 @@ use crate::rook_mask::*;
 pub const DEPTH: i32 = 7;
 pub const MATE_VALUE: i32 = 3000000;
 
-#[derive(Clone)]
 struct ChessGame {
     history: [Option<UndoMove>; 1024],
     history_index: usize,
 
     chess_board: ChessBoard,
     traversed_positions: HashMap<u64, i32>,
+
+    nodes_processed: AtomicUsize,
 }
 
 impl ChessGame {
@@ -33,6 +36,7 @@ impl ChessGame {
             traversed_positions: {
                 HashMap::new()
             },
+            nodes_processed: AtomicUsize::new(0),
         }
     }
 
@@ -58,12 +62,12 @@ impl ChessGame {
 
         let remove_piece = self.chess_board.execute_move(forward_move);
         let undo_move = UndoMove {
-            startSq: forward_move.startSq,
-            endSq: forward_move.endSq,
-            moveType: forward_move.moveType,
-            capturedPiece: remove_piece,
-            prevCastleRights: prev_castle_rights,
-            prevEnPassant: prev_en_passant,
+            start_sq: forward_move.start_sq,
+            end_sq: forward_move.end_sq,
+            move_type: forward_move.move_type,
+            captured_piece: remove_piece,
+            prev_castle_rights: prev_castle_rights,
+            prev_en_passant: prev_en_passant,
         };
 
         self.history[self.history_index] = Some(undo_move);
@@ -104,7 +108,14 @@ impl ChessGame {
 
     // Search Entry Point
     pub fn root_search(&mut self, depth: i32) -> Option<ForwardMove> {
+        // Search Time
+        let start_time = Instant::now();
         let result = self.negamax(depth, 0, i32::MIN + 1, i32::MAX - 1);
+
+        let elapsed_time = start_time.elapsed();
+        let node_procesed =  self.nodes_processed.load(Ordering::Relaxed);
+        println!("{} Nodes Procesed in {} milliseconds", node_procesed, elapsed_time.as_millis());
+
         result.best_move
     }
  
@@ -188,9 +199,18 @@ impl ChessGame {
         SearchResult { score: max_score, best_move }
     }
 
+    fn board_eval(&mut self) -> i32 {
+        let static_eval = self.chess_board.eval();
+
+        // Aggregiate for Nodes per Second
+        self.nodes_processed.fetch_add(1, Ordering::Relaxed);
+
+        static_eval
+    }
+
     // Quiescence Search 
     fn quiescence_search(&mut self, mut alpha: i32, beta: i32, depth: i32) -> i32 {
-        let mut static_eval = self.chess_board.eval();
+        let mut static_eval = self.board_eval();
         if self.chess_board.active_player() == Side::BLACK {
             static_eval = -static_eval;
         }
@@ -249,12 +269,12 @@ impl ChessGame {
 
     // Sort used for Principal Variation Search
     fn get_move_priority(&self, cmd: &ForwardMove) -> i32 {
-        match cmd.moveType {
+        match cmd.move_type {
             MoveFlag::PROMOTIONQUEEN | MoveFlag::PROMOTIONROOK |
             MoveFlag::PROMOTIONBISHOP | MoveFlag::PROMOTIONKNIGHT => 90000,
             MoveFlag::CAPTURE => {
-                let captured_piece_val=  self.chess_board.index_piece_value(cmd.endSq);
-                let starting_piece_val = self.chess_board.index_piece_value(cmd.startSq);
+                let captured_piece_val=  self.chess_board.index_piece_value(cmd.end_sq);
+                let starting_piece_val = self.chess_board.index_piece_value(cmd.start_sq);
 
                 (captured_piece_val * 10) - starting_piece_val
             },
@@ -280,7 +300,7 @@ impl ChessGame {
             .into_iter()
             .filter(|cmd| {
                 matches!(
-                    cmd.moveType,
+                    cmd.move_type,
                     MoveFlag::PROMOTIONQUEEN | MoveFlag::PROMOTIONROOK |
                     MoveFlag::PROMOTIONBISHOP | MoveFlag::PROMOTIONKNIGHT | 
                     MoveFlag::CAPTURE | MoveFlag::ENPASSANT
@@ -297,12 +317,12 @@ fn parse_uci(forward_move: ForwardMove) -> String {
         (4, 'e'), (5, 'f'), (6, 'g'), (7, 'h'),
     ]);
 
-    let start_file = *map.get(&(forward_move.startSq % 8)).unwrap_or(&'a'); 
-    let start_rank = (forward_move.startSq / 8) + 1;
-    let end_file = *map.get(&(forward_move.endSq % 8)).unwrap_or(&'a'); 
-    let end_rank = (forward_move.endSq / 8) + 1;
+    let start_file = *map.get(&(forward_move.start_sq % 8)).unwrap_or(&'a'); 
+    let start_rank = (forward_move.start_sq / 8) + 1;
+    let end_file = *map.get(&(forward_move.end_sq % 8)).unwrap_or(&'a'); 
+    let end_rank = (forward_move.end_sq / 8) + 1;
 
-    let promo = match forward_move.moveType {
+    let promo = match forward_move.move_type {
         MoveFlag::PROMOTIONQUEEN => "q",
         MoveFlag::PROMOTIONROOK => "r",
         MoveFlag::PROMOTIONBISHOP => "b",
@@ -318,9 +338,9 @@ fn parse_forward_move(raw_move: &String) -> ForwardMove {
     }).collect();
 
     ForwardMove { 
-        startSq: (result[1] * 8 + result[0]) as usize, 
-        endSq: (result[3] * 8 + result[2]) as usize, 
-        moveType: MoveFlag::try_from(result[4]).expect("Corrupted move data"),
+        start_sq: (result[1] * 8 + result[0]) as usize, 
+        end_sq: (result[3] * 8 + result[2]) as usize, 
+        move_type: MoveFlag::try_from(result[4]).expect("Corrupted move data"),
     }
 }
 
@@ -340,14 +360,14 @@ pub fn compute_next_move<'py>(py: Python<'py>, prev_moves: Vec<String>) -> PyRes
     let move_command_type_enum = enum_mod.getattr("MoveCommandType")?;
 
     if let Some(mv) = best_move {
-        let move_type_value = mv.moveType as i32;
+        let move_type_value = mv.move_type as i32;
         let enum_instance = move_command_type_enum.call1((move_type_value,))?;
 
         let args = (
-            (mv.startSq / 8) as i32,
-            (mv.startSq % 8) as i32,
-            (mv.endSq / 8) as i32,
-            (mv.endSq % 8) as i32,
+            (mv.start_sq / 8) as i32,
+            (mv.start_sq % 8) as i32,
+            (mv.end_sq / 8) as i32,
+            (mv.end_sq % 8) as i32,
             enum_instance,
         ).into_pyobject(py)?;
 

@@ -12,6 +12,8 @@ Engineered a hybrid desktop application pairing a PySide6 presentation layer wit
 
 - It uses Iterative Deepening combined with Principal Variations to search 10+ ply deep. In addition, the engine uses Transposition Table to store previously evaluated board positions and for coordinating results from Lock-Free Concurrent Tree Search (Lazy SMP).
 
+Benchmark - 1.2 Million Nodes per Second per thread on a Apple M4 Pro Chip. 
+
 ## 3. Neural Network Evaluation
 
 - NNUE Integration: Uses a custom, pre-trained neural network that updates incrementally using Chess UCI. This will be replaced by a self-trained NNUE as the timecat NNUE does not evaluate pseudo positions requred for Null-Move Pruning. 
@@ -27,6 +29,8 @@ The Chess AI has been tested and defeated bots on Chess.com with ELO 2000+
 
 - [Win - ELO 2300 Bot](https://www.chess.com/analysis/game/computer/1397423175/review)
 - [Win - ELO 2300 Bot](https://www.chess.com/analysis/game/computer/1393583077/analysis)
+
+*Chess.com bots are overrated by roughly 100 points. 
 
 ## Contact
 

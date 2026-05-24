@@ -16,13 +16,13 @@ pub fn queen_moves(mut queen_bitboard: u64, occupancy: u64,
 
         while queen_moves != 0 {
             let target = queen_moves.trailing_zeros() as usize;
-            moves.push(ForwardMove { startSq: queen, endSq: target, moveType: MoveFlag::MOVE });
+            moves.push(ForwardMove { start_sq: queen, end_sq: target, move_type: MoveFlag::MOVE });
             queen_moves &= queen_moves - 1;
         }
 
         while queen_captures != 0 {
             let target = queen_captures.trailing_zeros() as usize;
-            moves.push(ForwardMove { startSq: queen, endSq: target, moveType: MoveFlag::CAPTURE });
+            moves.push(ForwardMove { start_sq: queen, end_sq: target, move_type: MoveFlag::CAPTURE });
             queen_captures &= queen_captures - 1;
         }
 

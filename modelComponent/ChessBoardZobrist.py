@@ -109,14 +109,14 @@ class ChessBoardZobrist():
         initRow: int, initCol: int, finalRow: int, finalCol: int):
 
         # XOR InitRow / InitCol
-        startSq = initRow * 8 + initCol
+        start_sq = initRow * 8 + initCol
         startPiece = chessBoard.board[initRow][initCol]
         startType = ChessBoardZobrist.pieceType(startPiece)
-        chessBoard.zobristHash ^= ChessBoardZobrist.TABLE[startType][startSq]
+        chessBoard.zobristHash ^= ChessBoardZobrist.TABLE[startType][start_sq]
 
         # XOR finalRow / finalCol
-        endSq = finalRow * 8 + finalCol
-        chessBoard.zobristHash ^= ChessBoardZobrist.TABLE[startType][endSq]
+        end_sq = finalRow * 8 + finalCol
+        chessBoard.zobristHash ^= ChessBoardZobrist.TABLE[startType][end_sq]
 
     @staticmethod
     def forwardCastle(chessBoard: ChessBoardProtocal, prevCastleIndex: int):
@@ -142,17 +142,17 @@ class ChessBoardZobrist():
     @staticmethod
     def removePiece(chessBoard: ChessBoardProtocal, initRow: int, initCol: int):
         # XOR int / col
-        startSq = initRow * 8 + initCol
+        start_sq = initRow * 8 + initCol
         startPiece = chessBoard.board[initRow][initCol]
         startType = ChessBoardZobrist.pieceType(startPiece)
-        chessBoard.zobristHash ^= ChessBoardZobrist.TABLE[startType][startSq]
+        chessBoard.zobristHash ^= ChessBoardZobrist.TABLE[startType][start_sq]
 
     @staticmethod
     def restorePiece(chessBoard: ChessBoardProtocal, 
         initRow: int, initCol: int, restorePieceType: int):
         # XOR int / col
-        startSq = initRow * 8 + initCol
-        chessBoard.zobristHash ^= ChessBoardZobrist.TABLE[restorePieceType][startSq]
+        start_sq = initRow * 8 + initCol
+        chessBoard.zobristHash ^= ChessBoardZobrist.TABLE[restorePieceType][start_sq]
 
     @staticmethod
     def addQueen(chessBoard: ChessBoardProtocal, row: int, col: int):
@@ -162,8 +162,8 @@ class ChessBoardZobrist():
         else:
             queenIndex = 7
 
-        endSq = row * 8 + col
-        chessBoard.zobristHash ^= ChessBoardZobrist.TABLE[queenIndex][endSq]
+        end_sq = row * 8 + col
+        chessBoard.zobristHash ^= ChessBoardZobrist.TABLE[queenIndex][end_sq]
 
     @staticmethod
     def addRook(chessBoard: ChessBoardProtocal, row: int, col: int):
@@ -173,8 +173,8 @@ class ChessBoardZobrist():
         else:
             rookIndex = 9
 
-        endSq = row * 8 + col
-        chessBoard.zobristHash ^= ChessBoardZobrist.TABLE[rookIndex][endSq]
+        end_sq = row * 8 + col
+        chessBoard.zobristHash ^= ChessBoardZobrist.TABLE[rookIndex][end_sq]
 
     @staticmethod
     def addBishop(chessBoard: ChessBoardProtocal, row: int, col: int):
@@ -184,8 +184,8 @@ class ChessBoardZobrist():
         else:
             bishopIndex = 11
 
-        endSq = row * 8 + col
-        chessBoard.zobristHash ^= ChessBoardZobrist.TABLE[bishopIndex][endSq]
+        end_sq = row * 8 + col
+        chessBoard.zobristHash ^= ChessBoardZobrist.TABLE[bishopIndex][end_sq]
 
     @staticmethod
     def addKnight(chessBoard: ChessBoardProtocal, row: int, col: int):
@@ -195,8 +195,8 @@ class ChessBoardZobrist():
         else:
             knightIndex = 8
 
-        endSq = row * 8 + col
-        chessBoard.zobristHash ^= ChessBoardZobrist.TABLE[knightIndex][endSq]
+        end_sq = row * 8 + col
+        chessBoard.zobristHash ^= ChessBoardZobrist.TABLE[knightIndex][end_sq]
 
     @staticmethod
     def forwardUpdate(chessBoard: ChessBoardProtocal, cmd: MoveCommand, prevEnPassant: int):

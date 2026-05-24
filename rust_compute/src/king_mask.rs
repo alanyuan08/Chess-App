@@ -78,13 +78,13 @@ pub fn king_moves(mut king_bitboard: u64, occupancy: u64,
 
         while king_moves != 0 {
             let target = king_moves.trailing_zeros() as usize;
-            moves.push(ForwardMove { startSq: king, endSq: target, moveType: MoveFlag::MOVE });
+            moves.push(ForwardMove { start_sq: king, end_sq: target, move_type: MoveFlag::MOVE });
             king_moves &= king_moves - 1;
         }
 
         while king_captures != 0 {
             let target = king_captures.trailing_zeros() as usize;
-            moves.push(ForwardMove { startSq: king, endSq: target, moveType: MoveFlag::CAPTURE });
+            moves.push(ForwardMove { start_sq: king, end_sq: target, move_type: MoveFlag::CAPTURE });
             king_captures &= king_captures - 1;
         }
 
@@ -95,7 +95,7 @@ pub fn king_moves(mut king_bitboard: u64, occupancy: u64,
                     if (WHITE_KINGSIDE_PATH & opponent_attacks) == 0 {
                         if (WHITE_KINGSIDE_MOVE_PATH & occupancy) == 0 {
                             moves.push(
-                                ForwardMove { startSq: king, endSq: king + 2, moveType: MoveFlag::KINGSIDECASTLE }
+                                ForwardMove { start_sq: king, end_sq: king + 2, move_type: MoveFlag::KINGSIDECASTLE }
                             );
                         }
                     }
@@ -105,7 +105,7 @@ pub fn king_moves(mut king_bitboard: u64, occupancy: u64,
                     if (WHITE_QUEENSIDE_PATH & opponent_attacks) == 0 {   
                         if (WHITE_QUEENSIDE_MOVE_PATH & occupancy) == 0 {
                             moves.push(
-                                ForwardMove { startSq: king, endSq: king - 2, moveType: MoveFlag::QUEENSIDECASTLE }
+                                ForwardMove { start_sq: king, end_sq: king - 2, move_type: MoveFlag::QUEENSIDECASTLE }
                             );
                         }
                     }
@@ -116,7 +116,7 @@ pub fn king_moves(mut king_bitboard: u64, occupancy: u64,
                     if (BLACK_KINGSIDE_PATH & opponent_attacks) == 0 {
                         if (BLACK_KINGSIDE_MOVE_PATH & occupancy) == 0 {
                             moves.push(
-                                ForwardMove { startSq: king, endSq: king + 2, moveType: MoveFlag::KINGSIDECASTLE }
+                                ForwardMove { start_sq: king, end_sq: king + 2, move_type: MoveFlag::KINGSIDECASTLE }
                             );
                         }
                     }
@@ -126,7 +126,7 @@ pub fn king_moves(mut king_bitboard: u64, occupancy: u64,
                     if (BLACK_QUEENSIDE_PATH & opponent_attacks) == 0 {   
                         if (BLACK_QUEENSIDE_MOVE_PATH & occupancy) == 0 {
                             moves.push(
-                                ForwardMove { startSq: king, endSq: king - 2, moveType: MoveFlag::QUEENSIDECASTLE }
+                                ForwardMove { start_sq: king, end_sq: king - 2, move_type: MoveFlag::QUEENSIDECASTLE }
                             );
                         }
                     }
