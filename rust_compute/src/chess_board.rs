@@ -303,32 +303,38 @@ impl ChessBoard {
 
         // PV - Variation
         gen_moves.sort_unstable_by_key(|cmd| {
-            // 1. PV Move / Hint Move (Highest Priority)
+            // PV Move - Highest Priotiy
             if Some(cmd) == pv_move_hint.as_ref() {
-                return 0;
+                return i32::MIN;
             }
 
-            // 2. Captures and Promotions (Sorted by value)
+            // --- PV Moves sorted
             match cmd.move_type {
-                // Promotions are ranked highest
-                MoveFlag::PROMOTIONQUEEN | MoveFlag::PROMOTIONROOK |
-                MoveFlag::PROMOTIONBISHOP | MoveFlag::PROMOTIONKNIGHT => 1,
-                MoveFlag::CAPTURE => {
-                    // MVV-LVA calculation (Most Valuable Victim - Least Valuable Aggressor)
-                    // Goal: High victim value + Low attacker value = Highly desirable move
-                    let captured_piece_val=  board_ref.index_piece_value(cmd.end_sq);
-                    let starting_piece_val = board_ref.index_piece_value(cmd.start_sq);
+                MoveFlag::PROMOTIONQUEEN => 10,
+                MoveFlag::PROMOTIONROOK => 20,
+                MoveFlag::PROMOTIONKNIGHT => 30, 
+                MoveFlag::PROMOTIONBISHOP => 40, 
 
-                    let mvv_lva_score = captured_piece_val * 10 - starting_piece_val;
-                    1000 - mvv_lva_score
+                // Standard MVV-LVA: Small attacker taking big victim = lowest key (searched first)
+                MoveFlag::CAPTURE => {
+                    let captured_piece_val=  board_ref.index_piece_value(cmd.end_sq);
+                    let attacking_piece_val = board_ref.index_piece_value(cmd.start_sq);
+
+                    100 - (captured_piece_val * 10) + attacking_piece_val
                 }
-                MoveFlag::ENPASSANT => 991,
-                // Castling is Ranked below Captures
-                MoveFlag::KINGSIDECASTLE | MoveFlag::QUEENSIDECASTLE => 1001,
-                _ => 2000,
+                MoveFlag::ENPASSANT => 150, // Pawn takes Pawn
+
+                // --- Mid Priority ---
+                MoveFlag::KINGSIDECASTLE => 500,
+                MoveFlag::QUEENSIDECASTLE => 510,
+                MoveFlag::PAWNOPENMOVE => 600,
+
+                // --- Searched Last (Highest Key Value) ---
+                MoveFlag::MOVE => 1000, 
+
+                MoveFlag::NULL => i32::MAX,
             }
         });
-
         gen_moves
     }
 

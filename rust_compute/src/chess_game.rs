@@ -9,8 +9,7 @@ use crate::move_command::*;
 use crate::bishop_mask::*;
 use crate::rook_mask::*;
 
-pub const DEPTH: i32 = 7;
-pub const PV_DEPTH: i32 = 7;
+pub const PV_DEPTH: i32 = 8;
 pub const MATE_VALUE: i32 = 3000000;
 
 struct ChessGame {

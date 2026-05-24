@@ -141,16 +141,16 @@ pub fn piece_value(piece_type: BoardPiece) -> i32 {
         },
         BoardPiece::WBISHOP | BoardPiece::BBISHOP |
         BoardPiece::WKNIGHT | BoardPiece::BKNIGHT => {
-            return 3;
+            return 2;
         },
         BoardPiece::WROOK | BoardPiece::BROOK => {
-            return 5;
+            return 3;
         },
         BoardPiece::WQUEEN | BoardPiece::BQUEEN => {
-            return 9;
+            return 4;
         },
         BoardPiece::WKING | BoardPiece::BKING => {
-            return 100;
+            return 5;
         },
         BoardPiece::NONE => {
             panic!("Passed None");
