@@ -10,6 +10,7 @@ use crate::bishop_mask::*;
 use crate::rook_mask::*;
 
 pub const DEPTH: i32 = 7;
+pub const PV_DEPTH: i32 = 7;
 pub const MATE_VALUE: i32 = 3000000;
 
 struct ChessGame {
@@ -107,25 +108,31 @@ impl ChessGame {
     }
 
     // Search Entry Point
-    pub fn root_search(&mut self, depth: i32) -> Option<ForwardMove> {
+    pub fn root_search(&mut self) -> Option<ForwardMove> {
         // Search Time
         let start_time = Instant::now();
 
         let mut gen_moves: Vec<ForwardMove> = Vec::with_capacity(40);
-        let best_move_from_last_depth: Option<&ForwardMove> = None;
-        let result = self.negamax(depth, 0, i32::MIN + 1, i32::MAX - 1, 
-            &mut gen_moves, best_move_from_last_depth);
+        let mut best_move_overall: Option<ForwardMove> = None;
+
+        // Iterative Deepening
+        for depth in 1..=PV_DEPTH {
+            let result = self.negamax(depth, 0, i32::MIN + 1, i32::MAX - 1, 
+                &mut gen_moves, best_move_overall.clone());
+
+            best_move_overall = result.best_move;
+        }
 
         let elapsed_time = start_time.elapsed();
         let node_procesed =  self.nodes_processed.load(Ordering::Relaxed);
         println!("{} Nodes Procesed in {} milliseconds", node_procesed, elapsed_time.as_millis());
 
-        result.best_move
+        best_move_overall
     }
  
     // Process Negamax
     fn negamax(&mut self, depth: i32, ply: i32, mut alpha: i32, beta: i32, 
-        gen_moves: &mut Vec<ForwardMove>, pv_move_hint: Option<&ForwardMove>) -> SearchResult {
+        gen_moves: &mut Vec<ForwardMove>, pv_move_hint: Option<ForwardMove>) -> SearchResult {
         // Three Move Repetition Draw
         if self.check_three_move_repetition() {
             return SearchResult {
@@ -217,7 +224,7 @@ impl ChessGame {
 
     // Quiescence Search 
     fn quiescence_search(&mut self, mut alpha: i32, beta: i32, depth: i32, 
-        gen_moves: &mut Vec<ForwardMove>, pv_move_hint: Option<&ForwardMove>) -> i32 {
+        gen_moves: &mut Vec<ForwardMove>, pv_move_hint: Option<ForwardMove>) -> i32 {
         let mut static_eval = self.board_eval();
         if self.chess_board.active_player() == Side::BLACK {
             static_eval = -static_eval;
@@ -280,7 +287,7 @@ impl ChessGame {
     // The move does not confirm if it introduces a discovered check
     fn all_pseudo_legal_moves<'a>(&mut self, 
         gen_moves: &'a mut Vec<ForwardMove>, 
-        pv_move_hint: Option<&ForwardMove>
+        pv_move_hint: Option<ForwardMove>
     ) -> &'a mut Vec<ForwardMove> {
         let valid_moves = self.chess_board.generate_moves(gen_moves, pv_move_hint);
 
@@ -290,7 +297,7 @@ impl ChessGame {
     // Filter all Capture & Promotion Moves
     fn all_psuedo_legal_quiescence_moves<'a>(&mut self, 
         gen_moves: &'a mut Vec<ForwardMove>, 
-        pv_move_hint: Option<&ForwardMove>
+        pv_move_hint: Option<ForwardMove>
     ) ->  &'a mut Vec<ForwardMove> {
         let pseudo_legal_moves = self.all_pseudo_legal_moves(gen_moves, pv_move_hint);
         
@@ -348,7 +355,7 @@ pub fn compute_next_move<'py>(py: Python<'py>, prev_moves: Vec<String>) -> PyRes
 
     // chess_game.chess_board.timecat_print_fen();
     // println!("{:?}", chess_game.all_pseudo_legal_moves());
-    let best_move = chess_game.root_search(DEPTH);
+    let best_move = chess_game.root_search();
     
     let module = py.import("modelComponent.moveCommand")?;
     let move_command_class = module.getattr("MoveCommand")?;

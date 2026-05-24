@@ -267,7 +267,7 @@ impl ChessBoard {
     // Generate Pseudo-Moves - Only Validate King Safety for Castle / King Movement
     pub fn generate_moves<'a>(&mut self, 
         gen_moves: &'a mut Vec<ForwardMove>, 
-        pv_move_hint: Option<&ForwardMove>
+        pv_move_hint: Option<ForwardMove>
     ) -> &'a mut Vec<ForwardMove> {
         gen_moves.clear();
         
@@ -304,7 +304,7 @@ impl ChessBoard {
         // PV - Variation
         gen_moves.sort_unstable_by_key(|cmd| {
             // 1. PV Move / Hint Move (Highest Priority)
-            if Some(cmd) == pv_move_hint {
+            if Some(cmd) == pv_move_hint.as_ref() {
                 return 0;
             }
 
