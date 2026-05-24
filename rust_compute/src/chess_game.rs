@@ -110,7 +110,11 @@ impl ChessGame {
     pub fn root_search(&mut self, depth: i32) -> Option<ForwardMove> {
         // Search Time
         let start_time = Instant::now();
-        let result = self.negamax(depth, 0, i32::MIN + 1, i32::MAX - 1);
+
+        let mut gen_moves: Vec<ForwardMove> = Vec::with_capacity(40);
+        let best_move_from_last_depth: Option<&ForwardMove> = None;
+        let result = self.negamax(depth, 0, i32::MIN + 1, i32::MAX - 1, 
+            &mut gen_moves, best_move_from_last_depth);
 
         let elapsed_time = start_time.elapsed();
         let node_procesed =  self.nodes_processed.load(Ordering::Relaxed);
@@ -120,7 +124,8 @@ impl ChessGame {
     }
  
     // Process Negamax
-    fn negamax(&mut self, depth: i32, ply: i32, mut alpha: i32, beta: i32) -> SearchResult {
+    fn negamax(&mut self, depth: i32, ply: i32, mut alpha: i32, beta: i32, 
+        gen_moves: &mut Vec<ForwardMove>, pv_move_hint: Option<&ForwardMove>) -> SearchResult {
         // Three Move Repetition Draw
         if self.check_three_move_repetition() {
             return SearchResult {
@@ -132,7 +137,7 @@ impl ChessGame {
         // Leaf Node Condition -> Drop into Quiescence Search
         if depth == 0 {
             return SearchResult {
-                score: self.quiescence_search(alpha, beta, 0),
+                score: self.quiescence_search(alpha, beta, 0, gen_moves, pv_move_hint),
                 best_move: None,
             }
         }
@@ -141,9 +146,11 @@ impl ChessGame {
         let mut max_score = i32::MIN;
         let mut legal_moves_played = 0;
 
-        for forward_move in self.all_pseudo_legal_moves() {
+        let moves = self.all_pseudo_legal_moves(gen_moves, pv_move_hint).to_vec(); 
+
+        for forward_move in &moves {
             // Push move (handles UCI, board state, hash, and history internally)
-            self.process_forward_move(forward_move);
+            self.process_forward_move(*forward_move);
 
             // Psuedo legal move exposes check, undo move
             if self.chess_board.is_previous_player_king_in_check() {
@@ -153,10 +160,10 @@ impl ChessGame {
 
             // Move is Legal, Forward Move Time Cat
             legal_moves_played += 1;
-            self.process_time_cat_forward(forward_move);
+            self.process_time_cat_forward(*forward_move);
 
             // Recursive Negamax Call
-            let negamax_result = self.negamax(depth - 1, ply + 1, -beta, -alpha);
+            let negamax_result = self.negamax(depth - 1, ply + 1, -beta, -alpha, gen_moves, pv_move_hint);
             let score = -negamax_result.score;
 
             // Undo Move + TimeCat
@@ -196,7 +203,7 @@ impl ChessGame {
             }
         }
 
-        SearchResult { score: max_score, best_move }
+        SearchResult { score: max_score, best_move: best_move.copied() }
     }
 
     fn board_eval(&mut self) -> i32 {
@@ -209,7 +216,8 @@ impl ChessGame {
     }
 
     // Quiescence Search 
-    fn quiescence_search(&mut self, mut alpha: i32, beta: i32, depth: i32) -> i32 {
+    fn quiescence_search(&mut self, mut alpha: i32, beta: i32, depth: i32, 
+        gen_moves: &mut Vec<ForwardMove>, pv_move_hint: Option<&ForwardMove>) -> i32 {
         let mut static_eval = self.board_eval();
         if self.chess_board.active_player() == Side::BLACK {
             static_eval = -static_eval;
@@ -234,10 +242,12 @@ impl ChessGame {
             alpha = static_eval;
         }
 
+        let quiescence_moves = self.all_psuedo_legal_quiescence_moves(gen_moves, pv_move_hint).to_vec(); 
+
         // Filter and iterate through quiescence moves
-        for forward_move in self.all_psuedo_legal_quiescence_moves() {
+        for forward_move in &quiescence_moves {
             // Push move (handles UCI, board state, hash, and history internally)
-            self.process_forward_move(forward_move);
+            self.process_forward_move(*forward_move);
             
             // Psuedo legal move exposes check, undo move
             if self.chess_board.is_previous_player_king_in_check() {
@@ -246,10 +256,10 @@ impl ChessGame {
             }
 
             // Move is Legal, Forward Move Time Cat
-            self.process_time_cat_forward(forward_move);
+            self.process_time_cat_forward(*forward_move);
 
             // Negamax search call
-            let score = -self.quiescence_search(-beta, -alpha, depth + 1);
+            let score = -self.quiescence_search(-beta, -alpha, depth + 1, gen_moves, pv_move_hint);
             
             // Undo Move + TimeCat
             self.chess_board.timecat_pop_move();
@@ -267,46 +277,33 @@ impl ChessGame {
         alpha
     }
 
-    // Sort used for Principal Variation Search
-    fn get_move_priority(&self, cmd: &ForwardMove) -> i32 {
-        match cmd.move_type {
-            MoveFlag::PROMOTIONQUEEN | MoveFlag::PROMOTIONROOK |
-            MoveFlag::PROMOTIONBISHOP | MoveFlag::PROMOTIONKNIGHT => 90000,
-            MoveFlag::CAPTURE => {
-                let captured_piece_val=  self.chess_board.index_piece_value(cmd.end_sq);
-                let starting_piece_val = self.chess_board.index_piece_value(cmd.start_sq);
-
-                (captured_piece_val * 10) - starting_piece_val
-            },
-            MoveFlag::ENPASSANT => 900,
-            MoveFlag::KINGSIDECASTLE | MoveFlag::QUEENSIDECASTLE => 50,
-            _ => 0,
-        }
-    }
-
     // The move does not confirm if it introduces a discovered check
-    fn all_pseudo_legal_moves(&mut self) -> Vec<ForwardMove> {
-        let mut valid_moves = self.chess_board.generate_moves();
-        valid_moves.sort_unstable_by_key(|mov| std::cmp::Reverse(self.get_move_priority(mov)));
+    fn all_pseudo_legal_moves<'a>(&mut self, 
+        gen_moves: &'a mut Vec<ForwardMove>, 
+        pv_move_hint: Option<&ForwardMove>
+    ) -> &'a mut Vec<ForwardMove> {
+        let valid_moves = self.chess_board.generate_moves(gen_moves, pv_move_hint);
 
         valid_moves
     }
 
     // Filter all Capture & Promotion Moves
-    fn all_psuedo_legal_quiescence_moves(&mut self) -> Vec<ForwardMove> {
-        let pseudo_legal_moves = self.all_pseudo_legal_moves();
+    fn all_psuedo_legal_quiescence_moves<'a>(&mut self, 
+        gen_moves: &'a mut Vec<ForwardMove>, 
+        pv_move_hint: Option<&ForwardMove>
+    ) ->  &'a mut Vec<ForwardMove> {
+        let pseudo_legal_moves = self.all_pseudo_legal_moves(gen_moves, pv_move_hint);
         
+        pseudo_legal_moves.retain(|cmd| {
+            matches!(
+                cmd.move_type,
+                MoveFlag::PROMOTIONQUEEN | MoveFlag::PROMOTIONROOK |
+                MoveFlag::PROMOTIONBISHOP | MoveFlag::PROMOTIONKNIGHT | 
+                MoveFlag::CAPTURE | MoveFlag::ENPASSANT
+            )
+        });
+
         pseudo_legal_moves
-            .into_iter()
-            .filter(|cmd| {
-                matches!(
-                    cmd.move_type,
-                    MoveFlag::PROMOTIONQUEEN | MoveFlag::PROMOTIONROOK |
-                    MoveFlag::PROMOTIONBISHOP | MoveFlag::PROMOTIONKNIGHT | 
-                    MoveFlag::CAPTURE | MoveFlag::ENPASSANT
-                )
-            })
-            .collect()
     }
 
 }

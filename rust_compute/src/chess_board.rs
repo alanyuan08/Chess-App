@@ -265,8 +265,12 @@ impl ChessBoard {
     }
 
     // Generate Pseudo-Moves - Only Validate King Safety for Castle / King Movement
-    pub fn generate_moves(&mut self) -> Vec<ForwardMove> {
-        let mut gen_moves: Vec<ForwardMove> = Vec::with_capacity(218);
+    pub fn generate_moves<'a>(&mut self, 
+        gen_moves: &'a mut Vec<ForwardMove>, 
+        pv_move_hint: Option<&ForwardMove>
+    ) -> &'a mut Vec<ForwardMove> {
+        gen_moves.clear();
+        
         let player_index = self.player_index(self.active_player);
 
         let opp_index = self.player_index(self.opponent_player());
@@ -274,26 +278,56 @@ impl ChessBoard {
 
         // Generate Moves
         king_moves(self.kings[player_index], self.occupied, _opponent_attack_targets,
-            self.active_player, self.castling_rights, self.all_pieces[opp_index], &mut gen_moves);
+            self.active_player, self.castling_rights, self.all_pieces[opp_index], gen_moves);
 
-        knight_moves(self.knights[player_index], self.occupied, self.all_pieces[opp_index], &mut gen_moves);
+        knight_moves(self.knights[player_index], self.occupied, self.all_pieces[opp_index], gen_moves);
 
-        rook_moves(self.rooks[player_index], self.occupied, self.all_pieces[opp_index], &mut gen_moves);
+        rook_moves(self.rooks[player_index], self.occupied, self.all_pieces[opp_index], gen_moves);
 
-        bishop_moves(self.bishops[player_index], self.occupied, self.all_pieces[opp_index], &mut gen_moves);
+        bishop_moves(self.bishops[player_index], self.occupied, self.all_pieces[opp_index], gen_moves);
 
-        queen_moves(self.queens[player_index], self.occupied, self.all_pieces[opp_index], &mut gen_moves);
+        queen_moves(self.queens[player_index], self.occupied, self.all_pieces[opp_index], gen_moves);
 
         match self.active_player {
             Side::WHITE => {
                 white_pawn_moves(self.pawns[player_index], self.occupied, 
-                    self.all_pieces[opp_index], self.en_passant, &mut gen_moves);
+                    self.all_pieces[opp_index], self.en_passant, gen_moves);
             },
             Side::BLACK => {
                 black_pawn_moves(self.pawns[player_index], self.occupied, 
-                    self.all_pieces[opp_index], self.en_passant, &mut gen_moves);
+                    self.all_pieces[opp_index], self.en_passant, gen_moves);
             }
         }
+
+        let board_ref = &*self;
+
+        // PV - Variation
+        gen_moves.sort_unstable_by_key(|cmd| {
+            // 1. PV Move / Hint Move (Highest Priority)
+            if Some(cmd) == pv_move_hint {
+                return 0;
+            }
+
+            // 2. Captures and Promotions (Sorted by value)
+            match cmd.move_type {
+                // Promotions are ranked highest
+                MoveFlag::PROMOTIONQUEEN | MoveFlag::PROMOTIONROOK |
+                MoveFlag::PROMOTIONBISHOP | MoveFlag::PROMOTIONKNIGHT => 1,
+                MoveFlag::CAPTURE => {
+                    // MVV-LVA calculation (Most Valuable Victim - Least Valuable Aggressor)
+                    // Goal: High victim value + Low attacker value = Highly desirable move
+                    let captured_piece_val=  board_ref.index_piece_value(cmd.end_sq);
+                    let starting_piece_val = board_ref.index_piece_value(cmd.start_sq);
+
+                    let mvv_lva_score = captured_piece_val * 10 - starting_piece_val;
+                    1000 - mvv_lva_score
+                }
+                MoveFlag::ENPASSANT => 991,
+                // Castling is Ranked below Captures
+                MoveFlag::KINGSIDECASTLE | MoveFlag::QUEENSIDECASTLE => 1001,
+                _ => 2000,
+            }
+        });
 
         gen_moves
     }

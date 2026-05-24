@@ -137,20 +137,20 @@ pub enum BoardPiece {
 pub fn piece_value(piece_type: BoardPiece) -> i32 {
     match piece_type {
         BoardPiece::WPAWN | BoardPiece::BPAWN => {
-            return 100;
+            return 1;
         },
         BoardPiece::WBISHOP | BoardPiece::BBISHOP |
         BoardPiece::WKNIGHT | BoardPiece::BKNIGHT => {
-            return 300;
+            return 3;
         },
         BoardPiece::WROOK | BoardPiece::BROOK => {
-            return 500;
+            return 5;
         },
         BoardPiece::WQUEEN | BoardPiece::BQUEEN => {
-            return 900;
+            return 9;
         },
         BoardPiece::WKING | BoardPiece::BKING => {
-            return 10000;
+            return 100;
         },
         BoardPiece::NONE => {
             panic!("Passed None");
