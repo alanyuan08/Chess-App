@@ -227,7 +227,7 @@ pub fn compute_rook_magic(sq: usize) -> u64 {
 }
 
 pub fn rook_moves(mut rook_bitboard: u64, occupancy: u64, 
-    opponent_pieces: u64, moves: &mut Vec<ForwardMove>)  {
+    opponent_pieces: u64, moves: &mut Vec<ForwardMove>, mailbox: [BoardPiece; 64])  {
 
     while rook_bitboard != 0 {
         let rook = rook_bitboard.trailing_zeros() as usize;
@@ -239,13 +239,21 @@ pub fn rook_moves(mut rook_bitboard: u64, occupancy: u64,
 
         while rook_moves != 0 {
             let target = rook_moves.trailing_zeros() as usize;
-            moves.push(ForwardMove { start_sq: rook, end_sq: target, move_type: MoveFlag::MOVE });
+            moves.push(ForwardMove { 
+                start_sq: rook, end_sq: target, move_type: MoveFlag::MOVE, pv_score: 1000 
+            });
             rook_moves &= rook_moves - 1;
         }
 
         while rook_captures != 0 {
             let target = rook_captures.trailing_zeros() as usize;
-            moves.push(ForwardMove { start_sq: rook, end_sq: target, move_type: MoveFlag::CAPTURE });
+
+            let captured_piece_val = piece_value(mailbox[target]);
+            let pv_score = 100 - (captured_piece_val * 10) + 3; 
+
+            moves.push(ForwardMove { 
+                start_sq: rook, end_sq: target, move_type: MoveFlag::CAPTURE, pv_score 
+            });
             rook_captures &= rook_captures - 1;
         }
 

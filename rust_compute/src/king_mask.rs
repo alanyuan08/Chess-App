@@ -64,7 +64,7 @@ pub const KING_ATTACKS: [u64; 64] = {
 
 pub fn king_moves(mut king_bitboard: u64, occupancy: u64, 
     opponent_attacks: u64, active_player: Side, castling_rights: u8,
-    opponent_pieces: u64, moves: &mut Vec<ForwardMove>)  {
+    opponent_pieces: u64, moves: &mut Vec<ForwardMove>, mailbox: [BoardPiece; 64])  {
 
     // Check if King Capture / Move goes into Check
     while king_bitboard != 0 {
@@ -78,13 +78,21 @@ pub fn king_moves(mut king_bitboard: u64, occupancy: u64,
 
         while king_moves != 0 {
             let target = king_moves.trailing_zeros() as usize;
-            moves.push(ForwardMove { start_sq: king, end_sq: target, move_type: MoveFlag::MOVE });
+            moves.push(ForwardMove { 
+                start_sq: king, end_sq: target, move_type: MoveFlag::MOVE, pv_score: 1000
+            });
             king_moves &= king_moves - 1;
         }
 
         while king_captures != 0 {
             let target = king_captures.trailing_zeros() as usize;
-            moves.push(ForwardMove { start_sq: king, end_sq: target, move_type: MoveFlag::CAPTURE });
+            
+            let captured_piece_val = piece_value(mailbox[target]);
+            let pv_score = 100 - (captured_piece_val * 10) + 5; 
+
+            moves.push(ForwardMove { 
+                start_sq: king, end_sq: target, move_type: MoveFlag::CAPTURE, pv_score
+            });
             king_captures &= king_captures - 1;
         }
 
@@ -95,7 +103,9 @@ pub fn king_moves(mut king_bitboard: u64, occupancy: u64,
                     if (WHITE_KINGSIDE_PATH & opponent_attacks) == 0 {
                         if (WHITE_KINGSIDE_MOVE_PATH & occupancy) == 0 {
                             moves.push(
-                                ForwardMove { start_sq: king, end_sq: king + 2, move_type: MoveFlag::KINGSIDECASTLE }
+                                ForwardMove { 
+                                    start_sq: king, end_sq: king + 2, move_type: MoveFlag::KINGSIDECASTLE, pv_score: 500
+                                }
                             );
                         }
                     }
@@ -105,7 +115,9 @@ pub fn king_moves(mut king_bitboard: u64, occupancy: u64,
                     if (WHITE_QUEENSIDE_PATH & opponent_attacks) == 0 {   
                         if (WHITE_QUEENSIDE_MOVE_PATH & occupancy) == 0 {
                             moves.push(
-                                ForwardMove { start_sq: king, end_sq: king - 2, move_type: MoveFlag::QUEENSIDECASTLE }
+                                ForwardMove { 
+                                    start_sq: king, end_sq: king - 2, move_type: MoveFlag::QUEENSIDECASTLE, pv_score: 510
+                                }
                             );
                         }
                     }
@@ -116,7 +128,9 @@ pub fn king_moves(mut king_bitboard: u64, occupancy: u64,
                     if (BLACK_KINGSIDE_PATH & opponent_attacks) == 0 {
                         if (BLACK_KINGSIDE_MOVE_PATH & occupancy) == 0 {
                             moves.push(
-                                ForwardMove { start_sq: king, end_sq: king + 2, move_type: MoveFlag::KINGSIDECASTLE }
+                                ForwardMove { 
+                                    start_sq: king, end_sq: king + 2, move_type: MoveFlag::KINGSIDECASTLE, pv_score: 500 
+                                }
                             );
                         }
                     }
@@ -126,7 +140,9 @@ pub fn king_moves(mut king_bitboard: u64, occupancy: u64,
                     if (BLACK_QUEENSIDE_PATH & opponent_attacks) == 0 {   
                         if (BLACK_QUEENSIDE_MOVE_PATH & occupancy) == 0 {
                             moves.push(
-                                ForwardMove { start_sq: king, end_sq: king - 2, move_type: MoveFlag::QUEENSIDECASTLE }
+                                ForwardMove { 
+                                    start_sq: king, end_sq: king - 2, move_type: MoveFlag::QUEENSIDECASTLE, pv_score: 510 
+                                }
                             );
                         }
                     }

@@ -3,6 +3,7 @@ pub struct ForwardMove {
     pub start_sq: usize,
     pub end_sq: usize,
     pub move_type: MoveFlag,
+    pub pv_score: i32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

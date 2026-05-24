@@ -3,7 +3,7 @@ use crate::rook_mask::*;
 use crate::move_command::*;
 
 pub fn queen_moves(mut queen_bitboard: u64, occupancy: u64, 
-    opponent_pieces: u64, moves: &mut Vec<ForwardMove>)  {
+    opponent_pieces: u64, moves: &mut Vec<ForwardMove>, mailbox: [BoardPiece; 64])  {
 
     while queen_bitboard != 0 {
         let queen = queen_bitboard.trailing_zeros() as usize;
@@ -16,13 +16,21 @@ pub fn queen_moves(mut queen_bitboard: u64, occupancy: u64,
 
         while queen_moves != 0 {
             let target = queen_moves.trailing_zeros() as usize;
-            moves.push(ForwardMove { start_sq: queen, end_sq: target, move_type: MoveFlag::MOVE });
+            moves.push(ForwardMove { 
+                start_sq: queen, end_sq: target, move_type: MoveFlag::MOVE, pv_score: 1000 
+            });
             queen_moves &= queen_moves - 1;
         }
 
         while queen_captures != 0 {
             let target = queen_captures.trailing_zeros() as usize;
-            moves.push(ForwardMove { start_sq: queen, end_sq: target, move_type: MoveFlag::CAPTURE });
+
+            let captured_piece_val = piece_value(mailbox[target]);
+            let pv_score = 100 - (captured_piece_val * 10) + 5; 
+
+            moves.push(ForwardMove { 
+                start_sq: queen, end_sq: target, move_type: MoveFlag::CAPTURE, pv_score 
+            });
             queen_captures &= queen_captures - 1;
         }
 

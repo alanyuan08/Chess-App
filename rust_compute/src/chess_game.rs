@@ -1,5 +1,6 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
+use std::time::Duration;
 use std::collections::HashMap;
 use pyo3::prelude::*;
 
@@ -110,12 +111,17 @@ impl ChessGame {
     pub fn root_search(&mut self) -> Option<ForwardMove> {
         // Search Time
         let start_time = Instant::now();
+        let time_limit = Duration::from_secs(20);
 
         let mut gen_moves: Vec<ForwardMove> = Vec::with_capacity(40);
         let mut best_move_overall: Option<ForwardMove> = None;
 
         // Iterative Deepening
         for depth in 1..=PV_DEPTH {
+            if start_time.elapsed() >= time_limit {
+                break;
+            }
+            
             let result = self.negamax(depth, 0, i32::MIN + 1, i32::MAX - 1, 
                 &mut gen_moves, best_move_overall.clone());
 
@@ -143,7 +149,7 @@ impl ChessGame {
         // Leaf Node Condition -> Drop into Quiescence Search
         if depth == 0 {
             return SearchResult {
-                score: self.quiescence_search(alpha, beta, 0, gen_moves, pv_move_hint),
+                score: self.quiescence_search(alpha, beta, 0, gen_moves),
                 best_move: None,
             }
         }
@@ -169,7 +175,7 @@ impl ChessGame {
             self.process_time_cat_forward(*forward_move);
 
             // Recursive Negamax Call
-            let negamax_result = self.negamax(depth - 1, ply + 1, -beta, -alpha, gen_moves, pv_move_hint);
+            let negamax_result = self.negamax(depth - 1, ply + 1, -beta, -alpha, gen_moves, None);
             let score = -negamax_result.score;
 
             // Undo Move + TimeCat
@@ -223,19 +229,19 @@ impl ChessGame {
 
     // Quiescence Search 
     fn quiescence_search(&mut self, mut alpha: i32, beta: i32, depth: i32, 
-        gen_moves: &mut Vec<ForwardMove>, pv_move_hint: Option<ForwardMove>) -> i32 {
+        gen_moves: &mut Vec<ForwardMove>) -> i32 {
         let mut static_eval = self.board_eval();
         if self.chess_board.active_player() == Side::BLACK {
             static_eval = -static_eval;
         }
 
-        if depth > 50 {
-            return static_eval;
-        }
-
         // Three Move Repetition Draw
         if self.check_three_move_repetition() {
             return 0;
+        }
+
+        if depth > 50 {
+            return static_eval;
         }
 
         // Beta cutoff
@@ -248,7 +254,7 @@ impl ChessGame {
             alpha = static_eval;
         }
 
-        let quiescence_moves = self.all_psuedo_legal_quiescence_moves(gen_moves, pv_move_hint).to_vec(); 
+        let quiescence_moves = self.all_psuedo_legal_quiescence_moves(gen_moves).to_vec(); 
 
         // Filter and iterate through quiescence moves
         for forward_move in &quiescence_moves {
@@ -265,7 +271,7 @@ impl ChessGame {
             self.process_time_cat_forward(*forward_move);
 
             // Negamax search call
-            let score = -self.quiescence_search(-beta, -alpha, depth + 1, gen_moves, pv_move_hint);
+            let score = -self.quiescence_search(-beta, -alpha, depth + 1, gen_moves);
             
             // Undo Move + TimeCat
             self.chess_board.timecat_pop_move();
@@ -295,10 +301,9 @@ impl ChessGame {
 
     // Filter all Capture & Promotion Moves
     fn all_psuedo_legal_quiescence_moves<'a>(&mut self, 
-        gen_moves: &'a mut Vec<ForwardMove>, 
-        pv_move_hint: Option<ForwardMove>
+        gen_moves: &'a mut Vec<ForwardMove>
     ) ->  &'a mut Vec<ForwardMove> {
-        let pseudo_legal_moves = self.all_pseudo_legal_moves(gen_moves, pv_move_hint);
+        let pseudo_legal_moves = self.all_pseudo_legal_moves(gen_moves, None);
         
         pseudo_legal_moves.retain(|cmd| {
             matches!(
@@ -344,6 +349,7 @@ fn parse_forward_move(raw_move: &String) -> ForwardMove {
         start_sq: (result[1] * 8 + result[0]) as usize, 
         end_sq: (result[3] * 8 + result[2]) as usize, 
         move_type: MoveFlag::try_from(result[4]).expect("Corrupted move data"),
+        pv_score: 0,
     }
 }
 
