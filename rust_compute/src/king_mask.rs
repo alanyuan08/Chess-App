@@ -1,5 +1,6 @@
 use crate::move_command::*;
 use crate::chess_board::*;
+use arrayvec::ArrayVec;
 
 // White: Rank 1 (Indices 0-7)
 // e1=4, f1=5, g1=6
@@ -64,7 +65,8 @@ pub const KING_ATTACKS: [u64; 64] = {
 
 pub fn king_moves(mut king_bitboard: u64, occupancy: u64, 
     opponent_attacks: u64, active_player: Side, castling_rights: u8,
-    opponent_pieces: u64, moves: &mut Vec<ForwardMove>, mailbox: [BoardPiece; 64])  {
+    opponent_pieces: u64, moves: &mut ArrayVec::<ForwardMove, 256>,
+    mailbox: [BoardPiece; 64])  {
 
     // Check if King Capture / Move goes into Check
     while king_bitboard != 0 {

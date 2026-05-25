@@ -554,6 +554,7 @@ dependencies = [
 name = "rust_compute"
 version = "0.1.0"
 dependencies = [
+ "arrayvec",
  "const-random",
  "pyo3",
  "rand",

@@ -1,5 +1,6 @@
 use std::sync::LazyLock;
 use crate::move_command::*;
+use arrayvec::ArrayVec;
 
 // Mask the Irrelevant Bits no in the Diagonal Path
 pub const BISHOP_MASKS: [u64; 64] = {
@@ -202,7 +203,7 @@ pub fn compute_bishop_magic(sq: usize) -> u64 {
 }
 
 pub fn bishop_moves(mut bishop_bitboard: u64, occupancy: u64, 
-    opponent_pieces: u64, moves: &mut Vec<ForwardMove>, mailbox: [BoardPiece; 64])  {
+    opponent_pieces: u64, moves: &mut ArrayVec::<ForwardMove, 256>, mailbox: [BoardPiece; 64])  {
 
     while bishop_bitboard != 0 {
         let bishop = bishop_bitboard.trailing_zeros() as usize;

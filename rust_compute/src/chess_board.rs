@@ -6,6 +6,7 @@ use crate::rook_mask::*;
 use crate::queen_mask::*;
 use crate::move_command::*;
 use crate::zobrist_hash::*;
+use arrayvec::ArrayVec;
 use timecat::prelude::*;
 
 // 0 -> White / 1 -> Black
@@ -261,9 +262,9 @@ impl ChessBoard {
 
     // Generate Pseudo-Moves - Only Validate King Safety for Castle / King Movement
     pub fn generate_moves(&mut self, 
-        gen_moves: &mut Vec<ForwardMove>, 
+        gen_moves: &mut ArrayVec::<ForwardMove, 256>, 
         pv_move_hint: Option<ForwardMove>
-    ) -> usize {
+    ) {
         let start_idx = gen_moves.len();
         
         let player_index = self.player_index(self.active_player);
@@ -304,8 +305,6 @@ impl ChessBoard {
             let is_pv = Some(cmd) == pv_move_hint.as_ref();
             (!is_pv, cmd.pv_score)
         });
-
-        current_moves.len()
     }
 
     // helper method for move piece

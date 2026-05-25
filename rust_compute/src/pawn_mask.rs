@@ -1,4 +1,5 @@
 use crate::move_command::*;
+use arrayvec::ArrayVec;
 
 const NOT_A_FILE: u64 = 0xFEFE_FEFE_FEFE_FEFE;
 const NOT_H_FILE: u64 = 0x7F7F_7F7F_7F7F_7F7F;
@@ -31,7 +32,7 @@ pub fn black_pawn_attacks(black_pawns: u64) -> u64 {
 }
 
 pub fn white_pawn_moves(white_pawns: u64, occupancy: u64, black_pieces: u64, 
-    en_passant_board: u64, moves: &mut Vec<ForwardMove>, mailbox: [BoardPiece; 64])  {
+    en_passant_board: u64, moves: &mut ArrayVec::<ForwardMove, 256>, mailbox: [BoardPiece; 64])  {
 
     // --- Aggregating Single Pushes (No Promotion) ---
     let mut one_move = ((white_pawns & !RANK_7) << 8) & !occupancy;
@@ -164,7 +165,7 @@ pub fn white_pawn_moves(white_pawns: u64, occupancy: u64, black_pieces: u64,
 }
 
 pub fn black_pawn_moves(black_pawns: u64, occupancy: u64, white_pieces: u64, 
-    en_passant_board: u64, moves: &mut Vec<ForwardMove>, mailbox: [BoardPiece; 64])  {
+    en_passant_board: u64, moves: &mut ArrayVec::<ForwardMove, 256>, mailbox: [BoardPiece; 64])  {
 
     // --- Aggregating Single Pushes (No Promotion) ---
     let mut one_move = ((black_pawns & !RANK_2) >> 8) & !occupancy;

@@ -1,5 +1,6 @@
 use std::sync::LazyLock;
 use crate::move_command::*;
+use arrayvec::ArrayVec;
 
 // Mask the Irrelevant Bits no in the Diagonal Path
 pub const ROOK_MASKS: [u64; 64] = {
@@ -149,8 +150,8 @@ pub const fn compute_rook_attacks(sq: usize, occupancy: u64) -> u64 {
         // Only skip the LAST square in each direction
         while cur_r >= 0 && cur_r <= 7 {
             let target_bit = 1u64 << (cur_r * 8 + f);
-
             attacks |= target_bit;
+            
             if (occupancy & target_bit) != 0 {
                 break;
             }
@@ -227,7 +228,8 @@ pub fn compute_rook_magic(sq: usize) -> u64 {
 }
 
 pub fn rook_moves(mut rook_bitboard: u64, occupancy: u64, 
-    opponent_pieces: u64, moves: &mut Vec<ForwardMove>, mailbox: [BoardPiece; 64])  {
+    opponent_pieces: u64, moves: &mut ArrayVec::<ForwardMove, 256>, 
+    mailbox: [BoardPiece; 64])  {
 
     while rook_bitboard != 0 {
         let rook = rook_bitboard.trailing_zeros() as usize;

@@ -1,4 +1,5 @@
 use crate::move_command::*;
+use arrayvec::ArrayVec;
 
 // Compute Knight Attack on Compile
 pub const KNIGHT_ATTACKS: [u64; 64] = {
@@ -30,7 +31,8 @@ pub const KNIGHT_ATTACKS: [u64; 64] = {
 };
 
 pub fn knight_moves(mut knight_bitboard: u64, occupancy: u64, 
-    opponent_pieces: u64, moves: &mut Vec<ForwardMove>, mailbox: [BoardPiece; 64])  {
+    opponent_pieces: u64, moves: &mut ArrayVec::<ForwardMove, 256>, 
+    mailbox: [BoardPiece; 64])  {
 
     while knight_bitboard != 0 {
         let knight = knight_bitboard.trailing_zeros() as usize;

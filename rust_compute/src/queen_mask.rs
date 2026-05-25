@@ -1,9 +1,10 @@
 use crate::bishop_mask::*;
 use crate::rook_mask::*;
 use crate::move_command::*;
+use arrayvec::ArrayVec;
 
 pub fn queen_moves(mut queen_bitboard: u64, occupancy: u64, 
-    opponent_pieces: u64, moves: &mut Vec<ForwardMove>, mailbox: [BoardPiece; 64])  {
+    opponent_pieces: u64, moves: &mut ArrayVec::<ForwardMove, 256>, mailbox: [BoardPiece; 64])  {
 
     while queen_bitboard != 0 {
         let queen = queen_bitboard.trailing_zeros() as usize;
@@ -17,7 +18,7 @@ pub fn queen_moves(mut queen_bitboard: u64, occupancy: u64,
         while queen_moves != 0 {
             let target = queen_moves.trailing_zeros() as usize;
             moves.push(ForwardMove { 
-                start_sq: queen, end_sq: target, move_type: MoveFlag::MOVE, pv_score: 1000 
+                start_sq: queen, end_sq: target, move_type: MoveFlag::MOVE, pv_score: 200 
             });
             queen_moves &= queen_moves - 1;
         }
