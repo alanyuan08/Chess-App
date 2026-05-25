@@ -46,6 +46,7 @@ class ChessGameModel():
         # Three Move Repetition Draw
         if self.chessBoard.checkThreeMoveRepetiton():
             self.gameState = GameState.DRAW
+            return
 
         # No Moves - Determine Checkmate or Draw
         if len(self.chessBoard.allValidMoves()) == 0:
