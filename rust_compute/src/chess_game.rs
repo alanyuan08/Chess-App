@@ -48,6 +48,7 @@ impl ChessGame {
 
             let move_command: ForwardMove = parse_forward_move(prev_move);
             self.process_forward_move(move_command);
+            
             self.process_time_cat_forward(move_command);
         }
     }
@@ -111,7 +112,7 @@ impl ChessGame {
     pub fn root_search(&mut self) -> Option<ForwardMove> {
         // Search Time
         let start_time = Instant::now();
-        let time_limit = Duration::from_secs(20);
+        let time_limit = Duration::from_secs(40);
 
         let mut best_move_overall: Option<ForwardMove> = None;
 
@@ -122,8 +123,10 @@ impl ChessGame {
             }
             
             let result = self.negamax(depth, 0, i32::MIN + 1, i32::MAX - 1, best_move_overall);
-            best_move_overall = result.best_move.clone();
+            best_move_overall = result.best_move;
         }
+        
+        self.chess_board.debug_queen_moves();
 
         let elapsed_time = start_time.elapsed();
         let node_procesed =  self.nodes_processed.load(Ordering::Relaxed);
@@ -290,7 +293,6 @@ impl ChessGame {
         gen_moves: &mut ArrayVec::<ForwardMove, 256>
     ) {
         self.chess_board.generate_moves(gen_moves, None);
-
         gen_moves.retain(|cmd| {
             matches!(
                 cmd.move_type,
