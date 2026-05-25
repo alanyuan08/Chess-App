@@ -11,7 +11,7 @@ use crate::move_command::*;
 use crate::bishop_mask::*;
 use crate::rook_mask::*;
 
-pub const PV_DEPTH: i32 = 8;
+pub const PV_DEPTH: i32 = 6;
 pub const MATE_VALUE: i32 = 3000000;
 
 struct ChessGame {
@@ -126,8 +126,6 @@ impl ChessGame {
             best_move_overall = result.best_move;
         }
         
-        self.chess_board.debug_queen_moves();
-
         let elapsed_time = start_time.elapsed();
         let node_procesed =  self.nodes_processed.load(Ordering::Relaxed);
         println!("{} Nodes Procesed in {} milliseconds", node_procesed, elapsed_time.as_millis());
@@ -149,7 +147,7 @@ impl ChessGame {
         // Leaf Node Condition -> Drop into Quiescence Search
         if depth == 0 {
             return SearchResult {
-                score: self.quiescence_search(alpha, beta, 0),
+                score: self.quiescence_search(alpha, beta, ply),
                 best_move: None,
             }
         }
@@ -227,9 +225,8 @@ impl ChessGame {
 
     // Quiescence Search 
     fn quiescence_search(&mut self, mut alpha: i32, beta: i32, depth: i32) -> i32 {
-        let mut static_eval = self.board_eval();
-        if self.chess_board.active_player() == Side::BLACK {
-            static_eval = -static_eval;
+        if self.chess_board.is_previous_player_king_in_check() {
+            return alpha; 
         }
 
         // Three Move Repetition Draw
@@ -237,23 +234,36 @@ impl ChessGame {
             return 0;
         }
 
+        let mut static_eval = self.board_eval();
+        if self.chess_board.active_player() == Side::BLACK {
+            static_eval = -static_eval;
+        }
+
         if depth > 50 {
             return static_eval;
         }
 
-        // Beta cutoff
-        if static_eval >= beta {
-            return beta;
-        }
+        let king_in_check = self.chess_board.is_in_check(); 
 
-        // Update alpha (standing pat)
-        if static_eval > alpha {
-            alpha = static_eval;
+        if !king_in_check {
+            // Only allow standing pat if your king is perfectly safe
+            if static_eval >= beta {
+                return beta;
+            }
+            if static_eval > alpha {
+                alpha = static_eval;
+            }
         }
-        
         // Generate strictly legal tactical moves directly onto the global stack
         let mut gen_moves = ArrayVec::<ForwardMove, 256>::new();
-        self.filter_psuedo_legal_quiescence_moves(&mut gen_moves);
+
+        if king_in_check {
+            // King IS in check: Generate all Moves
+            self.chess_board.generate_moves(&mut gen_moves, None);
+        } else {
+            // King is NOT in check: Only generate captures, promotions, etc.
+            self.filter_psuedo_legal_quiescence_moves(&mut gen_moves);
+        }
 
         // Quiscence Search
         for forward_move in &gen_moves {

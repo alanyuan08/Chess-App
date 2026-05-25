@@ -260,17 +260,6 @@ impl ChessBoard {
         (self.kings[current_player_index] & _curr_opp_attack_targets) != 0
     }
 
-    pub fn debug_queen_moves(&mut self)  {
-        let player_index = self.player_index(self.active_player);
-        let opp_index = self.player_index(self.opponent_player());
-        let mut gen_moves = ArrayVec::<ForwardMove, 256>::new();
-
-        queen_moves(self.queens[player_index], self.occupied, self.all_pieces[opp_index], 
-            &mut gen_moves, self.mailbox);
-
-        println!("{:?}", gen_moves);
-    }
-
     // Generate Pseudo-Moves - Only Validate King Safety for Castle / King Movement
     pub fn generate_moves(&mut self, 
         gen_moves: &mut ArrayVec::<ForwardMove, 256>, 
@@ -308,11 +297,14 @@ impl ChessBoard {
             }
         }
         
-        // PV - Variation, with Iterative Deepening Best Move in Front.
-        gen_moves.sort_unstable_by_key(|cmd| {
-            let is_pv = Some(cmd) == pv_move_hint.as_ref();
-            (!is_pv, cmd.pv_score)
-        });
+        // Allocate PV Move in Front
+        if let Some(hint) = pv_move_hint.as_ref() {
+            if let Some(idx) = gen_moves.iter().position(|cmd| cmd == hint) {
+                gen_moves[idx].pv_score = 0;
+            }
+        }
+
+        gen_moves.sort_unstable_by_key(|cmd| cmd.pv_score);
     }
 
     // helper method for move piece
