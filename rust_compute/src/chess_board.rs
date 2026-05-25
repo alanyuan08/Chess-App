@@ -260,11 +260,11 @@ impl ChessBoard {
     }
 
     // Generate Pseudo-Moves - Only Validate King Safety for Castle / King Movement
-    pub fn generate_moves<'a>(&mut self, 
-        gen_moves: &'a mut Vec<ForwardMove>, 
+    pub fn generate_moves(&mut self, 
+        gen_moves: &mut Vec<ForwardMove>, 
         pv_move_hint: Option<ForwardMove>
-    ) -> &'a mut Vec<ForwardMove> {
-        gen_moves.clear();
+    ) -> usize {
+        let start_idx = gen_moves.len();
         
         let player_index = self.player_index(self.active_player);
 
@@ -299,13 +299,13 @@ impl ChessBoard {
         }
         
         // PV - Variation, with Iterative Deepening Best Move in Front.
-        gen_moves.sort_unstable_by_key(|cmd| {
+        let current_moves = &mut gen_moves[start_idx..];
+        current_moves.sort_unstable_by_key(|cmd| {
             let is_pv = Some(cmd) == pv_move_hint.as_ref();
-        
             (!is_pv, cmd.pv_score)
         });
 
-        gen_moves
+        current_moves.len()
     }
 
     // helper method for move piece

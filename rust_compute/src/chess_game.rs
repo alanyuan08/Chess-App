@@ -158,11 +158,16 @@ impl ChessGame {
         let mut max_score = i32::MIN;
         let mut legal_moves_played = 0;
 
-        let moves = self.all_pseudo_legal_moves(gen_moves, pv_move_hint).to_vec(); 
+        let start_idx = gen_moves.len(); 
 
-        for forward_move in &moves {
+        let move_count = self.chess_board.generate_moves(gen_moves, pv_move_hint);
+        let end_idx = start_idx + move_count;
+
+        for i in start_idx..end_idx {
+            let forward_move = gen_moves[i];
+
             // Push move (handles UCI, board state, hash, and history internally)
-            self.process_forward_move(*forward_move);
+            self.process_forward_move(forward_move);
 
             // Psuedo legal move exposes check, undo move
             if self.chess_board.is_previous_player_king_in_check() {
@@ -172,7 +177,7 @@ impl ChessGame {
 
             // Move is Legal, Forward Move Time Cat
             legal_moves_played += 1;
-            self.process_time_cat_forward(*forward_move);
+            self.process_time_cat_forward(forward_move);
 
             // Recursive Negamax Call
             let negamax_result = self.negamax(depth - 1, ply + 1, -beta, -alpha, gen_moves, None);
@@ -198,6 +203,8 @@ impl ChessGame {
             }
         }
 
+        gen_moves.truncate(start_idx);
+
         // 4. Handle terminal nodes cleanly if no legal moves exist
         if legal_moves_played == 0 {
             if self.chess_board.is_in_check() {
@@ -215,7 +222,7 @@ impl ChessGame {
             }
         }
 
-        SearchResult { score: max_score, best_move: best_move.copied() }
+        SearchResult { score: max_score, best_move }
     }
 
     fn board_eval(&mut self) -> i32 {
@@ -254,12 +261,18 @@ impl ChessGame {
             alpha = static_eval;
         }
 
-        let quiescence_moves = self.all_psuedo_legal_quiescence_moves(gen_moves).to_vec(); 
+        let start_idx = gen_moves.len();
+        
+        // Generate strictly legal tactical moves directly onto the global stack
+        let move_count = self.all_psuedo_legal_quiescence_moves(gen_moves);
+        let end_idx = start_idx + move_count;
 
-        // Filter and iterate through quiescence moves
-        for forward_move in &quiescence_moves {
+        // Quiscence Search
+        for i in start_idx..end_idx {
+            let forward_move = gen_moves[i]; 
+
             // Push move (handles UCI, board state, hash, and history internally)
-            self.process_forward_move(*forward_move);
+            self.process_forward_move(forward_move);
             
             // Psuedo legal move exposes check, undo move
             if self.chess_board.is_previous_player_king_in_check() {
@@ -268,7 +281,7 @@ impl ChessGame {
             }
 
             // Move is Legal, Forward Move Time Cat
-            self.process_time_cat_forward(*forward_move);
+            self.process_time_cat_forward(forward_move);
 
             // Negamax search call
             let score = -self.quiescence_search(-beta, -alpha, depth + 1, gen_moves);
@@ -289,24 +302,18 @@ impl ChessGame {
         alpha
     }
 
-    // The move does not confirm if it introduces a discovered check
-    fn all_pseudo_legal_moves<'a>(&mut self, 
-        gen_moves: &'a mut Vec<ForwardMove>, 
-        pv_move_hint: Option<ForwardMove>
-    ) -> &'a mut Vec<ForwardMove> {
-        let valid_moves = self.chess_board.generate_moves(gen_moves, pv_move_hint);
-
-        valid_moves
-    }
-
     // Filter all Capture & Promotion Moves
-    fn all_psuedo_legal_quiescence_moves<'a>(&mut self, 
-        gen_moves: &'a mut Vec<ForwardMove>
-    ) ->  &'a mut Vec<ForwardMove> {
-        let pseudo_legal_moves = self.all_pseudo_legal_moves(gen_moves, None);
+    fn all_psuedo_legal_quiescence_moves(&mut self, 
+        gen_moves: &mut Vec<ForwardMove>
+    ) -> usize {
+        let start_idx = gen_moves.len();
+        let move_count = self.chess_board.generate_moves(gen_moves, None);
+        let end_idx = start_idx + move_count;
+        let mut write_idx = start_idx;
 
-        pseudo_legal_moves.retain(|cmd| {
-            // 1. First, check if it's a capture or promotion
+        for read_idx in start_idx..end_idx {
+            let cmd = gen_moves[read_idx];
+
             let is_tactical = matches!(
                 cmd.move_type,
                 MoveFlag::PROMOTIONQUEEN | MoveFlag::PROMOTIONROOK |
@@ -314,19 +321,21 @@ impl ChessGame {
                 MoveFlag::CAPTURE | MoveFlag::ENPASSANT
             );
 
-            if !is_tactical {
-                return false;
+            if is_tactical {
+                // King Safety Check
+                self.process_forward_move(cmd);
+                let is_king_safe = !self.chess_board.is_previous_player_king_in_check();
+                self.process_backward_move();
+
+                if is_king_safe {
+                    gen_moves[write_idx] = cmd;
+                    write_idx += 1;
+                }
             }
+        }
+        gen_moves.truncate(write_idx);
 
-            // 2. Validate legality using your king safety function
-            self.process_forward_move(*cmd);
-            let is_king_safe = !self.chess_board.is_previous_player_king_in_check();
-            self.process_backward_move();
-
-            is_king_safe
-        });
-
-        pseudo_legal_moves
+        write_idx - start_idx
     }
 
 }
