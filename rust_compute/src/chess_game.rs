@@ -11,7 +11,7 @@ use crate::move_command::*;
 use crate::bishop_mask::*;
 use crate::rook_mask::*;
 
-pub const PV_DEPTH: i32 = 6;
+pub const PV_DEPTH: i32 = 7;
 pub const MATE_VALUE: i32 = 3000000;
 
 struct ChessGame {
@@ -184,16 +184,18 @@ impl ChessGame {
             // Track maximum evaluations
             if score > max_score {
                 max_score = score;
-                best_move = Some(*forward_move);
-            }
-
-            if score > alpha {
-                alpha = score;
+                if score > alpha {
+                    best_move = Some(*forward_move);
+                }
             }
 
             // Alpha-Beta Pruning Cutoff
-            if alpha >= beta {
-                break;
+            if score >= beta {
+                return SearchResult { score: beta, best_move: Some(*forward_move) };
+            }
+    
+            if score > alpha {
+                alpha = score;
             }
         }
 
@@ -214,7 +216,7 @@ impl ChessGame {
             }
         }
 
-        SearchResult { score: max_score, best_move }
+        SearchResult { score: alpha, best_move }
     }
 
     fn board_eval(&mut self) -> i32 {
@@ -265,6 +267,8 @@ impl ChessGame {
             self.filter_psuedo_legal_quiescence_moves(&mut gen_moves);
         }
 
+        let mut legal_moves_played = 0;
+
         // Quiscence Search
         for forward_move in &gen_moves {
             // Push move (handles UCI, board state, hash, and history internally)
@@ -277,6 +281,7 @@ impl ChessGame {
             }
 
             // Move is Legal, Forward Move Time Cat
+            legal_moves_played += 1;
             self.process_time_cat_forward(*forward_move);
 
             // Negamax search call
@@ -293,6 +298,10 @@ impl ChessGame {
             if score > alpha {
                 alpha = score;
             }
+        }
+
+        if king_in_check && legal_moves_played == 0 {
+            return -99999 + depth; 
         }
 
         alpha

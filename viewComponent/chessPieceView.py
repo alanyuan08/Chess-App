@@ -3,7 +3,7 @@ from PySide6.QtGui import QPixmap
 
 # Import Enums
 from communicatorProxy import CommunicatorProxy
-from appEnums import Player
+from appEnums import Player, PieceType
 
 # Import Model
 from modelComponent.chessPieceModel import ChessPieceModel
