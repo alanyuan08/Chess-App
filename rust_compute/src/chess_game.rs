@@ -184,18 +184,16 @@ impl ChessGame {
             // Track maximum evaluations
             if score > max_score {
                 max_score = score;
+                best_move = Some(*forward_move);
+                
                 if score > alpha {
-                    best_move = Some(*forward_move);
+                    alpha = score;
                 }
             }
 
-            // Alpha-Beta Pruning Cutoff
+            // Alpha-Beta Cutoff
             if score >= beta {
-                return SearchResult { score: beta, best_move: Some(*forward_move) };
-            }
-    
-            if score > alpha {
-                alpha = score;
+                return SearchResult { score: max_score, best_move: Some(*forward_move) };
             }
         }
 
@@ -216,7 +214,7 @@ impl ChessGame {
             }
         }
 
-        SearchResult { score: alpha, best_move }
+        SearchResult { score: max_score, best_move }
     }
 
     fn board_eval(&mut self) -> i32 {
