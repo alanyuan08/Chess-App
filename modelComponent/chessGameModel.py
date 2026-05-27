@@ -54,12 +54,12 @@ class ChessGameModel():
                 if self.chessBoard.checkMate():
                     self.gameState = GameState.BLACKWIN
                 else:
-                    self.gameState = self.gameState.DRAW
+                    self.gameState = GameState.DRAW
             else:
                 if self.chessBoard.checkMate():
                     self.gameState = GameState.WHITEWIN
                 else:
-                    self.gameState = self.gameState.DRAW
+                    self.gameState = GameState.DRAW
 
     # Validate Move
     def validateMove(self, initRow: int, initCol: int, targetRow: int, 

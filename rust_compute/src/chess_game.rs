@@ -11,8 +11,11 @@ use crate::move_command::*;
 use crate::bishop_mask::*;
 use crate::rook_mask::*;
 
-pub const PV_DEPTH: i32 = 7;
-pub const MATE_VALUE: i32 = 3000000;
+pub const PV_DEPTH: i32 = 8;
+pub const MATE_VALUE: i32 = 100000;
+pub const MAX_DEPTH: i32 = 50;
+
+const INFINITY: i32 = 1_000_000;
 
 struct ChessGame {
     history: [Option<UndoMove>; 1024],
@@ -76,11 +79,6 @@ impl ChessGame {
         self.history_index += 1;
     }
 
-    fn process_time_cat_forward(&mut self, forward_move: ForwardMove) {
-        let uci_command: String = parse_uci(forward_move);
-        self.chess_board.timecat_push_move(uci_command);
-    }
-
     fn process_backward_move(&mut self) {
         if self.history_index == 0 {
             return;
@@ -101,6 +99,15 @@ impl ChessGame {
         }
     }
 
+    fn process_time_cat_forward(&mut self, forward_move: ForwardMove) {
+        let uci_command: String = parse_uci(forward_move);
+        self.chess_board.timecat_push_move(uci_command);
+    }
+
+    fn process_time_cat_backward(&mut self) {
+        self.chess_board.timecat_pop_move();
+    }
+
     pub fn check_three_move_repetition(&self) -> bool {
         let hash = self.chess_board.zobrist_hash();
         
@@ -112,7 +119,7 @@ impl ChessGame {
     pub fn root_search(&mut self) -> Option<ForwardMove> {
         // Search Time
         let start_time = Instant::now();
-        let time_limit = Duration::from_secs(40);
+        let time_limit = Duration::from_secs(25);
 
         let mut best_move_overall: Option<ForwardMove> = None;
 
@@ -122,8 +129,9 @@ impl ChessGame {
                 break;
             }
             
-            let result = self.negamax(depth, 0, i32::MIN + 1, i32::MAX - 1, best_move_overall);
+            let result = self.negamax(depth, 0, -INFINITY, INFINITY, best_move_overall);
             best_move_overall = result.best_move;
+            println!("{:?}", best_move_overall);
         }
         
         let elapsed_time = start_time.elapsed();
@@ -153,8 +161,8 @@ impl ChessGame {
         }
 
         let mut best_move = None;
-        let mut max_score = i32::MIN;
         let mut legal_moves_played = 0;
+        let mut best_score = -INFINITY;
 
         let mut gen_moves = ArrayVec::<ForwardMove, 256>::new();
         self.chess_board.generate_moves(&mut gen_moves, pv_move_hint);
@@ -178,22 +186,22 @@ impl ChessGame {
             let score = -negamax_result.score;
 
             // Undo Move + TimeCat
-            self.chess_board.timecat_pop_move();
+            self.process_time_cat_backward();
             self.process_backward_move();
 
             // Track maximum evaluations
-            if score > max_score {
-                max_score = score;
+            if score > best_score {
+                best_score = score;
                 best_move = Some(*forward_move);
-                
-                if score > alpha {
-                    alpha = score;
-                }
             }
 
             // Alpha-Beta Cutoff
-            if score >= beta {
-                return SearchResult { score: max_score, best_move: Some(*forward_move) };
+            if best_score >= beta {
+                return SearchResult { score: best_score, best_move };
+            }
+
+            if score > alpha {
+                alpha = score;
             }
         }
 
@@ -214,7 +222,7 @@ impl ChessGame {
             }
         }
 
-        SearchResult { score: max_score, best_move }
+        SearchResult { score: best_score, best_move }
     }
 
     fn board_eval(&mut self) -> i32 {
@@ -225,10 +233,6 @@ impl ChessGame {
 
     // Quiescence Search 
     fn quiescence_search(&mut self, mut alpha: i32, beta: i32, depth: i32) -> i32 {
-        if self.chess_board.is_previous_player_king_in_check() {
-            return alpha; 
-        }
-
         // Three Move Repetition Draw
         if self.check_three_move_repetition() {
             return 0;
@@ -239,21 +243,25 @@ impl ChessGame {
             static_eval = -static_eval;
         }
 
-        if depth > 50 {
+        if depth > MAX_DEPTH {
             return static_eval;
         }
 
         let king_in_check = self.chess_board.is_in_check(); 
+        let mut best_score = if king_in_check { -INFINITY } else { static_eval };
 
         if !king_in_check {
             // Only allow standing pat if your king is perfectly safe
-            if static_eval >= beta {
-                return beta;
+            if best_score >= beta {
+                return best_score;
             }
-            if static_eval > alpha {
-                alpha = static_eval;
+            if best_score > alpha {
+                alpha = best_score;
             }
         }
+
+        let mut legal_moves_played = 0;
+
         // Generate strictly legal tactical moves directly onto the global stack
         let mut gen_moves = ArrayVec::<ForwardMove, 256>::new();
 
@@ -264,8 +272,6 @@ impl ChessGame {
             // King is NOT in check: Only generate captures, promotions, etc.
             self.filter_psuedo_legal_quiescence_moves(&mut gen_moves);
         }
-
-        let mut legal_moves_played = 0;
 
         // Quiscence Search
         for forward_move in &gen_moves {
@@ -286,24 +292,29 @@ impl ChessGame {
             let score = -self.quiescence_search(-beta, -alpha, depth + 1);
             
             // Undo Move + TimeCat
-            self.chess_board.timecat_pop_move();
+            self.process_time_cat_backward();
             self.process_backward_move();
 
             // Alpha-Beta pruning checks
-            if score >= beta {
-                return beta; 
+            if score > best_score {
+                best_score = score;
             }
+
+            if best_score >= beta { 
+                return best_score;
+            }
+
             if score > alpha {
                 alpha = score;
             }
         }
 
-        if king_in_check && legal_moves_played == 0 {
-            return -99999 + depth; 
+        if legal_moves_played == 0 && king_in_check {
+            return -MATE_VALUE + depth;
         }
 
-        alpha
-    }
+        best_score
+    }   
 
     // Filter all Capture & Promotion Moves
     fn filter_psuedo_legal_quiescence_moves(&mut self, 

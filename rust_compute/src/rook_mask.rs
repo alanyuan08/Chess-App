@@ -141,11 +141,11 @@ pub const fn compute_rook_attacks(sq: usize, occupancy: u64) -> u64 {
     let r = (sq / 8) as i8;
     let f = (sq % 8) as i8;
 
-    // Horizontal Searches
-    let horizontal_attacks: [i8; 2] = [1, -1];
+     // Vertical Directions (North and South)
+    let vertical_directions: [i8; 2] = [1, -1];
     let mut d = 0;
     while d < 2 {
-        let dr = horizontal_attacks[d];
+        let dr = vertical_directions[d];
         let mut cur_r = r + dr;
         // Only skip the LAST square in each direction
         while cur_r >= 0 && cur_r <= 7 {
@@ -160,11 +160,11 @@ pub const fn compute_rook_attacks(sq: usize, occupancy: u64) -> u64 {
         d += 1;
     }
 
-    // Vertical Searches 
-    let vertical_directions: [i8; 2] = [1, -1];
+     // Horizontal Directions (East and West)
+    let horizontal_directions: [i8; 2] = [1, -1];
     let mut d = 0;
     while d < 2 {
-        let df = vertical_directions[d];
+        let df = horizontal_directions[d];
         let mut cur_f = f + df;
         // Only skip the LAST square in each direction
          while cur_f >= 0 && cur_f <= 7 {
@@ -235,7 +235,6 @@ pub fn rook_moves(mut rook_bitboard: u64, occupancy: u64,
         let rook = rook_bitboard.trailing_zeros() as usize;
 
         let rook_attack_paths = rook_attack_paths(rook, occupancy);
-
         let mut rook_moves = rook_attack_paths & !occupancy;
         let mut rook_captures = rook_attack_paths & opponent_pieces;
 

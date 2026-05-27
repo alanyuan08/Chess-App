@@ -31,6 +31,8 @@ class PlayerInfo(QGraphicsPixmapItem):
 		if gameState == GameState.PLAYING:
 			if self.playerTurn:
 				newText += "Active Turn"
+		elif GameState.DRAW:
+			newText += "Draw"
 		elif self.player == Player.WHITE:
 			if gameState == GameState.WHITEWIN:
 				newText += "Player Win"
@@ -41,8 +43,6 @@ class PlayerInfo(QGraphicsPixmapItem):
 				newText += "Player Win"
 			else:
 				newText += "Player Lose"
-		elif GameState.DRAW:
-			newText += "Draw"
 
 		self.textItem.setHtml(
 			"<h1 style='color: white;'>" + newText + "</h1>"

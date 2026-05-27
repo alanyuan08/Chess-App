@@ -20,7 +20,7 @@ pub const KNIGHT_ATTACKS: [u64; 64] = {
             let (cur_r, cur_f) = (r + dr, f + df);
             
             if cur_r >= 0 && cur_r <= 7 && cur_f >= 0 && cur_f <= 7 {
-                knight_attack[i] |= 1 << (cur_r * 8 + cur_f);
+                knight_attack[i] |= 1u64 << (cur_r * 8 + cur_f);
             }
             d += 1;
         }

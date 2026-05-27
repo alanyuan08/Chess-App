@@ -11,14 +11,15 @@ pub fn queen_moves(mut queen_bitboard: u64, occupancy: u64,
 
         let rook_attack_paths = rook_attack_paths(queen, occupancy);
         let bishop_attack_paths = bishop_attack_paths(queen, occupancy);
+        let total_attacks = rook_attack_paths | bishop_attack_paths;
 
-        let mut queen_moves = (rook_attack_paths | bishop_attack_paths) & !occupancy;
-        let mut queen_captures = (rook_attack_paths | bishop_attack_paths) & opponent_pieces;
+        let mut queen_moves = total_attacks & !occupancy;
+        let mut queen_captures = total_attacks & opponent_pieces;
 
         while queen_moves != 0 {
             let target = queen_moves.trailing_zeros() as usize;
             moves.push(ForwardMove { 
-                start_sq: queen, end_sq: target, move_type: MoveFlag::MOVE, pv_score: 200 
+                start_sq: queen, end_sq: target, move_type: MoveFlag::MOVE, pv_score: 1000 
             });
             queen_moves &= queen_moves - 1;
         }

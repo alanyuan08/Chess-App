@@ -298,9 +298,13 @@ impl ChessBoard {
         }
         
         // Allocate PV Move in Front
-        if let Some(hint) = pv_move_hint.as_ref() {
-            if let Some(idx) = gen_moves.iter().position(|cmd| cmd == hint) {
-                gen_moves[idx].pv_score = 0;
+        if let Some(hint) = pv_move_hint {
+            if let Some(cmd) = gen_moves.iter_mut().find(|m| {
+                m.start_sq == hint.start_sq && 
+                m.end_sq == hint.end_sq && 
+                m.move_type == hint.move_type
+            }) {
+                cmd.pv_score = 0;
             }
         }
 
