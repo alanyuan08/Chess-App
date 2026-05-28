@@ -6,6 +6,22 @@ pub struct ForwardMove {
     pub pv_score: i32,
 }
 
+// Packs the move into a single u16 for the Transposition Table
+impl ForwardMove {
+    pub fn pack(&self) -> u16 {
+        (self.start_sq as u16) | ((self.end_sq as u16) << 6) | ((self.move_type as u16) << 12)
+    }
+
+    pub fn unpack(packed: u16) -> Self {
+        Self {
+            start_sq: (packed & 0x3F) as usize,
+            end_sq: ((packed >> 6) & 0x3F) as usize,
+            move_type: unsafe { std::mem::transmute((packed >> 12) as u32) }, 
+            pv_score: 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UndoMove {
     pub start_sq: usize,

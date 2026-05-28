@@ -1,3 +1,4 @@
+use std::cmp;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 use std::time::Duration;
@@ -10,12 +11,13 @@ use crate::move_command::*;
 
 use crate::bishop_mask::*;
 use crate::rook_mask::*;
+use crate::transposition_table::*;
 
-pub const PV_DEPTH: i32 = 8;
-pub const MATE_VALUE: i32 = 100000;
+pub const PV_DEPTH: i32 = 9;
+pub const MATE_VALUE: i32 = 30000;
 pub const MAX_DEPTH: i32 = 50;
 
-const INFINITY: i32 = 1_000_000;
+const INFINITY: i32 = 32000;
 
 struct ChessGame {
     history: [Option<UndoMove>; 1024],
@@ -25,6 +27,7 @@ struct ChessGame {
     traversed_positions: HashMap<u64, i32>,
 
     nodes_processed: AtomicUsize,
+    transposition_table: TranspositionTable,
 }
 
 impl ChessGame {
@@ -42,6 +45,7 @@ impl ChessGame {
                 HashMap::new()
             },
             nodes_processed: AtomicUsize::new(0),
+            transposition_table: TranspositionTable::new(128)
         }
     }
 
@@ -142,8 +146,12 @@ impl ChessGame {
     }
  
     // Process Negamax
-    fn negamax(&mut self, depth: i32, ply: i32, mut alpha: i32, beta: i32, 
+    fn negamax(&mut self, depth: i32, ply: i32, mut alpha: i32, mut beta: i32, 
         pv_move_hint: Option<ForwardMove>) -> SearchResult {
+        
+        // Original Alpha for Transposition Table
+        let original_alpha = alpha;
+        
         // Three Move Repetition Draw
         if self.check_three_move_repetition() {
             return SearchResult {
@@ -152,12 +160,51 @@ impl ChessGame {
             };
         }
 
+        let hash = self.chess_board.zobrist_hash();
+        if let Some(tt_entry) = self.transposition_table.probe(hash, ply) {
+            let retrieved_score: i32 = tt_entry.score as i32;
+            let retrieved_depth: i32 = tt_entry.depth as i32;
+            
+            if retrieved_depth >= depth {
+                let cached_move = if tt_entry.move_id == 0 {
+                    None
+                } else {
+                    Some(ForwardMove::unpack(tt_entry.move_id))
+                };
+
+                // EXACT: The true minimax value was found; return it immediately.
+                if tt_entry.flag == HashFlag::EXACT {
+                    return SearchResult {
+                        score: retrieved_score,
+                        best_move: cached_move,
+                    };
+                }
+                    
+                // LOWER BOUND: The true score is AT LEAST this high. 
+                else if tt_entry.flag == HashFlag::LOWERBOUND {
+                    alpha = cmp::max(alpha, retrieved_score);
+                }
+                // UPPER BOUND: The true score is AT MOST this high.
+                else if tt_entry.flag == HashFlag::UPPERBOUND {
+                    beta = cmp::min(beta, retrieved_score);
+                }  
+
+                // If the bounds adjusted alpha/beta enough to cause a cutoff, return early
+                if alpha >= beta {
+                    return SearchResult {
+                        score: retrieved_score,
+                        best_move: cached_move,
+                    };
+                }
+            }
+        }
+
         // Leaf Node Condition -> Drop into Quiescence Search
         if depth == 0 {
             return SearchResult {
                 score: self.quiescence_search(alpha, beta, ply),
                 best_move: None,
-            }
+            };
         }
 
         let mut best_move = None;
@@ -197,6 +244,11 @@ impl ChessGame {
 
             // Alpha-Beta Cutoff
             if best_score >= beta {
+                // Adjust mate scores to absolute bounds before saving
+                self.transposition_table.store(
+                    hash, best_score, ply, best_move, depth, HashFlag::LOWERBOUND
+                );
+
                 return SearchResult { score: best_score, best_move };
             }
 
@@ -208,12 +260,22 @@ impl ChessGame {
         // 4. Handle terminal nodes cleanly if no legal moves exist
         if legal_moves_played == 0 {
             if self.chess_board.is_in_check() {
+                let mate_score = -MATE_VALUE + ply;
+
+                self.transposition_table.store(
+                    hash, mate_score, ply, None, depth, HashFlag::EXACT
+                );
+
                 // Checkmate
                 return SearchResult { 
-                    score: -MATE_VALUE + ply, 
+                    score: mate_score, 
                     best_move: None 
                 };
             } else {
+                self.transposition_table.store(
+                    hash, 0, ply, None, depth, HashFlag::EXACT
+                );
+
                 // Stalemate
                 return SearchResult { 
                     score: 0, 
@@ -222,6 +284,14 @@ impl ChessGame {
             }
         }
 
+        let flag = if best_score > original_alpha {
+            HashFlag::EXACT
+        } else {
+            HashFlag::UPPERBOUND
+        };
+
+        // Adjust mate scores to absolute bounds before saving final loop results
+        self.transposition_table.store(hash, best_score, ply, best_move, depth, flag);
         SearchResult { score: best_score, best_move }
     }
 
@@ -232,7 +302,7 @@ impl ChessGame {
     }
 
     // Quiescence Search 
-    fn quiescence_search(&mut self, mut alpha: i32, beta: i32, depth: i32) -> i32 {
+    fn quiescence_search(&mut self, mut alpha: i32, beta: i32, ply: i32) -> i32 {
         // Three Move Repetition Draw
         if self.check_three_move_repetition() {
             return 0;
@@ -243,7 +313,7 @@ impl ChessGame {
             static_eval = -static_eval;
         }
 
-        if depth > MAX_DEPTH {
+        if ply > MAX_DEPTH {
             return static_eval;
         }
 
@@ -289,7 +359,7 @@ impl ChessGame {
             self.process_time_cat_forward(*forward_move);
 
             // Negamax search call
-            let score = -self.quiescence_search(-beta, -alpha, depth + 1);
+            let score = -self.quiescence_search(-beta, -alpha, ply + 1);
             
             // Undo Move + TimeCat
             self.process_time_cat_backward();
@@ -310,7 +380,7 @@ impl ChessGame {
         }
 
         if legal_moves_played == 0 && king_in_check {
-            return -MATE_VALUE + depth;
+            return -MATE_VALUE + ply;
         }
 
         best_score

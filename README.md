@@ -1,22 +1,26 @@
-# Chess App
+# Chess AI
 
 Engineered a hybrid desktop application pairing a PySide6 presentation layer with a high-performance Rust engine core, evaluating millions of positions per second.
 
+The Chess AI is (unofficially) tesed play at ELO 2700.
+
+![Chess AI in Action](img/saved_game/saved_game.png)
+
 ## 1. Python Presentation & Validation Layer
     
-- PySide6 User Interface: Renders the 2D chessboard, handles player drag-and-drop input in addition to Move Validation. It also handles the Three-Fold Repetition using a Zobrist Hash and maintains an opening handbook of the most commonly played moves. 
+- PySide6 User Interface: Renders the 2D chessboard, handles player drag-and-drop input and Move Validation. It also maintains an opening handbook of the most commonly played moves.
 
 ## 2. Rust Engine Core
 
-- High-Performance Generation: Computes all pseudo-legal move paths across millions of positions per second using Bitboards for Move Generation. It uses Min-Max combined with Alpha-Beta Pruning for pruning unpromising branches early and Quiescence for extending unstable searches beyond the search horiozn. 
+- High-Performance Generation: Computes all pseudo-legal move paths across millions of positions per second using Bitboards for Move Generation. It uses Min-Max combined with Alpha-Beta Pruning for pruning unpromising branches early and Quiescence for extending unstable searches beyond the search horizon. 
 
 - It uses Iterative Deepening combined with Principal Variations to search 10+ ply deep. In addition, the engine uses Transposition Table to store previously evaluated board positions and for coordinating results from Lock-Free Concurrent Tree Search (Lazy SMP).
 
-Benchmark - Appromixiately 1.25 Million Nodes per Second per thread on a Apple M4 Pro Chip. 
+Benchmark - Approximately 1.25 Million Nodes per Second per thread on a Apple M4 Pro Chip. 
 
 ## 3. Neural Network Evaluation
 
-- NNUE Integration: Uses a custom, pre-trained neural network that updates incrementally using Chess UCI. This will be replaced by a self-trained NNUE as the timecat NNUE does not evaluate pseudo positions requred for Null-Move Pruning. 
+- NNUE Integration: Uses a custom, pre-trained neural network that updates incrementally using Chess UCI. This will be replaced by a self-trained NNUE as the timecat NNUE does not evaluate pseudo positions required for Null-Move Pruning. 
 
 # Running the App
 
@@ -27,10 +31,9 @@ Playing as [black|white]
 
 The Chess AI has been tested and defeated bots on Chess.com with ELO 2000+
 
-- [Win - ELO 2300 Bot](https://www.chess.com/analysis/game/computer/1397423175/review)
+- [Win - ELO 2300 Bot](https://www.chess.com/analysis/game/computer/1397423175/analysis)
 - [Win - ELO 2300 Bot](https://www.chess.com/analysis/game/computer/1393583077/analysis)
-
-*Chess.com bots are overrated by roughly 100 points. 
+- [DRAW - ELO 2500 Bot](https://www.chess.com/analysis/game/computer/1438052400/analysis)
 
 ## Contact
 
