@@ -16,7 +16,7 @@ The Chess AI is (unofficially) tested to play at ELO 2700.
 
 - It uses Iterative Deepening combined with Principal Variations to search 10+ ply deep. In addition, the engine uses Transposition Table to store previously evaluated board positions and for coordinating results from Lock-Free Concurrent Tree Search (Lazy SMP).
 
-Benchmark - Approximately 1.25 Million Nodes per Second per thread on a Apple M4 Pro Chip. 
+Benchmark - Approximately 1.15 Million Nodes per Second per thread on a Apple M4 Pro Chip. 
 
 ## 3. Neural Network Evaluation
 
