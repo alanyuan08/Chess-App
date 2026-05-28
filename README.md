@@ -2,7 +2,7 @@
 
 Engineered a hybrid desktop application pairing a PySide6 presentation layer with a high-performance Rust engine core, evaluating millions of positions per second.
 
-The Chess AI is (unofficially) tesed play at ELO 2700.
+The Chess AI is (unofficially) tested to play at ELO 2700.
 
 ![Chess AI in Action](img/saved_game/saved_game.png)
 
@@ -23,6 +23,10 @@ Benchmark - Approximately 1.25 Million Nodes per Second per thread on a Apple M4
 - NNUE Integration: Uses a custom, pre-trained neural network that updates incrementally using Chess UCI. This will be replaced by a self-trained NNUE as the timecat NNUE does not evaluate pseudo positions required for Null-Move Pruning. 
 
 # Running the App
+
+## Prerequisites
+
+The user nedes Python 3, PySide6, and Cargo (Rust) installed on their machine.
 
 Playing as [black|white]
 - /run.sh [black|white]
