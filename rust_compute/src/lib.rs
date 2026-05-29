@@ -12,6 +12,8 @@ pub mod chess_board;
 pub mod chess_game;
 pub mod zobrist_hash;
 pub mod transposition_table;
+pub mod search_worker;
+pub mod parser;
 
 use crate::chess_game::{init_attack_tables};
 use crate::chess_game::{compute_next_move};
