@@ -147,7 +147,7 @@ impl ChessGame {
  
     // Process Negamax
     fn negamax(&mut self, depth: i32, ply: i32, mut alpha: i32, mut beta: i32, 
-        pv_move_hint: Option<ForwardMove>) -> SearchResult {
+        mut pv_move_hint: Option<ForwardMove>) -> SearchResult {
         
         // Original Alpha for Transposition Table
         let original_alpha = alpha;
@@ -165,12 +165,17 @@ impl ChessGame {
             let retrieved_score: i32 = tt_entry.score as i32;
             let retrieved_depth: i32 = tt_entry.depth as i32;
             
+            let cached_move = if tt_entry.move_id == 0 {
+                None
+            } else {
+                Some(ForwardMove::unpack(tt_entry.move_id))
+            };
+
+            if cached_move.is_some() {
+                pv_move_hint = cached_move;
+            }
+
             if retrieved_depth >= depth {
-                let cached_move = if tt_entry.move_id == 0 {
-                    None
-                } else {
-                    Some(ForwardMove::unpack(tt_entry.move_id))
-                };
 
                 // EXACT: The true minimax value was found; return it immediately.
                 if tt_entry.flag == HashFlag::EXACT {

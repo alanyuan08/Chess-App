@@ -2,7 +2,7 @@
 
 Engineered a hybrid desktop application pairing a PySide6 presentation layer with a high-performance Rust engine core, evaluating millions of positions per second.
 
-The Chess AI is (unofficially) tested to play at ELO 2700.
+The Chess AI is (unofficially) tested defeat 2700 ELO rated bots on chess.com.
 
 ![Chess AI in Action](img/saved_game/saved_game.png)
 
