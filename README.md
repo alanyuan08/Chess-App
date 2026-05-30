@@ -24,8 +24,6 @@ The engine has been unofficially benchmarked and validated against 2700 Elo bots
 
 - **Deep Evaluation:** Combines Iterative Deepening with Principal Variation Search (PVS) to regularly achieve search depths of 10+ plies. (Average Move is approximately 30 seconds to 1.5 minutes)
 
-The algorithm does not employ Null-Move Pruning as the  
-
 - **Transposition Tables:** Caches previously evaluated board states to accelerate search paths and share data across threads
 
 - **Parallel Processing:** Scales performance across CPU threads using a lock-free concurrent tree search architecture (Lazy SMP)
