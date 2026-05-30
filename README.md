@@ -1,12 +1,12 @@
 # Chess AI
 
+![Chess AI in Action](img/saved_game/saved_game.png)
+
 A hybrid desktop chess application pairing a responsive PySide6 user interface with a high-performance, multithreaded Rust engine core capable of evaluating millions of positions per second.
 
 The engine has been unofficially benchmarked and validated against 2700 Elo bots on Chess.com.
 
 - Benchmark - Approximately 7.2 Million Nodes per second on a Apple M4 Pro Chip.
-
-![Chess AI in Action](img/saved_game/saved_game.png)
 
 ## 1. Python Presentation & Validation Layer
     
