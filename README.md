@@ -2,7 +2,7 @@
 
 Engineered a hybrid desktop application pairing a PySide6 presentation layer with a high-performance Rust engine core, evaluating millions of positions per second.
 
-The Chess AI is (unofficially) tested against 2500+ ELO rated bots on chess.com.
+The Chess AI is (unofficially) tested against 2700 ELO rated bots on chess.com.
 
 ![Chess AI in Action](img/saved_game/saved_game.png)
 
@@ -35,13 +35,14 @@ Playing as [black|white]
 
 # Playing Level
 
-The Chess AI has been tested and consistently drew against ELO 2500 chess.com bots.
+The Chess AI has been tested and consistently drew against ELO 2700 chess.com bots.
+
+- [DRAW - ELO 2700 Bot](https://www.chess.com/analysis/game/computer/1447582972/analysis)
 
 - [DRAW - ELO 2500 Bot](https://www.chess.com/analysis/game/computer/1438052400/analysis)
+
 - [DRAW - ELO 2500 Bot](https://www.chess.com/analysis/game/computer/1447219354/analysis)
 
-- [Win - ELO 2300 Bot](https://www.chess.com/analysis/game/computer/1397423175/analysis)
-- [Win - ELO 2300 Bot](https://www.chess.com/analysis/game/computer/1393583077/analysis)
 
 ## Contact
 

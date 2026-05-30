@@ -105,18 +105,39 @@ impl TranspositionTable {
             store_score -= ply as i16; 
         }
 
-        // Extract exact 22 bits from the key
+        // Extract exact 22 bits from the key for collision checks
         let tag_22 = (key >> 42) & 0x3F_FFFF; 
 
-        // Pack cleanly into a single 64-bit integer
+        // Pre-pack our incoming payload data
         let mut final_packed = 0u64;
-        final_packed |= move_id as u64;
-        final_packed |= (store_score as u16 as u64) << 16;
+        final_packed |= (move_id as u64) & 0xFFFF;             // Enforce 16-bit bounds
+        final_packed |= ((store_score as u16) as u64) << 16;
         final_packed |= ((depth as u8) as u64) << 32;
         final_packed |= tag_22 << 40;
         final_packed |= (flag as u8 as u64) << 62;
 
-        // Single CPU cycle replacement
-        self.entries[index].store(final_packed, Ordering::Relaxed);
+        // --- LOCK-FREE COMPARE-AND-EXCHANGE LOOP ---
+        // Load the initial state of the slot
+        let mut current_packed = self.entries[index].load(Ordering::Relaxed);
+
+        loop {
+            let existing_depth = ((current_packed >> 32) & 0xFF) as i8 as i32;
+
+            if depth < existing_depth {
+                return;
+            }
+
+            match self.entries[index].compare_exchange_weak(
+                current_packed,
+                final_packed,
+                Ordering::Release,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(actual) => {
+                    current_packed = actual;
+                }
+            }
+        }
     }
 }

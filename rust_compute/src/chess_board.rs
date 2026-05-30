@@ -304,7 +304,7 @@ impl ChessBoard {
                 m.end_sq == hint.end_sq && 
                 m.move_type == hint.move_type
             }) {
-                cmd.pv_score = 0;
+                cmd.pv_score = -2_000_000;
             }
         }
 

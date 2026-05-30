@@ -60,7 +60,6 @@ impl SearchWorker {
         let mut best_move_overall: Option<ForwardMove> = None;
         for depth in start_depth..=max_depth {
             if stop_signal.load(Ordering::Relaxed) {
-                stop_signal.store(true, Ordering::Relaxed);
                 break;
             }
             
@@ -178,15 +177,11 @@ impl SearchWorker {
             let retrieved_score: i32 = tt_entry.score as i32;
             let retrieved_depth: i32 = tt_entry.depth as i32;
             
-            let cached_move = if tt_entry.move_id == 0 {
-                None
-            } else {
-                Some(ForwardMove::unpack(tt_entry.move_id))
+            if tt_entry.move_id != 0 {
+                let mut mv = ForwardMove::unpack(tt_entry.move_id);
+                mv.pv_score = -2_000_000;
+                pv_move_hint = Some(mv);
             };
-
-            if cached_move.is_some() {
-                pv_move_hint = cached_move;
-            }
 
             if retrieved_depth >= depth {
 
@@ -194,7 +189,7 @@ impl SearchWorker {
                 if tt_entry.flag == HashFlag::EXACT {
                     return SearchResult {
                         score: retrieved_score,
-                        best_move: cached_move,
+                        best_move: pv_move_hint,
                     };
                 }
                     
@@ -211,7 +206,7 @@ impl SearchWorker {
                 if alpha >= beta {
                     return SearchResult {
                         score: retrieved_score,
-                        best_move: cached_move,
+                        best_move: pv_move_hint,
                     };
                 }
             }
@@ -220,7 +215,7 @@ impl SearchWorker {
         // Leaf Node Condition -> Drop into Quiescence Search
         if depth == 0 {
             return SearchResult {
-                score: self.quiescence_search(alpha, beta, ply, stop_signal),
+                score: self.quiescence_search(alpha, beta, ply, -1),
                 best_move: None,
             };
         }
@@ -319,13 +314,47 @@ impl SearchWorker {
         static_eval
     }
 
-        // Quiescence Search 
-    fn quiescence_search(&mut self, mut alpha: i32, beta: i32, 
-        ply: i32, stop_signal: &AtomicBool) -> i32 {
-        
+    // Quiescence Search 
+    fn quiescence_search(&mut self, mut alpha: i32, mut beta: i32, ply: i32, depth: i32) -> i32 {
         // Three Move Repetition Draw
         if self.check_three_move_repetition() {
             return 0;
+        }
+
+        let mut pv_move_hint = None;
+
+        let hash = self.chess_board.zobrist_hash();
+        if let Some(tt_entry) = self.transposition_table.probe(hash, ply) {
+            let retrieved_score: i32 = tt_entry.score as i32;
+            let retrieved_depth: i32 = tt_entry.depth as i32;
+            
+            if tt_entry.move_id != 0 {
+                let mut mv = ForwardMove::unpack(tt_entry.move_id);
+                mv.pv_score = -2_000_000;
+                pv_move_hint = Some(mv);
+            };
+
+            if retrieved_depth >= depth {
+
+                // EXACT: The true minimax value was found; return it immediately.
+                if tt_entry.flag == HashFlag::EXACT {
+                    return retrieved_score;
+                }
+                    
+                // LOWER BOUND: The true score is AT LEAST this high. 
+                else if tt_entry.flag == HashFlag::LOWERBOUND {
+                    alpha = cmp::max(alpha, retrieved_score);
+                }
+                // UPPER BOUND: The true score is AT MOST this high.
+                else if tt_entry.flag == HashFlag::UPPERBOUND {
+                    beta = cmp::min(beta, retrieved_score);
+                }  
+
+                // If the bounds adjusted alpha/beta enough to cause a cutoff, return early
+                if alpha >= beta {
+                    return retrieved_score;
+                }
+            }
         }
 
         let mut static_eval = self.board_eval();
@@ -351,13 +380,15 @@ impl SearchWorker {
         }
 
         let mut legal_moves_played = 0;
+        let mut best_move = None;
+        let mut hash_flag = HashFlag::UPPERBOUND;
 
         // Generate strictly legal tactical moves directly onto the global stack
         let mut gen_moves = ArrayVec::<ForwardMove, 256>::new();
 
         if king_in_check {
             // King IS in check: Generate all Moves
-            self.chess_board.generate_moves(&mut gen_moves, None);
+            self.chess_board.generate_moves(&mut gen_moves, pv_move_hint);
         } else {
             // King is NOT in check: Only generate captures, promotions, etc.
             self.filter_psuedo_legal_quiescence_moves(&mut gen_moves);
@@ -379,23 +410,26 @@ impl SearchWorker {
             self.process_time_cat_forward(*forward_move);
 
             // Negamax search call
-            let score = -self.quiescence_search(-beta, -alpha, ply + 1, stop_signal);
+            let score = -self.quiescence_search(-beta, -alpha, ply + 1, depth - 1);
             
             // Undo Move + TimeCat
             self.process_time_cat_backward();
             self.process_backward_move();
 
-            // Alpha-Beta pruning checks
+            // Fail-soft updates
             if score > best_score {
                 best_score = score;
-            }
+                best_move = Some(*forward_move);
 
-            if best_score >= beta { 
-                return best_score;
-            }
+                if score > alpha {
+                    alpha = score;
+                    hash_flag = HashFlag::EXACT;
 
-            if score > alpha {
-                alpha = score;
+                    if score >= beta { 
+                        hash_flag = HashFlag::LOWERBOUND;
+                        break;
+                    }
+                }
             }
         }
 
@@ -403,6 +437,8 @@ impl SearchWorker {
             return -MATE_VALUE + ply;
         }
 
+        // Store evaluation state inside the Transposition Table
+        self.transposition_table.store(hash, best_score, ply, best_move, depth, hash_flag);
         best_score
     }   
 
@@ -414,8 +450,7 @@ impl SearchWorker {
         gen_moves.retain(|cmd| {
             matches!(
                 cmd.move_type,
-                MoveFlag::PROMOTIONQUEEN | MoveFlag::PROMOTIONROOK |
-                MoveFlag::PROMOTIONBISHOP | MoveFlag::PROMOTIONKNIGHT | 
+                MoveFlag::PROMOTIONQUEEN | 
                 MoveFlag::CAPTURE | MoveFlag::ENPASSANT
             )
         });

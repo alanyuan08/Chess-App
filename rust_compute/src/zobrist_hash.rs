@@ -23,8 +23,8 @@ pub static ZOBRIST_TABLE_MAP: LazyLock<Box<[[u64; SQUARES]; PIECE_TYPES]>> = Laz
     table
 });
 
-pub static ZOBRIST_EN_PASSANT: LazyLock<Box<[u64; EN_PASSANT_FILES]>> = LazyLock::new(|| {
-    let mut en_passant = Box::new([0u64; EN_PASSANT_FILES]);
+pub static ZOBRIST_EN_PASSANT: LazyLock<Box<[u64; EN_PASSANT_STATES]>> = LazyLock::new(|| {
+    let mut en_passant = Box::new([0u64; EN_PASSANT_STATES]);
     let mut rng = rand::rng();
 
     for i in 0..EN_PASSANT_STATES{
@@ -64,5 +64,5 @@ pub fn en_passant_zobrist(en_passant: u64) -> usize {
     }
 
     let square_index = en_passant.trailing_zeros() as usize;
-    (square_index % 8)
+    square_index % 8
 }
