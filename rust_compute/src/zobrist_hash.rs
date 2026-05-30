@@ -8,8 +8,8 @@ const PIECE_TYPES: usize = 13;
 const SQUARES: usize = 64;
 const CASTLING: usize = 16;
 
-// 0-8 map to the files / 9 indiciates no En Passant
-const EN_PASSANT_FILES: usize = 9;
+// 0-7 = Files A-H, 8 = No En Passant
+const EN_PASSANT_STATES: usize = 9;
 
 pub static ZOBRIST_TABLE_MAP: LazyLock<Box<[[u64; SQUARES]; PIECE_TYPES]>> = LazyLock::new(|| {
     let mut table = Box::new([[0u64; SQUARES]; PIECE_TYPES]);
@@ -27,7 +27,7 @@ pub static ZOBRIST_EN_PASSANT: LazyLock<Box<[u64; EN_PASSANT_FILES]>> = LazyLock
     let mut en_passant = Box::new([0u64; EN_PASSANT_FILES]);
     let mut rng = rand::rng();
 
-    for i in 0..(EN_PASSANT_FILES-1){
+    for i in 0..EN_PASSANT_STATES{
         en_passant[i] = rng.random();
     }
     en_passant
@@ -60,9 +60,9 @@ pub fn piece_type_zobrist(piece_type: BoardPiece) -> usize {
 // Convert En Passant Square to hash
 pub fn en_passant_zobrist(en_passant: u64) -> usize {
     if en_passant == 0 {
-        return 0;
+        return 8;
     }
 
     let square_index = en_passant.trailing_zeros() as usize;
-    (square_index % 8) + 1
+    (square_index % 8)
 }
