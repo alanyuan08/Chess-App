@@ -19,7 +19,7 @@ pub struct SearchWorker {
     history_index: usize,
 
     chess_board: ChessBoard,
-    traversed_positions: HashMap<u64, i32>,
+    traversed_positions: HashMap<u64, i32>
 }
 
 impl SearchWorker {
@@ -47,9 +47,10 @@ impl SearchWorker {
     // Search Entry Point
     pub fn root_search(&mut self, thread_id: i32, 
         max_depth: i32, stop_signal: &AtomicBool) -> Option<ForwardMove> {
+        // Start the timer
 
         // Thread_id = 0 is the main thread, the rest are helper threads
-       let start_depth = if thread_id == 0 { 
+        let start_depth = if thread_id == 0 { 
             1 
         } else { 
             2 + (thread_id % 4)
@@ -59,6 +60,7 @@ impl SearchWorker {
         let mut best_move_overall: Option<ForwardMove> = None;
         for depth in start_depth..=max_depth {
             if stop_signal.load(Ordering::Relaxed) {
+                stop_signal.store(true, Ordering::Relaxed);
                 break;
             }
             
@@ -218,7 +220,7 @@ impl SearchWorker {
         // Leaf Node Condition -> Drop into Quiescence Search
         if depth == 0 {
             return SearchResult {
-                score: self.quiescence_search(alpha, beta, ply),
+                score: self.quiescence_search(alpha, beta, ply, stop_signal),
                 best_move: None,
             };
         }
@@ -318,7 +320,9 @@ impl SearchWorker {
     }
 
         // Quiescence Search 
-    fn quiescence_search(&mut self, mut alpha: i32, beta: i32, ply: i32) -> i32 {
+    fn quiescence_search(&mut self, mut alpha: i32, beta: i32, 
+        ply: i32, stop_signal: &AtomicBool) -> i32 {
+        
         // Three Move Repetition Draw
         if self.check_three_move_repetition() {
             return 0;
@@ -375,7 +379,7 @@ impl SearchWorker {
             self.process_time_cat_forward(*forward_move);
 
             // Negamax search call
-            let score = -self.quiescence_search(-beta, -alpha, ply + 1);
+            let score = -self.quiescence_search(-beta, -alpha, ply + 1, stop_signal);
             
             // Undo Move + TimeCat
             self.process_time_cat_backward();

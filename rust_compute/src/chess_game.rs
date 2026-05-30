@@ -9,9 +9,9 @@ use crate::rook_mask::*;
 use crate::transposition_table::*;
 use crate::search_worker::*;
 
-pub const PV_DEPTH: i32 = 9;
+pub const PV_DEPTH: i32 = 8;
 pub const MATE_VALUE: i32 = 30000;
-pub const MAX_DEPTH: i32 = 50;
+pub const MAX_DEPTH: i32 = 20;
 
 pub const INFINITY: i32 = 32000;
 
@@ -56,7 +56,7 @@ pub fn compute_next_move<'py>(py: Python<'py>, prev_moves: Vec<String>) -> PyRes
                 let mut search_worker = SearchWorker::new(nodes, tt);
                 search_worker.process_moves(prev_moves_clone);
 
-                let max_search_depth = PV_DEPTH + NUM_THREADS as i32;
+                let max_search_depth = PV_DEPTH as i32;
                 let thread_best_move = search_worker.root_search(
                     thread_id, 
                     max_search_depth, 
