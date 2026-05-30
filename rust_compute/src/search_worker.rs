@@ -1,4 +1,5 @@
 use std::sync::atomic::{AtomicUsize, AtomicBool, Ordering};
+use std::time::{Instant, Duration};
 use std::sync::Arc;
 use crate::transposition_table::*;
 use std::collections::HashMap;
@@ -48,6 +49,8 @@ impl SearchWorker {
     pub fn root_search(&mut self, thread_id: i32, 
         max_depth: i32, stop_signal: &AtomicBool) -> Option<ForwardMove> {
         // Start the timer
+        let start_time = Instant::now();
+        let time_limit = Duration::from_secs(60);
 
         // Thread_id = 0 is the main thread, the rest are helper threads
         let start_depth = if thread_id == 0 { 
@@ -59,14 +62,17 @@ impl SearchWorker {
         // --- ITERATIVE DEEPENING LOOP ---
         let mut best_move_overall: Option<ForwardMove> = None;
         for depth in start_depth..=max_depth {
-            if stop_signal.load(Ordering::Relaxed) {
+            if stop_signal.load(Ordering::Relaxed) || start_time.elapsed() >= time_limit {
+                if thread_id == 0 {
+                    stop_signal.store(true, Ordering::Relaxed);
+                }
                 break;
             }
             
             let result = self.negamax(depth, 0, -INFINITY, INFINITY, 
                 best_move_overall, stop_signal);
             
-            if !stop_signal.load(Ordering::Relaxed) {
+            if !stop_signal.load(Ordering::Relaxed){
                 best_move_overall = result.best_move;
 
                 if thread_id == 0 {
