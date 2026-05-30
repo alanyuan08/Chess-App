@@ -1,6 +1,6 @@
 # Chess AI
 
-![Chess AI in Action](img/saved_game/saved_game.png)
+<img src="img/saved_game/saved_game.png" width="50%">
 
 A hybrid desktop chess application pairing a responsive PySide6 user interface with a high-performance, multithreaded Rust engine core capable of evaluating millions of positions per second.
 
