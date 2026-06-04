@@ -55,6 +55,8 @@ The Chess AI has been tested and consistently drew against ELO 2700 chess.com bo
 
 - [DRAW - ELO 2700 Bot](https://www.chess.com/analysis/game/computer/1447582972/analysis)
 
+*Based on slightly variation of the Engine 
+
 - [DRAW - ELO 2500 Bot](https://www.chess.com/analysis/game/computer/1438052400/analysis)
 
 - [DRAW - ELO 2500 Bot](https://www.chess.com/analysis/game/computer/1447219354/analysis)
@@ -66,7 +68,7 @@ Alan Yuan
 
 | Platform | Link | Intent |
 | :--- | :--- | :--- |
-| **Email** | [alan0408yuan@gmail.com](mailto:alan0408yuan@gmail.com) | Direct inquiries & scheduling |
-| **LinkedIn** | [linkedin.com](https://www.linkedin.com/in/alan-yuan-62301272/) | Professional networking & background |
+| **Email** | [alan0408yuan@gmail.com](mailto:alan0408yuan@gmail.com) | Direct inquiries |
+| **LinkedIn** | [linkedin.com](https://www.linkedin.com/in/alan-yuan-62301272/) | Professional networking |
 
 *Response time: Typically within 24 hours.*
