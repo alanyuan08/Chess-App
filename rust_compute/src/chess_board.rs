@@ -85,7 +85,7 @@ impl ChessBoard {
             }
 
             // 2. Initialize Major Pieces (Bitboards)
-            self.rooks[color]   |= (1u64 << (piece_rank_offset + 0)) | (1u64 << (piece_rank_offset + 7));
+            self.rooks[color]   |= (1u64 << (piece_rank_offset)) | (1u64 << (piece_rank_offset + 7));
             self.knights[color] |= (1u64 << (piece_rank_offset + 1)) | (1u64 << (piece_rank_offset + 6));
             self.bishops[color] |= (1u64 << (piece_rank_offset + 2)) | (1u64 << (piece_rank_offset + 5));
             self.queens[color]  |= 1u64 << (piece_rank_offset + 3);
@@ -100,9 +100,7 @@ impl ChessBoard {
                 BoardPiece::BKING, BoardPiece::BBISHOP, BoardPiece::BKNIGHT, BoardPiece::BROOK]
             };
 
-            for i in 0..8 {
-                self.mailbox[piece_rank_offset + i] = pieces[i];
-            }
+            self.mailbox[piece_rank_offset..8 + piece_rank_offset].copy_from_slice(&pieces);
 
             // 4. Composite Bitboards
             self.all_pieces[color] = self.pawns[color] | self.rooks[color] | 
