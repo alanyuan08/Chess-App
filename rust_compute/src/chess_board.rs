@@ -85,7 +85,7 @@ impl ChessBoard {
             }
 
             // 2. Initialize Major Pieces (Bitboards)
-            self.rooks[color]   |= (1u64 << (piece_rank_offset)) | (1u64 << (piece_rank_offset + 7));
+            self.rooks[color]   |= (1u64 << piece_rank_offset) | (1u64 << (piece_rank_offset + 7));
             self.knights[color] |= (1u64 << (piece_rank_offset + 1)) | (1u64 << (piece_rank_offset + 6));
             self.bishops[color] |= (1u64 << (piece_rank_offset + 2)) | (1u64 << (piece_rank_offset + 5));
             self.queens[color]  |= 1u64 << (piece_rank_offset + 3);

@@ -231,7 +231,7 @@ pub fn compute_rook_magic(sq: usize) -> u64 {
 pub fn rook_moves(chess_board: &mut ChessBoard, player_index: usize, opp_index: usize,
     moves: &mut ArrayVec::<ForwardMove, 256>)  {
 
-    let mut rook_bitboard = chess_board.knights[player_index];
+    let mut rook_bitboard = chess_board.rooks[player_index];
 
     while rook_bitboard != 0 {
         let rook = rook_bitboard.trailing_zeros() as usize;

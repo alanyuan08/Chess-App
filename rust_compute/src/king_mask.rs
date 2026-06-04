@@ -101,8 +101,8 @@ pub fn king_moves(chess_board: &mut ChessBoard, player_index: usize, opp_index: 
         // Check for Queen / King Side Castle
         match chess_board.active_player() {
             Side::WHITE => {
-                if (chess_board.castle_rights() & WHITE_KINGSIDE) != 0 {
-                    if (WHITE_KINGSIDE_PATH & opponent_attacks) == 0 
+                if (chess_board.castle_rights() & WHITE_KINGSIDE) != 0 
+                    && (WHITE_KINGSIDE_PATH & opponent_attacks) == 0 
                         && (WHITE_KINGSIDE_MOVE_PATH & chess_board.occupied) == 0 {
                             moves.push(
                                 ForwardMove { 
@@ -110,9 +110,10 @@ pub fn king_moves(chess_board: &mut ChessBoard, player_index: usize, opp_index: 
                                     move_type: MoveFlag::KINGSIDECASTLE, pv_score: 500
                                 }
                             );
-                    }
+                }
 
-                    if (WHITE_QUEENSIDE_PATH & opponent_attacks) == 0
+                if (chess_board.castle_rights() & WHITE_QUEENSIDE) != 0 
+                    && (WHITE_QUEENSIDE_PATH & opponent_attacks) == 0
                         && (WHITE_QUEENSIDE_MOVE_PATH & chess_board.occupied) == 0 {
                             moves.push(
                                 ForwardMove { 
@@ -120,12 +121,11 @@ pub fn king_moves(chess_board: &mut ChessBoard, player_index: usize, opp_index: 
                                     move_type: MoveFlag::QUEENSIDECASTLE, pv_score: 510
                                 }
                             );
-                    }
                 }
             },
             Side::BLACK => {
-                if (chess_board.castle_rights() & BLACK_KINGSIDE) != 0 {
-                    if (BLACK_KINGSIDE_PATH & opponent_attacks) == 0 
+                if (chess_board.castle_rights() & BLACK_KINGSIDE) != 0 
+                    && (BLACK_KINGSIDE_PATH & opponent_attacks) == 0 
                         && (BLACK_KINGSIDE_MOVE_PATH & chess_board.occupied) == 0 {
                             moves.push(
                                 ForwardMove { 
@@ -133,9 +133,10 @@ pub fn king_moves(chess_board: &mut ChessBoard, player_index: usize, opp_index: 
                                     move_type: MoveFlag::KINGSIDECASTLE, pv_score: 500 
                                 }
                             );
-                    }
+                }
 
-                    if (BLACK_QUEENSIDE_PATH & opponent_attacks) == 0 
+                if (chess_board.castle_rights() & BLACK_QUEENSIDE) != 0 
+                    && (BLACK_QUEENSIDE_PATH & opponent_attacks) == 0 
                         && (BLACK_QUEENSIDE_MOVE_PATH & chess_board.occupied) == 0 {
                             moves.push(
                                 ForwardMove { 
@@ -143,7 +144,6 @@ pub fn king_moves(chess_board: &mut ChessBoard, player_index: usize, opp_index: 
                                     move_type: MoveFlag::QUEENSIDECASTLE, pv_score: 510 
                                 }
                             );
-                    }
                 }
             }
         }
