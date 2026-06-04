@@ -16,6 +16,10 @@ jobs:
     name: Compile Check
     runs-on: ubuntu-latest
 
+    defaults:
+      run:
+        working-directory: ./rust_compute
+
     steps:
       # 1. Fetch your repository source code
       - name: Checkout code

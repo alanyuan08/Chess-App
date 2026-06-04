@@ -12,21 +12,21 @@ use timecat::prelude::*;
 // 0 -> White / 1 -> Black
 #[derive(Debug, Clone)] 
 pub struct ChessBoard {
-    pawns: [u64; 2],
-    knights: [u64; 2],
-    bishops: [u64; 2],
-    rooks: [u64; 2],
-    queens: [u64; 2],
-    kings: [u64; 2],
+    pub pawns: [u64; 2],
+    pub knights: [u64; 2],
+    pub bishops: [u64; 2],
+    pub rooks: [u64; 2],
+    pub queens: [u64; 2],
+    pub kings: [u64; 2],
     
-    all_pieces: [u64; 2],
-    occupied: u64,
+    pub all_pieces: [u64; 2],
+    pub occupied: u64,
+    
+    pub mailbox: [BoardPiece; 64],
 
     castling_rights: u8,
     en_passant: u64,
     active_player: Side,
-
-    mailbox: [BoardPiece; 64],
 
     // Zobrist Hash
     zobrist_hash: u64,
@@ -39,6 +39,12 @@ pub const WHITE_KINGSIDE: u8 = 0b0001; // 1
 pub const WHITE_QUEENSIDE: u8 = 0b0010; // 2
 pub const BLACK_KINGSIDE: u8 = 0b0100; // 4
 pub const BLACK_QUEENSIDE: u8 = 0b1000; // 8
+
+impl Default for ChessBoard {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl ChessBoard {
     // A constructor-like associated function
@@ -135,10 +141,10 @@ impl ChessBoard {
     pub fn opponent_player(&self) -> Side {
         match self.active_player {
             Side::WHITE => {
-                return Side::BLACK;
+                Side::BLACK
             },
             Side::BLACK => {
-                return Side::WHITE;
+                Side::WHITE
             }
         }
     }
@@ -147,10 +153,10 @@ impl ChessBoard {
     pub fn player_index(&self, player_side: Side) -> usize {
         match player_side {
             Side::WHITE => {
-                return 0;
+                0
             },
             Side::BLACK => {
-                return 1;
+                1
             }
         }
     }
@@ -195,8 +201,6 @@ impl ChessBoard {
     // Undo Time Cat Move
     pub fn timecat_pop_move(&mut self) {
         let _ = self.timecat_board.pop();
-
-        return;
     }
 
     // Used to Calculate Castling / King Safety
@@ -266,25 +270,19 @@ impl ChessBoard {
         pv_move_hint: Option<ForwardMove>
     ) {        
         let player_index = self.player_index(self.active_player);
-
         let opp_index = self.player_index(self.opponent_player());
         let _opponent_attack_targets = self.compute_attack_targets(self.opponent_player());
 
         // Generate Moves
-        king_moves(self.kings[player_index], self.occupied, _opponent_attack_targets, self.active_player, 
-            self.castling_rights, self.all_pieces[opp_index], gen_moves, self.mailbox);
+        king_moves(self, player_index, opp_index, _opponent_attack_targets, gen_moves);
 
-        knight_moves(self.knights[player_index], self.occupied, self.all_pieces[opp_index], 
-            gen_moves, self.mailbox);
+        knight_moves(self, player_index, opp_index, gen_moves);
 
-        rook_moves(self.rooks[player_index], self.occupied, self.all_pieces[opp_index], 
-            gen_moves, self.mailbox);
+        rook_moves(self, player_index, opp_index, gen_moves);
 
-        bishop_moves(self.bishops[player_index], self.occupied, self.all_pieces[opp_index], 
-            gen_moves, self.mailbox);
+        bishop_moves(self, player_index, opp_index, gen_moves);
 
-        queen_moves(self.queens[player_index], self.occupied, self.all_pieces[opp_index], 
-            gen_moves, self.mailbox);
+        queen_moves(self, player_index, opp_index, gen_moves);
 
         match self.active_player {
             Side::WHITE => {

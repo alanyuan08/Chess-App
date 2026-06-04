@@ -1,5 +1,6 @@
 use std::sync::LazyLock;
 use crate::move_command::*;
+use crate::chess_board::*;
 use arrayvec::ArrayVec;
 
 // Mask the Irrelevant Bits no in the Diagonal Path
@@ -202,16 +203,17 @@ pub fn compute_bishop_magic(sq: usize) -> u64 {
     }
 }
 
-pub fn bishop_moves(mut bishop_bitboard: u64, occupancy: u64, 
-    opponent_pieces: u64, moves: &mut ArrayVec::<ForwardMove, 256>, mailbox: [BoardPiece; 64])  {
+pub fn bishop_moves(chess_board: &mut ChessBoard, player_index: usize, opp_index: usize,
+    moves: &mut ArrayVec::<ForwardMove, 256>)  {
+
+    let mut bishop_bitboard = chess_board.bishops[player_index];
 
     while bishop_bitboard != 0 {
         let bishop = bishop_bitboard.trailing_zeros() as usize;
+        let bishop_attack_paths = bishop_attack_paths(bishop, chess_board.occupied);
 
-        let bishop_attack_paths = bishop_attack_paths(bishop, occupancy);
-
-        let mut bishop_moves = bishop_attack_paths & !occupancy;
-        let mut bishop_captures = bishop_attack_paths & opponent_pieces;
+        let mut bishop_moves = bishop_attack_paths & !chess_board.occupied;
+        let mut bishop_captures = bishop_attack_paths & chess_board.all_pieces[opp_index];
 
         while bishop_moves != 0 {
             let target = bishop_moves.trailing_zeros() as usize;
@@ -224,7 +226,7 @@ pub fn bishop_moves(mut bishop_bitboard: u64, occupancy: u64,
         while bishop_captures != 0 {
             let target = bishop_captures.trailing_zeros() as usize;
             
-            let captured_piece_val = piece_value(mailbox[target]);
+            let captured_piece_val = piece_value(chess_board.mailbox[target]);
             let pv_score = 100 - (captured_piece_val * 10) + 2; 
 
             moves.push(ForwardMove { 

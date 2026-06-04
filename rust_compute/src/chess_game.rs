@@ -56,10 +56,9 @@ pub fn compute_next_move<'py>(py: Python<'py>, prev_moves: Vec<String>) -> PyRes
                 let mut search_worker = SearchWorker::new(nodes, tt);
                 search_worker.process_moves(prev_moves_clone);
 
-                let max_search_depth = PV_DEPTH as i32;
                 let thread_best_move = search_worker.root_search(
                     thread_id, 
-                    max_search_depth, 
+                    PV_DEPTH, 
                     &stop_signal
                 );
 

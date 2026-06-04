@@ -1,4 +1,5 @@
 use crate::move_command::*;
+use crate::chess_board::*;
 use arrayvec::ArrayVec;
 
 // Compute Knight Attack on Compile
@@ -30,16 +31,17 @@ pub const KNIGHT_ATTACKS: [u64; 64] = {
     knight_attack
 };
 
-pub fn knight_moves(mut knight_bitboard: u64, occupancy: u64, 
-    opponent_pieces: u64, moves: &mut ArrayVec::<ForwardMove, 256>, 
-    mailbox: [BoardPiece; 64])  {
+pub fn knight_moves(chess_board: &mut ChessBoard, player_index: usize, opp_index: usize,
+    moves: &mut ArrayVec::<ForwardMove, 256>)  {
+
+    let mut knight_bitboard = chess_board.knights[player_index];
 
     while knight_bitboard != 0 {
         let knight = knight_bitboard.trailing_zeros() as usize;
-        let knight_attack_paths = KNIGHT_ATTACKS[knight as usize];
+        let knight_attack_paths = KNIGHT_ATTACKS[knight];
 
-        let mut knight_moves = knight_attack_paths & !occupancy;
-        let mut knight_captures = knight_attack_paths & opponent_pieces;
+        let mut knight_moves = knight_attack_paths & !chess_board.occupied;
+        let mut knight_captures = knight_attack_paths & chess_board.all_pieces[opp_index];
 
         while knight_moves != 0 {
             let target = knight_moves.trailing_zeros() as usize;
@@ -54,7 +56,7 @@ pub fn knight_moves(mut knight_bitboard: u64, occupancy: u64,
         while knight_captures != 0 {
             let target = knight_captures.trailing_zeros() as usize;
 
-            let captured_piece_val = piece_value(mailbox[target]);
+            let captured_piece_val = piece_value(chess_board.mailbox[target]);
             let pv_score = 100 - (captured_piece_val * 10) + 2; 
 
             moves.push(
