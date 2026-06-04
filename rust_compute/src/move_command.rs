@@ -49,13 +49,6 @@ pub enum MoveFlag {
     PROMOTIONKNIGHT = 10,
 }
 
-pub const PROMOTION_FLAGS: [MoveFlag; 4] = [
-    MoveFlag::PROMOTIONQUEEN,
-    MoveFlag::PROMOTIONROOK,
-    MoveFlag::PROMOTIONBISHOP,
-    MoveFlag::PROMOTIONKNIGHT,
-];
-
 #[derive(Clone, Copy)]
 pub struct SearchResult {
     pub score: i32,
