@@ -22,7 +22,7 @@ pub struct ChessBoard {
     pub all_pieces: [u64; 2],
     pub occupied: u64,
     
-    pub mailbox: [BoardPiece; 64],
+    mailbox: [BoardPiece; 64],
 
     castling_rights: u8,
     en_passant: u64,
@@ -177,6 +177,11 @@ impl ChessBoard {
     // Return Active Player
     pub fn active_player(&self) -> Side {   
         self.active_player
+    }
+
+    // Return Mailbox Piece
+    pub fn mailbox_piece(&self, target: usize) -> BoardPiece {   
+        self.mailbox[target]
     }
 
     // Return Time Cat Score

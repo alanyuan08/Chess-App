@@ -251,7 +251,7 @@ pub fn rook_moves(chess_board: &mut ChessBoard, player_index: usize, opp_index: 
         while rook_captures != 0 {
             let target = rook_captures.trailing_zeros() as usize;
 
-            let captured_piece_val = piece_value(chess_board.mailbox[target]);
+            let captured_piece_val = piece_value(chess_board.mailbox_piece(target));
             let pv_score = 100 - (captured_piece_val * 10) + 3; 
 
             moves.push(ForwardMove { 

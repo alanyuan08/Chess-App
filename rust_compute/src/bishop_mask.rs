@@ -226,7 +226,7 @@ pub fn bishop_moves(chess_board: &mut ChessBoard, player_index: usize, opp_index
         while bishop_captures != 0 {
             let target = bishop_captures.trailing_zeros() as usize;
             
-            let captured_piece_val = piece_value(chess_board.mailbox[target]);
+            let captured_piece_val = piece_value(chess_board.mailbox_piece(target));
             let pv_score = 100 - (captured_piece_val * 10) + 2; 
 
             moves.push(ForwardMove { 

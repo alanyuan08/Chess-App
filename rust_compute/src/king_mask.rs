@@ -89,7 +89,7 @@ pub fn king_moves(chess_board: &mut ChessBoard, player_index: usize, opp_index: 
         while king_captures != 0 {
             let target = king_captures.trailing_zeros() as usize;
             
-            let captured_piece_val = piece_value(chess_board.mailbox[target]);
+            let captured_piece_val = piece_value(chess_board.mailbox_piece(target));
             let pv_score = 100 - (captured_piece_val * 10) + 5; 
 
             moves.push(ForwardMove { 
