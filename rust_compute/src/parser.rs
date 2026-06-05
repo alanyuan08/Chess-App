@@ -22,7 +22,7 @@ pub fn parse_uci(forward_move: ForwardMove) -> String {
     format!("{}{}{}{}{}", start_file, start_rank, end_file, end_rank, promo)
 }
 
-pub fn parse_forward_move(raw_move: &String) -> ForwardMove {    
+pub fn parse_forward_move(raw_move: &str) -> ForwardMove {    
     let result: Vec<u32> = raw_move.chars().map(|c: char| {
         c.to_digit(10).unwrap_or(0)
     }).collect();

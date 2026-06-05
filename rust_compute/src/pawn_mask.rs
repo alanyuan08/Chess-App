@@ -51,12 +51,11 @@ pub fn white_pawn_moves(white_pawns: u64, occupancy: u64, black_pieces: u64,
     while promotion_move != 0 {
         let target = promotion_move.trailing_zeros() as usize;
         
-        // 1. Queen Promotion: Highest priority (most negative)
         moves.push(ForwardMove { 
             start_sq: target - 8, end_sq: target, move_type: MoveFlag::PROMOTIONQUEEN, pv_score: 10 
         });
 
-        // 2. Under-promotions: Pushed past 1000 so they are evaluated after quiet moves
+        // Under-promotions: Pushed past 1000 so they are evaluated after quiet moves
         moves.push(ForwardMove { 
             start_sq: target - 8, end_sq: target, move_type: MoveFlag::PROMOTIONROOK, pv_score: 2000 
         });
@@ -121,12 +120,11 @@ pub fn white_pawn_moves(white_pawns: u64, occupancy: u64, black_pieces: u64,
     let mut left_capture_promotion = left_captures & RANK_8;
     while left_capture_promotion != 0 {
         let target = left_capture_promotion.trailing_zeros() as usize;
-        // 1. Queen Promotion: Highest priority (most negative)
         moves.push(ForwardMove { 
             start_sq: target - 7, end_sq: target, move_type: MoveFlag::PROMOTIONQUEEN, pv_score: 10 
         });
 
-        // 2. Under-promotions: Pushed past 1000 so they are evaluated after quiet moves
+        // Under-promotions: Pushed past 1000 so they are evaluated after quiet moves
         moves.push(ForwardMove { 
             start_sq: target - 7, end_sq: target, move_type: MoveFlag::PROMOTIONROOK, pv_score: 2000 
         });
@@ -142,12 +140,11 @@ pub fn white_pawn_moves(white_pawns: u64, occupancy: u64, black_pieces: u64,
     let mut right_capture_promotion = right_captures & RANK_8;
     while right_capture_promotion != 0 {
         let target = right_capture_promotion.trailing_zeros() as usize;
-        // 1. Queen Promotion: Highest priority (most negative)
         moves.push(ForwardMove { 
             start_sq: target - 9, end_sq: target, move_type: MoveFlag::PROMOTIONQUEEN, pv_score: 10 
         });
 
-        // 2. Under-promotions: Pushed past 1000 so they are evaluated after quiet moves
+        // Under-promotions: Pushed past 1000 so they are evaluated after quiet moves
         moves.push(ForwardMove { 
             start_sq: target - 9, end_sq: target, move_type: MoveFlag::PROMOTIONROOK, pv_score: 2000 
         });

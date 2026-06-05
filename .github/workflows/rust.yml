@@ -1,0 +1,44 @@
+name: Rust Compile Check
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+  # Disable incremental compilation for faster CI builds from scratch
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  check:
+    name: Compile Check
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: ./rust_compute
+
+    steps:
+      # 1. Fetch your repository source code
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. Install Rust toolchain and handle problem matchers
+      - name: Setup Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: clippy, rustfmt
+
+      # 3. Cache dependencies to speed up future runs
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      # 4. Fast validation check (verifies code compiles)
+      - name: Run cargo check
+        run: cargo check --all-targets --all-features
+
+      # 5. Optional: Run lints to catch common code style mistakes
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings

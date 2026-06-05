@@ -116,8 +116,8 @@ impl SearchWorker {
             end_sq: forward_move.end_sq,
             move_type: forward_move.move_type,
             captured_piece: remove_piece,
-            prev_castle_rights: prev_castle_rights,
-            prev_en_passant: prev_en_passant,
+            prev_castle_rights,
+            prev_en_passant,
         };
 
         self.history[self.history_index] = Some(undo_move);

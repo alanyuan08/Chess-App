@@ -16,7 +16,7 @@ impl ForwardMove {
         Self {
             start_sq: (packed & 0x3F) as usize,
             end_sq: ((packed >> 6) & 0x3F) as usize,
-            move_type: unsafe { std::mem::transmute((packed >> 12) as u32) }, 
+            move_type: unsafe { std::mem::transmute::<u32, MoveFlag>((packed >> 12) as u32) }, 
             pv_score: 0,
         }
     }
@@ -49,13 +49,6 @@ pub enum MoveFlag {
     PROMOTIONKNIGHT = 10,
 }
 
-pub const PROMOTION_FLAGS: [MoveFlag; 4] = [
-    MoveFlag::PROMOTIONQUEEN,
-    MoveFlag::PROMOTIONROOK,
-    MoveFlag::PROMOTIONBISHOP,
-    MoveFlag::PROMOTIONKNIGHT,
-];
-
 #[derive(Clone, Copy)]
 pub struct SearchResult {
     pub score: i32,
@@ -65,16 +58,16 @@ pub struct SearchResult {
 pub fn white_promotion_piece(promotion_flag: MoveFlag) -> BoardPiece {
     match promotion_flag {
         MoveFlag::PROMOTIONQUEEN => {
-            return BoardPiece::WQUEEN;
+            BoardPiece::WQUEEN
         },
         MoveFlag::PROMOTIONROOK => {
-            return BoardPiece::WROOK;
+            BoardPiece::WROOK
         },
         MoveFlag::PROMOTIONBISHOP => {
-            return BoardPiece::WBISHOP;
+            BoardPiece::WBISHOP
         },
         MoveFlag::PROMOTIONKNIGHT => {
-            return BoardPiece::WKNIGHT;
+            BoardPiece::WKNIGHT
         },
         _ => {
             panic!("Invalid Promotion Flag");
@@ -85,16 +78,16 @@ pub fn white_promotion_piece(promotion_flag: MoveFlag) -> BoardPiece {
 pub fn black_promotion_piece(promotion_flag: MoveFlag) -> BoardPiece {
     match promotion_flag {
         MoveFlag::PROMOTIONQUEEN => {
-            return BoardPiece::BQUEEN;
+            BoardPiece::BQUEEN
         },
         MoveFlag::PROMOTIONROOK => {
-            return BoardPiece::BROOK;
+            BoardPiece::BROOK
         },
         MoveFlag::PROMOTIONBISHOP => {
-            return BoardPiece::BBISHOP;
+            BoardPiece::BBISHOP
         },
         MoveFlag::PROMOTIONKNIGHT => {
-            return BoardPiece::BKNIGHT;
+            BoardPiece::BKNIGHT
         },
         _ => {
             panic!("Invalid Promotion Flag");
@@ -154,20 +147,20 @@ pub enum BoardPiece {
 pub fn piece_value(piece_type: BoardPiece) -> i32 {
     match piece_type {
         BoardPiece::WPAWN | BoardPiece::BPAWN => {
-            return 1;
+            1
         },
         BoardPiece::WBISHOP | BoardPiece::BBISHOP |
         BoardPiece::WKNIGHT | BoardPiece::BKNIGHT => {
-            return 2;
+            2
         },
         BoardPiece::WROOK | BoardPiece::BROOK => {
-            return 3;
+            3
         },
         BoardPiece::WQUEEN | BoardPiece::BQUEEN => {
-            return 4;
+            4
         },
         BoardPiece::WKING | BoardPiece::BKING => {
-            return 5;
+            5
         },
         BoardPiece::NONE => {
             panic!("Passed None");
@@ -180,12 +173,12 @@ pub fn piece_player(piece_type: BoardPiece) -> Side {
         BoardPiece::WPAWN | BoardPiece::WBISHOP |
         BoardPiece::WKNIGHT | BoardPiece::WROOK |
         BoardPiece::WQUEEN | BoardPiece::WKING  => {
-            return Side::WHITE;
+            Side::WHITE
         },
         BoardPiece::BPAWN | BoardPiece::BBISHOP |
         BoardPiece::BKNIGHT | BoardPiece::BROOK |
         BoardPiece::BQUEEN | BoardPiece::BKING  => {
-            return Side::BLACK;
+            Side::BLACK
         },
         BoardPiece::NONE => {
             panic!("Passed None");
