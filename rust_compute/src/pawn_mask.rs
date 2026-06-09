@@ -1,5 +1,6 @@
 use crate::move_command::*;
 use arrayvec::ArrayVec;
+use crate::chess_board::*;
 
 const NOT_A_FILE: u64 = 0xFEFE_FEFE_FEFE_FEFE;
 const NOT_H_FILE: u64 = 0x7F7F_7F7F_7F7F_7F7F;
@@ -31,8 +32,13 @@ pub fn black_pawn_attacks(black_pawns: u64) -> u64 {
     captures_left | captures_right
 }
 
-pub fn white_pawn_moves(white_pawns: u64, occupancy: u64, black_pieces: u64, 
-    en_passant_board: u64, moves: &mut ArrayVec::<ForwardMove, 256>, mailbox: [BoardPiece; 64])  {
+pub fn white_pawn_moves(chess_board: &mut ChessBoard, player_index: usize, opp_index: usize,
+    moves: &mut ArrayVec::<ForwardMove, 256>)  {
+
+    let white_pawns = chess_board.pawns[player_index];
+    let black_pieces = chess_board.all_pieces[opp_index];
+    let en_passant_board = chess_board.en_passant();
+    let occupancy = chess_board.occupied;
 
     // --- Aggregating Single Pushes (No Promotion) ---
     let mut one_move = ((white_pawns & !RANK_7) << 8) & !occupancy;
@@ -55,7 +61,6 @@ pub fn white_pawn_moves(white_pawns: u64, occupancy: u64, black_pieces: u64,
             start_sq: target - 8, end_sq: target, move_type: MoveFlag::PROMOTIONQUEEN, pv_score: 10 
         });
 
-        // Under-promotions: Pushed past 1000 so they are evaluated after quiet moves
         moves.push(ForwardMove { 
             start_sq: target - 8, end_sq: target, move_type: MoveFlag::PROMOTIONROOK, pv_score: 2000 
         });
@@ -90,7 +95,7 @@ pub fn white_pawn_moves(white_pawns: u64, occupancy: u64, black_pieces: u64,
     while left_capture_no_promotion != 0 {
         let target = left_capture_no_promotion.trailing_zeros() as usize;
 
-        let captured_piece_val = piece_value(mailbox[target]);
+        let captured_piece_val = piece_value(chess_board.mailbox_piece(target));
         let pv_score = 100 - (captured_piece_val * 10) + 1; 
 
         moves.push(
@@ -105,7 +110,7 @@ pub fn white_pawn_moves(white_pawns: u64, occupancy: u64, black_pieces: u64,
     while right_capture_no_promotion != 0 {
         let target = right_capture_no_promotion.trailing_zeros() as usize;
 
-        let captured_piece_val = piece_value(mailbox[target]);
+        let captured_piece_val = piece_value(chess_board.mailbox_piece(target));
         let pv_score = 100 - (captured_piece_val * 10) + 1; 
 
         moves.push(
@@ -181,8 +186,13 @@ pub fn white_pawn_moves(white_pawns: u64, occupancy: u64, black_pieces: u64,
     }
 }
 
-pub fn black_pawn_moves(black_pawns: u64, occupancy: u64, white_pieces: u64, 
-    en_passant_board: u64, moves: &mut ArrayVec::<ForwardMove, 256>, mailbox: [BoardPiece; 64])  {
+pub fn black_pawn_moves(chess_board: &mut ChessBoard, player_index: usize, opp_index: usize,
+    moves: &mut ArrayVec::<ForwardMove, 256>)  {
+
+    let black_pawns = chess_board.pawns[player_index];
+    let white_pieces = chess_board.all_pieces[opp_index];
+    let en_passant_board = chess_board.en_passant();
+    let occupancy = chess_board.occupied;
 
     // --- Aggregating Single Pushes (No Promotion) ---
     let mut one_move = ((black_pawns & !RANK_2) >> 8) & !occupancy;
@@ -239,7 +249,7 @@ pub fn black_pawn_moves(black_pawns: u64, occupancy: u64, white_pieces: u64,
     while left_capture_no_promotion != 0 {
         let target = left_capture_no_promotion.trailing_zeros() as usize;
 
-        let captured_piece_val = piece_value(mailbox[target]);
+        let captured_piece_val = piece_value(chess_board.mailbox_piece(target));
         let pv_score = 100 - (captured_piece_val * 10) + 1; 
 
         moves.push(
@@ -254,7 +264,7 @@ pub fn black_pawn_moves(black_pawns: u64, occupancy: u64, white_pieces: u64,
     while right_capture_no_promotion != 0 {
         let target = right_capture_no_promotion.trailing_zeros() as usize;
 
-        let captured_piece_val = piece_value(mailbox[target]);
+        let captured_piece_val = piece_value(chess_board.mailbox_piece(target));
         let pv_score = 100 - (captured_piece_val * 10) + 1; 
 
         moves.push(

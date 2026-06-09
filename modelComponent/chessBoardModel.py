@@ -50,13 +50,10 @@ class ChessBoardModel():
         self.forwardPosition()
 
     # Used to Determine if Checkmate Or Draw
-    def checkMate(self) -> bool:
+    def inCheck(self) -> bool:
         opponentAttackTargets = self.allOpponentCaptureTargets()
         kingTuple = self.kingTuple(self.playerTurn)
-        if kingTuple in opponentAttackTargets:
-            return True
-
-        return False
+        return kingTuple in opponentAttackTargets
 
     def forwardPosition(self):
         self.traversedPositions[self.zobristHash] = \
