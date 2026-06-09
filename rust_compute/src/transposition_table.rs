@@ -62,7 +62,7 @@ impl TranspositionTable {
     #[inline(always)]
     fn pack_entry(move_id: u16, score: i16, depth: i32, flag: HashFlag, key: u64, ply: i32) -> u64 {
         
-        let mut store_score = score as i16;
+        let mut store_score = score;
         if store_score > (MATE_VALUE - MAX_DEPTH) as i16 { 
             store_score += ply as i16; 
         } else if store_score < (-MATE_VALUE + MAX_DEPTH) as i16 { 
