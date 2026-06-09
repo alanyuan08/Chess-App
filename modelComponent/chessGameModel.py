@@ -51,12 +51,12 @@ class ChessGameModel():
         # No Moves - Determine Checkmate or Draw
         if len(self.chessBoard.allValidMoves()) == 0:
             if self.gamePlayerTurn == Player.WHITE:
-                if self.chessBoard.checkMate():
+                if self.chessBoard.inCheck():
                     self.gameState = GameState.BLACKWIN
                 else:
                     self.gameState = GameState.DRAW
             else:
-                if self.chessBoard.checkMate():
+                if self.chessBoard.inCheck():
                     self.gameState = GameState.WHITEWIN
                 else:
                     self.gameState = GameState.DRAW

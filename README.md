@@ -55,7 +55,7 @@ The Chess AI has been tested and consistently drew against ELO 2700 chess.com bo
 
 - [DRAW - ELO 2700 Bot](https://www.chess.com/analysis/game/computer/1447582972/analysis)
 
-*Based on slightly variation of the Engine 
+*Based on slightly older variation of the Engine 
 
 - [DRAW - ELO 2500 Bot](https://www.chess.com/analysis/game/computer/1438052400/analysis)
 

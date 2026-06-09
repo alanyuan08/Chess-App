@@ -289,12 +289,10 @@ impl ChessBoard {
 
         match self.active_player {
             Side::WHITE => {
-                white_pawn_moves(self.pawns[player_index], self.occupied, 
-                    self.all_pieces[opp_index], self.en_passant, gen_moves, self.mailbox);
+                white_pawn_moves(self, player_index, opp_index, gen_moves);
             },
             Side::BLACK => {
-                black_pawn_moves(self.pawns[player_index], self.occupied, 
-                    self.all_pieces[opp_index], self.en_passant, gen_moves, self.mailbox);
+                black_pawn_moves(self, player_index, opp_index, gen_moves);
             }
         }
         

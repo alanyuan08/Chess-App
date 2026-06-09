@@ -31,7 +31,7 @@ class PlayerInfo(QGraphicsPixmapItem):
 		if gameState == GameState.PLAYING:
 			if self.playerTurn:
 				newText += "Active Turn"
-		elif GameState.DRAW:
+		elif gameState == GameState.DRAW:
 			newText += "Draw"
 		elif self.player == Player.WHITE:
 			if gameState == GameState.WHITEWIN:
