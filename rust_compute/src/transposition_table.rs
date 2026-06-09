@@ -72,7 +72,7 @@ impl TranspositionTable {
         let tag_22 = (key >> 42) & 0x3F_FFFF; 
         let mut packed = 0u64;
         packed |= (move_id as u64) & 0xFFFF;
-        packed |= ((store_score as u16) as u64) << 16;
+        packed |= (store_score as u64) << 16;
         packed |= ((depth as u8) as u64) << 32;
         packed |= tag_22 << 40;
         packed |= (flag as u8 as u64) << 62;

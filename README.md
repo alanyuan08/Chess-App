@@ -22,7 +22,7 @@ The engine has been unofficially benchmarked and validated against 2700 Elo bots
 
 - **Adversarial Search:** Implements Minimax search enhanced by Alpha-Beta pruning and a Quiescence search to eliminate horizon-effect instability
 
-- **Deep Evaluation:** Combines Iterative Deepening with Principal Variation Search (PVS) to regularly achieve search depths of 10+ plies. (Average Move is approximately 30 seconds to 1.5 minutes)
+- **Deep Evaluation:** Combines Iterative Deepening with Principal Variation Search (PVS) to regularly achieve search depths of 10+ plies. (Average Move is approximately 20 seconds to 1.5 minutes)
 
 - **Transposition Tables:** Caches previously evaluated board states to accelerate search paths and share data across threads
 
