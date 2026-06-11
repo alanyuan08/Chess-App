@@ -28,7 +28,7 @@ The engine has been unofficially benchmarked and validated against 2700 Elo bots
 
 - **Parallel Processing:** Scales performance across CPU threads using a lock-free concurrent tree search architecture (Lazy SMP)
 
-- **Performance Benchmark:** Processes approximately 7.2 million nodes per second (NPS) on an Apple M4 Pro chip.
+- **Performance Benchmark:** Processes approximately 7.7 million nodes per second (NPS) on an Apple M4 Pro chip.
 
 > **Note:**: The transposition table implementation (transposition_table.rs) utilized AI-assisted generation and relies on open-source algorithmic paradigms. I do not claim sole authorship over this specific module.
 
