@@ -47,39 +47,41 @@ pub fn compute_next_move<'py>(py: Python<'py>, prev_moves: Vec<String>) -> PyRes
     let mut default_worker = SearchWorker::new(tt_ref);
     default_worker.process_moves(prev_moves);
 
-    thread::scope(|s| {
-        let mut handlers = Vec::new();
+    py.allow_threads(|| {
+        thread::scope(|s| {
+            let mut handlers = Vec::new();
 
-        for thread_id in 0..NUM_THREADS {
-            let stop_signal = Arc::clone(&stop_search);
-            let nodes_counter = Arc::clone(&chess_game.nodes_processed); 
+            for thread_id in 0..NUM_THREADS {
+                let stop_signal = Arc::clone(&stop_search);
+                let nodes_counter = Arc::clone(&chess_game.nodes_processed); 
 
-            let mut thread_worker = default_worker.clone(); 
+                let mut thread_worker = default_worker.clone(); 
 
-            let handle = s.spawn(move || {
-                let (thread_best_move, nodes_processed) = thread_worker.root_search(
-                    thread_id, 
-                    PV_DEPTH, 
-                    &stop_signal
-                );
+                let handle = s.spawn(move || {
+                    let (thread_best_move, nodes_processed) = thread_worker.root_search(
+                        thread_id, 
+                        PV_DEPTH, 
+                        &stop_signal
+                    );
 
-                nodes_counter.fetch_add(nodes_processed, Ordering::Relaxed);
+                    nodes_counter.fetch_add(nodes_processed, Ordering::Relaxed);
 
-                (thread_id, thread_best_move)
-            });
+                    (thread_id, thread_best_move)
+                });
 
-            handlers.push(handle);
-        }
-
-        // Aggregate Responses (Fixed Scoped Handle Join API)
-        for handle in handlers {
-            let (thread_id, best_move) = handle.join().unwrap(); 
-            
-            if thread_id == 0 {
-                final_best_move = best_move;
+                handlers.push(handle);
             }
-        }
-    });
+
+            // Aggregate Responses (Fixed Scoped Handle Join API)
+            for handle in handlers {
+                let (thread_id, best_move) = handle.join().unwrap(); 
+                
+                if thread_id == 0 {
+                    final_best_move = best_move;
+                }
+            }
+        });
+    }
 
     let elapsed_time = start_time.elapsed();
     let node_procesed =  chess_game.nodes_processed.load(Ordering::Relaxed);
