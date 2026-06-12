@@ -13,7 +13,7 @@ use arrayvec::ArrayVec;
 #[derive(Clone)] 
 pub struct SearchWorker<'a> {
     transposition_table: &'a TranspositionTable,
-    nodes_processed: i32,
+    nodes_processed: usize,
 
     history: [Option<UndoMove>; 1024],
     history_index: usize,
@@ -50,16 +50,16 @@ impl<'a> SearchWorker<'a> {
 
     // Search Entry Point
     pub fn root_search(&mut self, thread_id: i32, 
-        max_depth: i32, stop_signal: &AtomicBool) -> (Option<ForwardMove>, i32){
+        max_depth: i32, stop_signal: &AtomicBool) -> (Option<ForwardMove>, usize){
         // Start the timer
         let start_time = Instant::now();
-        let time_limit = Duration::from_secs(45);
+        let time_limit = Duration::from_secs(20);
 
         // Thread_id = 0 is the main thread, the rest are helper threads
         let start_depth = if thread_id == 0 { 
             1 
         } else { 
-            2 + (thread_id % 4)
+            2 + (thread_id % 2)
         };
 
         // --- ITERATIVE DEEPENING LOOP ---

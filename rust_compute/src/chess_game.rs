@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use pyo3::prelude::*;
 use std::sync::Arc;
 use std::thread;
@@ -19,14 +19,14 @@ pub const INFINITY: i32 = 32000;
 pub const NUM_THREADS: i32 = 10;
 
 struct ChessGame {
-    nodes_processed: Arc<AtomicI32>,
+    nodes_processed: Arc<AtomicUsize>,
     transposition_table: TranspositionTable,
 }
 
 impl ChessGame {
     fn new() -> Self {
         Self {
-            nodes_processed: Arc::new(AtomicI32::new(0)),
+            nodes_processed: Arc::new(AtomicUsize::new(0)),
             transposition_table: TranspositionTable::new(1024 * 8)
         }
     }
