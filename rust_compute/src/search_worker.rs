@@ -11,9 +11,9 @@ use crate::chess_board::*;
 use arrayvec::ArrayVec;
 
 #[derive(Clone)] 
-pub struct SearchWorker<'a> {
+pub struct SearchWorker<'a>  {
     transposition_table: &'a TranspositionTable,
-    nodes_processed: i32,
+    nodes_processed: usize,
 
     history: [Option<UndoMove>; 1024],
     history_index: usize,
@@ -50,16 +50,16 @@ impl<'a> SearchWorker<'a> {
 
     // Search Entry Point
     pub fn root_search(&mut self, thread_id: i32, 
-        max_depth: i32, stop_signal: &AtomicBool) -> (Option<ForwardMove>, i32){
+        max_depth: i32, stop_signal: &AtomicBool) -> (Option<ForwardMove>, usize){
         // Start the timer
         let start_time = Instant::now();
-        let time_limit = Duration::from_secs(45);
+        let time_limit = Duration::from_secs(15);
 
         // Thread_id = 0 is the main thread, the rest are helper threads
         let start_depth = if thread_id == 0 { 
             1 
         } else { 
-            2 + (thread_id % 4)
+            2 + (thread_id % 2)
         };
 
         // --- ITERATIVE DEEPENING LOOP ---
@@ -181,10 +181,6 @@ impl<'a> SearchWorker<'a> {
     fn negamax(&mut self, depth: i32, ply: i32, mut alpha: i32, mut beta: i32, 
         mut pv_move_hint: Option<ForwardMove>, stop_signal: &AtomicBool) -> SearchResult {
         
-        if stop_signal.load(Ordering::Relaxed) {
-            return SearchResult { score: 0, best_move: None };
-        }
-
         // Original Alpha for Transposition Table
         let original_alpha = alpha;
         
@@ -236,10 +232,15 @@ impl<'a> SearchWorker<'a> {
             }
         }
 
+        // Halt Signal
+        if (self.nodes_processed & 2047) == 0 && stop_signal.load(Ordering::Relaxed) {
+            return SearchResult { score: 0, best_move: None };
+        }
+
         // Leaf Node Condition -> Drop into Quiescence Search
         if depth == 0 {
             return SearchResult {
-                score: self.quiescence_search(alpha, beta, ply, -1),
+                score: self.quiescence_search(alpha, beta, ply, -1, stop_signal),
                 best_move: None,
             };
         }
@@ -339,7 +340,9 @@ impl<'a> SearchWorker<'a> {
     }
 
     // Quiescence Search 
-    fn quiescence_search(&mut self, mut alpha: i32, mut beta: i32, ply: i32, depth: i32) -> i32 {
+    fn quiescence_search(&mut self, mut alpha: i32, mut beta: i32, ply: i32, 
+        depth: i32, stop_signal: &AtomicBool) -> i32 {
+            
         // Three Move Repetition Draw
         if self.is_three_move_repetition() {
             return 0;
@@ -403,6 +406,11 @@ impl<'a> SearchWorker<'a> {
             }
         }
 
+        // Halt Signal
+        if (self.nodes_processed & 2047) == 0 && stop_signal.load(Ordering::Relaxed) {
+            return 0; 
+        }
+
         let mut legal_moves_played = 0;
         let mut best_move = None;
         let mut hash_flag = HashFlag::UPPERBOUND;
@@ -434,7 +442,7 @@ impl<'a> SearchWorker<'a> {
             self.process_time_cat_forward(*forward_move);
 
             // Negamax search call
-            let score = -self.quiescence_search(-beta, -alpha, ply + 1, depth - 1);
+            let score = -self.quiescence_search(-beta, -alpha, ply + 1, depth - 1, stop_signal);
             
             // Undo Move + TimeCat
             self.process_time_cat_backward();

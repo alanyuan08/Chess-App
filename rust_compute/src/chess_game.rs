@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use pyo3::prelude::*;
 use std::sync::Arc;
 use std::thread;
@@ -9,7 +9,7 @@ use crate::rook_mask::*;
 use crate::transposition_table::*;
 use crate::search_worker::*;
 
-pub const PV_DEPTH: i32 = 8;
+pub const PV_DEPTH: i32 = 20;
 pub const MATE_VALUE: i32 = 30000;
 pub const MAX_DEPTH: i32 = 20;
 
@@ -19,15 +19,15 @@ pub const INFINITY: i32 = 32000;
 pub const NUM_THREADS: i32 = 10;
 
 struct ChessGame {
-    nodes_processed: Arc<AtomicI32>,
-    transposition_table: TranspositionTable,
+    nodes_processed: Arc<AtomicUsize>,
+    transposition_table: Arc<TranspositionTable>,
 }
 
 impl ChessGame {
     fn new() -> Self {
         Self {
-            nodes_processed: Arc::new(AtomicI32::new(0)),
-            transposition_table: TranspositionTable::new(1024 * 8)
+            nodes_processed: Arc::new(AtomicUsize::new(0)),
+            transposition_table: Arc::new(TranspositionTable::new(1024 * 8))
         }
     }
 }
@@ -42,28 +42,28 @@ pub fn compute_next_move<'py>(py: Python<'py>, prev_moves: Vec<String>) -> PyRes
 
     // Shared stop signal across all M4 Pro performance cores
     let stop_search = Arc::new(AtomicBool::new(false));
-    
-    let tt_ref = &chess_game.transposition_table;
-    let mut default_worker = SearchWorker::new(tt_ref);
-    default_worker.process_moves(prev_moves);
 
+    let tt_ref = &*chess_game.transposition_table; 
+    let stop_signal_ref = &*stop_search;
+    let nodes_counter_ref = &*chess_game.nodes_processed;
+    
     thread::scope(|s| {
         let mut handlers = Vec::new();
 
         for thread_id in 0..NUM_THREADS {
-            let stop_signal = Arc::clone(&stop_search);
-            let nodes_counter = Arc::clone(&chess_game.nodes_processed); 
-
-            let mut thread_worker = default_worker.clone(); 
+            let prev_moves_clone = prev_moves.clone();
 
             let handle = s.spawn(move || {
-                let (thread_best_move, nodes_processed) = thread_worker.root_search(
+                let mut search_worker = SearchWorker::new(tt_ref);
+                search_worker.process_moves(prev_moves_clone);
+
+                let (thread_best_move, nodes_processed) = search_worker.root_search(
                     thread_id, 
                     PV_DEPTH, 
-                    &stop_signal
+                    stop_signal_ref
                 );
 
-                nodes_counter.fetch_add(nodes_processed, Ordering::Relaxed);
+                nodes_counter_ref.fetch_add(nodes_processed, Ordering::Relaxed);
 
                 (thread_id, thread_best_move)
             });

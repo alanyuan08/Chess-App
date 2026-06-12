@@ -6,7 +6,7 @@ A hybrid desktop chess application pairing a responsive PySide6 user interface w
 
 The engine has been unofficially benchmarked and validated against 2700 Elo bots on Chess.com.
 
-- Benchmark - Approximately 7.2 Million Nodes per second on a Apple M4 Pro Chip.
+- Benchmark - Approximately 7.7 Million Nodes per second on a Apple M4 Pro Chip.
 
 ## 1. Python Presentation & Validation Layer
     
@@ -54,13 +54,7 @@ Playing as [black|white]
 The Chess AI has been tested and consistently drew against ELO 2700 chess.com bots.
 
 - [DRAW - ELO 2700 Bot](https://www.chess.com/analysis/game/computer/1447582972/analysis)
-
-*Based on slightly older variation of the Engine 
-
-- [DRAW - ELO 2500 Bot](https://www.chess.com/analysis/game/computer/1438052400/analysis)
-
-- [DRAW - ELO 2500 Bot](https://www.chess.com/analysis/game/computer/1447219354/analysis)
-
+- [DRAW - ELO 2700 Bot](https://www.chess.com/analysis/game/computer/1547096612/analysis)
 
 ## Contact
 
