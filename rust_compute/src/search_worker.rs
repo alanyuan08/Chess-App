@@ -53,7 +53,7 @@ impl<'a> SearchWorker<'a> {
         max_depth: i32, stop_signal: &AtomicBool) -> (Option<ForwardMove>, usize){
         // Start the timer
         let start_time = Instant::now();
-        let time_limit = Duration::from_secs(20);
+        let time_limit = Duration::from_secs(15);
 
         // Thread_id = 0 is the main thread, the rest are helper threads
         let start_depth = if thread_id == 0 { 
