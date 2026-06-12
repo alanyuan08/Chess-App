@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicUsize, AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use pyo3::prelude::*;
 use std::sync::Arc;
 use std::thread;
@@ -16,18 +16,18 @@ pub const MAX_DEPTH: i32 = 20;
 pub const INFINITY: i32 = 32000;
 
 // This is tuned for a Mac M4 Pro Chip
-pub const NUM_THREADS: i32 = 10; 
+pub const NUM_THREADS: i32 = 10;
 
 struct ChessGame {
-    nodes_processed: Arc<AtomicUsize>,
-    transposition_table: Arc<TranspositionTable>,
+    nodes_processed: Arc<AtomicI32>,
+    transposition_table: TranspositionTable,
 }
 
 impl ChessGame {
     fn new() -> Self {
         Self {
-            nodes_processed: Arc::new(AtomicUsize::new(0)),
-            transposition_table: Arc::new(TranspositionTable::new(128))
+            nodes_processed: Arc::new(AtomicI32::new(0)),
+            transposition_table: TranspositionTable::new(1024 * 8)
         }
     }
 }
@@ -42,25 +42,28 @@ pub fn compute_next_move<'py>(py: Python<'py>, prev_moves: Vec<String>) -> PyRes
 
     // Shared stop signal across all M4 Pro performance cores
     let stop_search = Arc::new(AtomicBool::new(false));
+    
+    let tt_ref = &chess_game.transposition_table;
+    let mut default_worker = SearchWorker::new(tt_ref);
+    default_worker.process_moves(prev_moves);
 
     thread::scope(|s| {
         let mut handlers = Vec::new();
 
         for thread_id in 0..NUM_THREADS {
-            let tt = Arc::clone(&chess_game.transposition_table);
-            let nodes = Arc::clone(&chess_game.nodes_processed);
             let stop_signal = Arc::clone(&stop_search);
-            let prev_moves_clone = prev_moves.clone();
-            
-            let handle = s.spawn(move || {
-                let mut search_worker = SearchWorker::new(nodes, tt);
-                search_worker.process_moves(prev_moves_clone);
+            let nodes_counter = Arc::clone(&chess_game.nodes_processed); 
 
-                let thread_best_move = search_worker.root_search(
+            let mut thread_worker = default_worker.clone(); 
+
+            let handle = s.spawn(move || {
+                let (thread_best_move, nodes_processed) = thread_worker.root_search(
                     thread_id, 
                     PV_DEPTH, 
                     &stop_signal
                 );
+
+                nodes_counter.fetch_add(nodes_processed, Ordering::Relaxed);
 
                 (thread_id, thread_best_move)
             });

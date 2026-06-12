@@ -1,8 +1,6 @@
-use std::sync::atomic::{AtomicUsize, AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Instant, Duration};
-use std::sync::Arc;
 use crate::transposition_table::*;
-use std::collections::HashMap;
 use std::cmp;
 
 use crate::move_command::*;
@@ -12,21 +10,23 @@ use crate::parser::*;
 use crate::chess_board::*;
 use arrayvec::ArrayVec;
 
-pub struct SearchWorker {
-    nodes_processed: Arc<AtomicUsize>,
-    transposition_table: Arc<TranspositionTable>,
+#[derive(Clone)] 
+pub struct SearchWorker<'a> {
+    transposition_table: &'a TranspositionTable,
+    nodes_processed: i32,
 
     history: [Option<UndoMove>; 1024],
     history_index: usize,
 
     chess_board: ChessBoard,
-    traversed_positions: HashMap<u64, i32>
+
+    traversed_positions: [u64; 1024],
+    position_stack_len: usize,
 }
 
-impl SearchWorker {
+impl<'a> SearchWorker<'a> {
     pub fn new(
-        nodes_processed: Arc<AtomicUsize>,
-        transposition_table: Arc<TranspositionTable>,
+        transposition_table: &'a TranspositionTable, 
     ) -> Self {
         Self {
             history: [None; 1024],
@@ -37,17 +37,20 @@ impl SearchWorker {
                 chess_board.init_board();
                 chess_board
             },
+
             traversed_positions: {
-                HashMap::new()
+                [0; 1024]
             },
-            nodes_processed,
+            position_stack_len: 0, 
+            
+            nodes_processed: 0,
             transposition_table
         }
     }
 
     // Search Entry Point
     pub fn root_search(&mut self, thread_id: i32, 
-        max_depth: i32, stop_signal: &AtomicBool) -> Option<ForwardMove> {
+        max_depth: i32, stop_signal: &AtomicBool) -> (Option<ForwardMove>, i32){
         // Start the timer
         let start_time = Instant::now();
         let time_limit = Duration::from_secs(45);
@@ -87,7 +90,37 @@ impl SearchWorker {
             }
         }
             
-        best_move_overall
+        (best_move_overall, self.nodes_processed)
+    }
+
+    // Call this when entering a node (making a move)
+    fn push_position(&mut self) {
+        let hash = self.chess_board.zobrist_hash();
+        self.traversed_positions[self.position_stack_len] = hash;
+        self.position_stack_len += 1;
+    }
+
+    // Call this when backing out of a node (undoing a move)
+    fn pop_position(&mut self) {
+        self.position_stack_len -= 1;
+    }
+
+    // Fast linear scan inside the L1 CPU cache
+    fn is_three_move_repetition(&self) -> bool {
+        let current_hash = self.chess_board.zobrist_hash();
+        let mut curr_count = 0;
+
+        for i in (0..self.position_stack_len).rev() {
+            if self.traversed_positions[i] == current_hash {
+                curr_count += 1;
+
+                if curr_count == 3 {
+                    return true;
+                }
+            }
+        }
+
+        false
     }
 
     pub fn process_moves(&mut self, prev_moves: Vec<String>) {
@@ -106,9 +139,7 @@ impl SearchWorker {
         let prev_castle_rights = self.chess_board.castle_rights(); 
         let prev_en_passant = self.chess_board.en_passant();
 
-        let hash = self.chess_board.zobrist_hash();
-        let count = self.traversed_positions.entry(hash).or_insert(0);
-        *count += 1;
+        self.push_position();
 
         let remove_piece = self.chess_board.execute_move(forward_move);
         let undo_move = UndoMove {
@@ -131,14 +162,7 @@ impl SearchWorker {
 
         self.history_index -= 1;
         if let Some(undo_move) = self.history[self.history_index].take() {
-            let hash = self.chess_board.zobrist_hash();
-            if let Some(count) = self.traversed_positions.get_mut(&hash) {
-                if *count > 1 {
-                    *count -= 1;
-                } else {
-                    self.traversed_positions.remove(&hash);
-                }
-            }
+            self.pop_position();
 
             self.chess_board.unexecute_move(undo_move);
         }
@@ -153,12 +177,6 @@ impl SearchWorker {
         self.chess_board.timecat_pop_move();
     }
 
-    // Check if the current position has been reached 3 times
-    fn check_three_move_repetition(&self) -> bool {
-        let hash = self.chess_board.zobrist_hash();
-        self.traversed_positions.get(&hash).copied().unwrap_or(0) == 3
-    }
-
     // Process Negamax
     fn negamax(&mut self, depth: i32, ply: i32, mut alpha: i32, mut beta: i32, 
         mut pv_move_hint: Option<ForwardMove>, stop_signal: &AtomicBool) -> SearchResult {
@@ -171,7 +189,7 @@ impl SearchWorker {
         let original_alpha = alpha;
         
         // Three Move Repetition Draw
-        if self.check_three_move_repetition() {
+        if self.is_three_move_repetition() {
             return SearchResult {
                 score: 0,
                 best_move: None,
@@ -316,14 +334,14 @@ impl SearchWorker {
 
     fn board_eval(&mut self) -> i32 {
         let static_eval = self.chess_board.eval();
-        self.nodes_processed.fetch_add(1, Ordering::Relaxed);
+        self.nodes_processed += 1;
         static_eval
     }
 
     // Quiescence Search 
     fn quiescence_search(&mut self, mut alpha: i32, mut beta: i32, ply: i32, depth: i32) -> i32 {
         // Three Move Repetition Draw
-        if self.check_three_move_repetition() {
+        if self.is_three_move_repetition() {
             return 0;
         }
 
