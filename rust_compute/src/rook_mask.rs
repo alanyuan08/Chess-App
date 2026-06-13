@@ -92,15 +92,19 @@ pub static ROOK_ATTACKS: LazyLock<Box<[u64; ROOK_ATTACK_SIZE]>> = LazyLock::new(
 });
 
 // Retrieve the Rook Attack Paths for board / position
-pub fn rook_attack_paths(sq: usize, board: u64) -> u64{
-    let magic_number = ROOK_MAGIC[sq];
-    let shift = ROOK_SHIFT[sq];
+pub fn rook_attack_paths(sq: usize, board: u64) -> u64 {
+    unsafe {
+        // SAFETY: Assumes `sq` is always within bounds (0..64) for all global arrays,
+        // and the computed index fits within the total size of `ROOK_ATTACKS`.
+        let magic_number = *ROOK_MAGIC.get_unchecked(sq);
+        let shift = *ROOK_SHIFT.get_unchecked(sq);
+        let mask = *ROOK_MASKS.get_unchecked(sq);
+        let offset = *ROOK_OFFSETS.get_unchecked(sq);
 
-    let mask = ROOK_MASKS[sq];
-    let offset = ROOK_OFFSETS[sq];
+        let index = ((board & mask).wrapping_mul(magic_number)) >> (64 - shift);
 
-    let index = ((board & mask).wrapping_mul(magic_number)) >> (64 - shift);
-    ROOK_ATTACKS[(offset + index) as usize]
+        *ROOK_ATTACKS.get_unchecked((offset + index) as usize)
+    }
 }
 
 pub const fn mask(sq: u8) -> u64 {

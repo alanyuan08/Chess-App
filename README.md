@@ -4,9 +4,9 @@
 
 A hybrid desktop chess application pairing a responsive PySide6 user interface with a high-performance, multithreaded Rust engine core capable of evaluating millions of positions per second.
 
-The engine has been unofficially benchmarked and validated against 2700 Elo bots on Chess.com.
+The engine has been unofficially benchmarked and validated against 2900 Elo bots on Chess.com.
 
-- Benchmark - Approximately 7.7 Million Nodes per second on a Apple M4 Pro Chip.
+- Benchmark - Approximately 8.2 Million Nodes per second on a Apple M4 Pro Chip.
 
 ## 1. Python Presentation & Validation Layer
     
@@ -28,7 +28,7 @@ The engine has been unofficially benchmarked and validated against 2700 Elo bots
 
 - **Parallel Processing:** Scales performance across CPU threads using a lock-free concurrent tree search architecture (Lazy SMP)
 
-- **Performance Benchmark:** Processes approximately 7.7 million nodes per second (NPS) on an Apple M4 Pro chip.
+- **Performance Benchmark:** Processes approximately 8.2 million nodes per second (NPS) on an Apple M4 Pro chip.
 
 > **Note:**: The transposition table implementation (transposition_table.rs) utilized AI-assisted generation and relies on open-source algorithmic paradigms. I do not claim sole authorship over this specific module.
 
@@ -51,9 +51,10 @@ Playing as [black|white]
 
 # Playing Level
 
-The Chess AI has been tested and consistently drew against ELO 2700 chess.com bots.
+The Chess AI has been tested and consistently drew against ELO 2900 chess.com bots.
 
-- [DRAW - ELO 2700 Bot](https://www.chess.com/analysis/game/computer/1447582972/analysis)
+- [WIN - ELO 2900 Bot](https://www.chess.com/analysis/game/computer/1550643276/analysis)
+- [DRAW - ELO 2900 Bot](https://www.chess.com/analysis/game/computer/1550461094/analysis)
 - [DRAW - ELO 2700 Bot](https://www.chess.com/analysis/game/computer/1547096612/analysis)
 
 ## Contact

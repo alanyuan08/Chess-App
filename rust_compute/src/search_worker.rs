@@ -56,15 +56,19 @@ impl<'a> SearchWorker<'a> {
         let time_limit = Duration::from_secs(15);
 
         // Thread_id = 0 is the main thread, the rest are helper threads
-        let start_depth = if thread_id == 0 { 
-            1 
-        } else { 
-            2 + (thread_id % 2)
+        let (start_depth, depth_step) = if thread_id == 0 {
+            (1, 1) 
+        } else {
+            let start = 2 + (thread_id % 2);
+            let step = 2; 
+            (start, step)
         };
 
         // --- ITERATIVE DEEPENING LOOP ---
         let mut best_move_overall: Option<ForwardMove> = None;
-        for depth in start_depth..=max_depth {
+        let mut depth = start_depth;
+
+        while depth <= max_depth {
             if stop_signal.load(Ordering::Relaxed) || start_time.elapsed() >= time_limit {
                 if thread_id == 0 {
                     stop_signal.store(true, Ordering::Relaxed);
@@ -88,6 +92,8 @@ impl<'a> SearchWorker<'a> {
             } else {
                 break;
             }
+
+            depth += depth_step;
         }
             
         (best_move_overall, self.nodes_processed)
