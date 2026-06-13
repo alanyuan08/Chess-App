@@ -92,15 +92,19 @@ pub static BISHOP_ATTACKS: LazyLock<Box<[u64; BISHOP_ATTACK_SIZE]>> = LazyLock::
 });
 
 // Retrieve the Bishop Attack Paths for board / position
-pub fn bishop_attack_paths(sq: usize, board: u64) -> u64{
-    let magic_number = BISHOP_MAGIC[sq];
-    let shift = BISHOP_SHIFT[sq];
+pub fn bishop_attack_paths(sq: usize, board: u64) -> u64 {
+    unsafe {
+        // SAFETY: Assumes `sq` is always within bounds (0..64) for all global arrays,
+        // and the computed index fits within the total size of `BISHOP_ATTACKS`.
+        let magic_number = *BISHOP_MAGIC.get_unchecked(sq);
+        let shift = *BISHOP_SHIFT.get_unchecked(sq);
+        let mask = *BISHOP_MASKS.get_unchecked(sq);
+        let offset = *BISHOP_OFFSETS.get_unchecked(sq);
 
-    let mask = BISHOP_MASKS[sq];
-    let offset = BISHOP_OFFSETS[sq];
+        let index = ((board & mask).wrapping_mul(magic_number)) >> (64 - shift);
 
-    let index = ((board & mask).wrapping_mul(magic_number)) >> (64 - shift);
-    BISHOP_ATTACKS[(offset + index) as usize]
+        *BISHOP_ATTACKS.get_unchecked((offset + index) as usize)
+    }
 }
 
 // Mask the diagonal route

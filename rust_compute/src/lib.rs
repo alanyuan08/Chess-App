@@ -16,12 +16,12 @@ pub mod search_worker;
 pub mod parser;
 
 use crate::chess_game::{init_attack_tables};
-use crate::chess_game::{compute_next_move};
+use crate::chess_game::ChessGame;
 
 #[pymodule]
 fn rust_compute(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(init_attack_tables, m)?)?;
-    m.add_function(wrap_pyfunction!(compute_next_move, m)?)?;
+    m.add_class::<ChessGame>()?;
 
     Ok(())
 }

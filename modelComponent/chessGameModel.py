@@ -26,6 +26,9 @@ class ChessGameModel():
 
         # Opening Handbook - Node Represents Current Move
         self.currOpeningMove = openingHandBook
+
+        # Rust Chess Engine
+        self.game_engine = rust_compute.ChessGame()
     
     # Return Moves in UCI for Rust Computations
     def returnChessMoves(self) -> list[str]:
@@ -76,4 +79,4 @@ class ChessGameModel():
             return self.currOpeningMove.randomSubsequentCmd()
         
         # Rust Compute Next Move
-        return rust_compute.compute_next_move(self.returnChessMoves())
+        return self.game_engine.compute_next_move(self.returnChessMoves())
