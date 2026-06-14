@@ -24,13 +24,15 @@ pub struct TTEntry {
 }
 
 // Condon-Thompson Bucket using 100% stable AtomicU64 primitives.
-#[derive(Debug)]
+// current implement
 pub struct TtBucket {
     pub depth_preferred: AtomicU64, // Slot 1 (8 bytes)
     pub always_replace: AtomicU64,  // Slot 2 (8 bytes)
 }
 
 // Condon-Thompson transposition table using packed 128-bit buckets
+// The current implementation uses a 32 MB size cache to retain the memory within
+// Apple M4 L3 Cache - This is implementation is currently unneccessary. 
 pub struct TranspositionTable {
     buckets: Vec<TtBucket>,
     mask: usize,

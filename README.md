@@ -49,11 +49,12 @@ Playing as [black|white]
 
 # Playing Level
 
-The Chess AI has been tested and consistently drew against ELO 2900 chess.com bots.
+The Chess AI has been tested and consistently drew against ELO 3000 chess.com bots.
+* Chess.com bots are inflated by 200+ points
 
+- [DRAW - ELO 3200 Bot](https://www.chess.com/analysis/game/computer/1562860054/analysis)
 - [WIN - ELO 2900 Bot](https://www.chess.com/analysis/game/computer/1550643276/analysis)
 - [WIN - ELO 2900 Bot](https://www.chess.com/analysis/game/computer/1554932080/analysis)
-- [DRAW - ELO 2900 Bot](https://www.chess.com/analysis/game/computer/1550461094/analysis)
 
 ## Contact
 
