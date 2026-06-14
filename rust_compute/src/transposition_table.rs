@@ -14,6 +14,7 @@ pub enum HashFlag {
 
 // TTEntry Structure
 #[derive(Clone, Copy, Debug)]
+#[repr(C, align(16))] 
 pub struct TTEntry {
     pub key: u64,
     pub move_id: u16,
@@ -24,15 +25,14 @@ pub struct TTEntry {
 
 // Condon-Thompson Bucket using 100% stable AtomicU64 primitives.
 #[derive(Debug)]
-#[repr(C)] // Guarantees fields remain in this exact order in memory
-pub struct TT_Bucket {
+pub struct TtBucket {
     pub depth_preferred: AtomicU64, // Slot 1 (8 bytes)
     pub always_replace: AtomicU64,  // Slot 2 (8 bytes)
 }
 
 // Condon-Thompson transposition table using packed 128-bit buckets
 pub struct TranspositionTable {
-    buckets: Vec<TT_Bucket>,
+    buckets: Vec<TtBucket>,
     mask: usize,
 }
 
@@ -40,14 +40,14 @@ impl TranspositionTable {
     /// Creates a flat table matching the nearest power-of-two megabytes
     pub fn new(mb: usize) -> Self {
         let size_bytes = mb * 1024 * 1024;
-        let count = size_bytes / std::mem::size_of::<TT_Bucket>();
+        let count = size_bytes / std::mem::size_of::<TtBucket>();
         
         // Round down to power of two for fast bitwise indexing
         let power_of_two_count = count.next_power_of_two() >> 1;
         let final_count = std::cmp::max(1, power_of_two_count);
 
         let buckets = (0..final_count)
-            .map(|_| TT_Bucket {
+            .map(|_| TtBucket {
                 depth_preferred: AtomicU64::new(0),
                 always_replace: AtomicU64::new(0),
             })

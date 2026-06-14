@@ -6,8 +6,6 @@ A hybrid desktop chess application pairing a responsive PySide6 user interface w
 
 The engine has been unofficially benchmarked and validated against 2900 Elo bots on Chess.com.
 
-- Benchmark - Approximately 8.2 Million Nodes per second on a Apple M4 Pro Chip.
-
 ## 1. Python Presentation & Validation Layer
     
 - **PySide6 UI:** Renders a fluid 2D chessboard and manages real-time player drag-and-drop interactions
@@ -22,13 +20,13 @@ The engine has been unofficially benchmarked and validated against 2900 Elo bots
 
 - **Adversarial Search:** Implements Minimax search enhanced by Alpha-Beta pruning and a Quiescence search to eliminate horizon-effect instability
 
-- **Deep Evaluation:** Combines Iterative Deepening with Principal Variation Search (PVS) to regularly achieve search depths of 10+ plies. (Average Move is approximately 20 seconds to 1.5 minutes)
+- **Deep Evaluation:** Combines Iterative Deepening with Principal Variation Search (PVS) to regularly achieve search depths of 10+ plies. (Average Move is approximately 20 seconds to 1 minutes)
 
 - **Transposition Tables:** Caches previously evaluated board states to accelerate search paths and share data across threads
 
 - **Parallel Processing:** Scales performance across CPU threads using a lock-free concurrent tree search architecture (Lazy SMP)
 
-- **Performance Benchmark:** Processes approximately 8.2 million nodes per second (NPS) on an Apple M4 Pro chip.
+- **Performance Benchmark:** Processes approximately 8.2 million nodes per second (NPS) on an Apple M4 Pro chip. (8 Performance Core Only - 4.5 GHz + On-Chip Cache Memory - 39.5 MB)
 
 > **Note:**: The transposition table implementation (transposition_table.rs) utilized AI-assisted generation and relies on open-source algorithmic paradigms. I do not claim sole authorship over this specific module.
 
@@ -36,7 +34,7 @@ The engine has been unofficially benchmarked and validated against 2900 Elo bots
 
 - **NNUE Integration:** Features an incrementally updated Efficiently Updatable Neural Network (NNUE) paired with the Universal Chess Interface (UCI) protocol.
 
-> **Current Limitations:**: The engine currently utilizes the Timecat NNUE backend; This third-party library cannot process pseudo-positions or invalid board states and thus the Null-Move Pruning (NMP) is currently disabled. 
+> **Current Limitations:**: The engine currently utilizes the Timecat NNUE backend; This dependency will need to be removed prior to Computer Chess Rating Listing (CCRL) submission.
 
 > **Future Roadmap:**: This dependency will be replaced with a custom, self-trained NNUE framework designed to handle perspective shifts during abstract pruning phases.
 
@@ -54,8 +52,8 @@ Playing as [black|white]
 The Chess AI has been tested and consistently drew against ELO 2900 chess.com bots.
 
 - [WIN - ELO 2900 Bot](https://www.chess.com/analysis/game/computer/1550643276/analysis)
+- [WIN - ELO 2900 Bot](https://www.chess.com/analysis/game/computer/1554932080/analysis)
 - [DRAW - ELO 2900 Bot](https://www.chess.com/analysis/game/computer/1550461094/analysis)
-- [DRAW - ELO 2700 Bot](https://www.chess.com/analysis/game/computer/1547096612/analysis)
 
 ## Contact
 
