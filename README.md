@@ -4,7 +4,7 @@
 
 A hybrid desktop chess application pairing a responsive PySide6 user interface with a high-performance, multithreaded Rust engine core capable of evaluating millions of positions per second.
 
-The engine has been unofficially benchmarked and validated against 2900 Elo bots on Chess.com.
+The engine has been unofficially benchmarked and validated against 30000 Elo bots on Chess.com.
 
 ## 1. Python Presentation & Validation Layer
     
@@ -49,11 +49,11 @@ Playing as [black|white]
 
 # Playing Level
 
-The Chess AI has been tested and consistently drew against ELO 2900 chess.com bots.
+The Chess AI has been tested and consistently drew against ELO 3000 chess.com bots.
 
+- [DRAW - ELO 3200 Bot](https://www.chess.com/analysis/game/computer/1562860054/analysis)
 - [WIN - ELO 2900 Bot](https://www.chess.com/analysis/game/computer/1550643276/analysis)
 - [WIN - ELO 2900 Bot](https://www.chess.com/analysis/game/computer/1554932080/analysis)
-- [DRAW - ELO 2900 Bot](https://www.chess.com/analysis/game/computer/1550461094/analysis)
 
 ## Contact
 

@@ -111,18 +111,33 @@ impl<'a> SearchWorker<'a> {
         self.position_stack_len -= 1;
     }
 
-    // Fast linear scan inside the L1 CPU cache
+    // Fast linear scan inside the L1 CPU cache stepping by 2
     fn is_three_move_repetition(&self) -> bool {
         let current_hash = self.chess_board.zobrist_hash();
         let mut curr_count = 0;
 
-        for i in (0..self.position_stack_len).rev() {
+        // A repetition requires at least 2 plies to pass (1 full move)
+        if self.position_stack_len < 2 {
+            return false;
+        }
+
+        // Start 2 plies back (the last time it was this player's turn)
+        let mut i = self.position_stack_len - 2;
+
+        loop {
             if self.traversed_positions[i] == current_hash {
                 curr_count += 1;
 
                 if curr_count == 3 {
                     return true;
                 }
+            }
+
+            // Underflow protection: break out if we cannot step back 2 more plies
+            if i >= 2 {
+                i -= 2;
+            } else {
+                break;
             }
         }
 
@@ -181,6 +196,14 @@ impl<'a> SearchWorker<'a> {
 
     fn process_time_cat_backward(&mut self) {
         self.chess_board.timecat_pop_move();
+    }
+
+    // A simple, linear-logarithmic approximation using integer division:
+    // R increases slowly as depth and move count grow.
+    fn calculate_lmr_reduction(&mut self, depth: i32, moves_tried: i32) -> i32 {
+        let base_r = 1 + (depth / 8) + (moves_tried / 12);
+
+        base_r.clamp(1, 2)
     }
 
     // Process Negamax
@@ -258,7 +281,20 @@ impl<'a> SearchWorker<'a> {
         let mut gen_moves = ArrayVec::<ForwardMove, 256>::new();
         self.chess_board.generate_moves(&mut gen_moves, pv_move_hint);
 
+        // Late Move Reduction 
+        let mut lmr_eligibility;
+        let mut moves_tried: i32 = 0;
+        let king_in_check = self.chess_board.is_in_check(); 
+
         for forward_move in &gen_moves {
+            // Check LMR Eligibility
+            lmr_eligibility = false;
+            if depth >= 3 && moves_tried > 2 {
+                if !king_in_check && matches!(forward_move.move_type, MoveFlag::MOVE) {
+                    lmr_eligibility = true;
+                }
+            }
+
             // Push move (handles UCI, board state, hash, and history internally)
             self.process_forward_move(*forward_move);
 
@@ -272,8 +308,19 @@ impl<'a> SearchWorker<'a> {
             legal_moves_played += 1;
             self.process_time_cat_forward(*forward_move);
 
-            // Recursive Negamax Call
-            let negamax_result = self.negamax(depth - 1, ply + 1, -beta, -alpha, None, stop_signal);
+            // LMR Reduction
+            let mut negamax_result;
+            if lmr_eligibility {
+                let reduction = self.calculate_lmr_reduction(depth, moves_tried);
+                negamax_result = self.negamax(depth - reduction, ply + 1, -beta, -alpha, None, stop_signal);
+
+                if negamax_result.score > alpha {
+                    negamax_result = self.negamax(depth - 1, ply + 1, -beta, -alpha, None, stop_signal);
+                }
+            } else {
+                negamax_result = self.negamax(depth - 1, ply + 1, -beta, -alpha, None, stop_signal);
+            }
+
             let score = -negamax_result.score;
 
             // Undo Move + TimeCat
@@ -299,11 +346,13 @@ impl<'a> SearchWorker<'a> {
             if score > alpha {
                 alpha = score;
             }
+
+            moves_tried += 1;
         }
 
         // 4. Handle terminal nodes cleanly if no legal moves exist
         if legal_moves_played == 0 {
-            if self.chess_board.is_in_check() {
+            if king_in_check {
                 let mate_score = -MATE_VALUE + ply;
 
                 self.transposition_table.store(
