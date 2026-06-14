@@ -15,8 +15,14 @@ pub const MAX_DEPTH: i32 = 20;
 
 pub const INFINITY: i32 = 32000;
 
-// This is tuned for a Mac M4 Pro Chip
-pub const NUM_THREADS: i32 = 10;
+// This is tuned for the Mac M4 Pro Chip
+// Thread Count is set to the number of Performance Cores to avoid 
+// Heterogeneous Thread Migration between Performance and Efficiency
+pub const NUM_THREADS: i32 = 8;
+
+// The Cache should live inside the L1 / L2 / L3 space to avoid the 
+// expensive memory access from RAM.
+pub const CACHE_SIZE: usize = 32;
 
 #[pyclass]
 pub struct ChessGame {
@@ -30,7 +36,7 @@ impl ChessGame {
     fn new() -> Self {
         Self {
             nodes_processed: Arc::new(AtomicUsize::new(0)),
-            transposition_table: Arc::new(TranspositionTable::new(1024 * 8))
+            transposition_table: Arc::new(TranspositionTable::new(CACHE_SIZE))
         }
     }
 
@@ -39,7 +45,6 @@ impl ChessGame {
         py: Python<'py>, 
         prev_moves: Vec<String>
     ) -> PyResult<Bound<'py, PyAny>> {
-
         let chess_game = ChessGame::new();
         let mut final_best_move = None;
 
