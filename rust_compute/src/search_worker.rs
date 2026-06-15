@@ -314,7 +314,7 @@ impl<'a> SearchWorker<'a> {
                 let reduction = self.calculate_lmr_reduction(depth, moves_tried);
                 negamax_result = self.negamax(depth - reduction, ply + 1, -beta, -alpha, None, stop_signal);
 
-                if negamax_result.score > alpha {
+                if -negamax_result.score > alpha {
                     negamax_result = self.negamax(depth - 1, ply + 1, -beta, -alpha, None, stop_signal);
                 }
             } else {
