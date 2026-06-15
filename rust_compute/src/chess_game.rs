@@ -9,7 +9,7 @@ use crate::rook_mask::*;
 use crate::transposition_table::*;
 use crate::search_worker::*;
 
-pub const PV_DEPTH: i32 = 20;
+pub const PV_DEPTH: i32 = 10;
 pub const MATE_VALUE: i32 = 30000;
 pub const MAX_DEPTH: i32 = 20;
 

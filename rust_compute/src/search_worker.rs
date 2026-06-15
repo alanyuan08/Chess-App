@@ -61,7 +61,7 @@ impl<'a> SearchWorker<'a> {
         } else {
             let start = 2 + (thread_id % 2);
             let step = 2; 
-            (start, step)
+            (start, step)   
         };
 
         // --- ITERATIVE DEEPENING LOOP ---

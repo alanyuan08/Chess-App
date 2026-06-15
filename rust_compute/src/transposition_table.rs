@@ -23,18 +23,10 @@ pub struct TTEntry {
     pub flag: HashFlag,
 }
 
-// Condon-Thompson Bucket using 100% stable AtomicU64 primitives.
-// current implement
-pub struct TtBucket {
-    pub depth_preferred: AtomicU64, // Slot 1 (8 bytes)
-    pub always_replace: AtomicU64,  // Slot 2 (8 bytes)
-}
-
-// Condon-Thompson transposition table using packed 128-bit buckets
 // The current implementation uses a 32 MB size cache to retain the memory within
 // Apple M4 L3 Cache - This is implementation is currently unneccessary. 
 pub struct TranspositionTable {
-    buckets: Vec<TtBucket>,
+    buckets: Vec<AtomicU64>,
     mask: usize,
 }
 
@@ -42,18 +34,13 @@ impl TranspositionTable {
     /// Creates a flat table matching the nearest power-of-two megabytes
     pub fn new(mb: usize) -> Self {
         let size_bytes = mb * 1024 * 1024;
-        let count = size_bytes / std::mem::size_of::<TtBucket>();
+        let count = size_bytes / std::mem::size_of::<TTEntry>();
         
         // Round down to power of two for fast bitwise indexing
         let power_of_two_count = count.next_power_of_two() >> 1;
         let final_count = std::cmp::max(1, power_of_two_count);
 
-        let buckets = (0..final_count)
-            .map(|_| TtBucket {
-                depth_preferred: AtomicU64::new(0),
-                always_replace: AtomicU64::new(0),
-            })
-            .collect();
+        let buckets = (0..final_count).map(|_| AtomicU64::new(0)).collect();
         Self {
             buckets,
             mask: final_count - 1,
@@ -124,42 +111,33 @@ impl TranspositionTable {
     #[inline(always)]
     pub fn probe(&self, key: u64, ply: i32) -> Option<TTEntry> {
         let index = (key as usize) & self.mask;
-        let bucket = &self.buckets[index];
-        
-        // Fetching depth_preferred pulls the entire TT_Bucket cache line into L1.
-        let dp_packed = bucket.depth_preferred.load(Ordering::Relaxed);
-        if let Some(entry) = Self::unpack_entry(dp_packed, key, ply) {
+        let packed = self.buckets[index].load(Ordering::Relaxed);
+        if let Some(entry) = Self::unpack_entry(packed, key, ply) {
             return Some(entry);
         }
 
-        // Fetching always_replace is an immediate L1 hit (0 penalty)
-        let ar_packed = bucket.always_replace.load(Ordering::Relaxed);
-        if let Some(entry) = Self::unpack_entry(ar_packed, key, ply) {
-            return Some(entry);
-        }
-        
         None
     }
 
     #[inline(always)]
     pub fn store(&self, key: u64, score: i32, ply: i32, 
-        forward_move: Option<ForwardMove>, depth: i32, flag: HashFlag) 
-    {
-        let index = (key as usize) & self.mask;
-        let bucket = &self.buckets[index];
+        forward_move: Option<ForwardMove>, depth: i32, flag: HashFlag
+    ) {
+        // Base indexing logic (Must mask to an even index structure)
+        let base_index = ((key as usize) & self.mask) & !1;
+        
+        let dp_bucket = &self.buckets[base_index];     // Even index = Depth Preferred
+        let ar_bucket = &self.buckets[base_index + 1]; // Odd index = Always Replace
 
         let move_id = forward_move.map_or(0, |mv| mv.pack()); 
         let new_packed = Self::pack_entry(move_id, score as i16, depth, flag, key, ply);
 
-        // --- SLOT 1: DEPTH PREFERRED ---
-        let mut current_dp = bucket.depth_preferred.load(Ordering::Relaxed);
+        let mut current_dp = dp_bucket.load(Ordering::Relaxed);
         loop {
             let existing_dp_depth = ((current_dp >> 32) & 0xFF) as i8 as i32;
 
             if depth >= existing_dp_depth {
-                // If the new entry is deeper, overwrite depth_preferred.
-                // Demote the displaced deep entry down into the always_replace slot.
-                match bucket.depth_preferred.compare_exchange_weak(
+                match dp_bucket.compare_exchange_weak(
                     current_dp,
                     new_packed,
                     Ordering::Release,
@@ -167,16 +145,14 @@ impl TranspositionTable {
                 ) {
                     Ok(_) => {
                         if current_dp != 0 {
-                            bucket.always_replace.store(current_dp, Ordering::Release);
+                            ar_bucket.store(current_dp, Ordering::Release);
                         }
                         return;
                     }
                     Err(actual) => current_dp = actual,
                 }
             } else {
-                // --- SLOT 2: FALLBACK TO ALWAYS REPLACE ---
-                // If it's too shallow for the depth slot, directly write it here.
-                bucket.always_replace.store(new_packed, Ordering::Release);
+                ar_bucket.store(new_packed, Ordering::Release);
                 return;
             }
         }
