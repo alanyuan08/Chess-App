@@ -114,12 +114,15 @@ impl<'a> SearchWorker<'a> {
     // Fast linear scan inside the L1 CPU cache stepping by 2
     fn is_three_move_repetition(&self) -> bool {
         let current_hash = self.chess_board.zobrist_hash();
-        let mut curr_count = 0;
-
-        // A repetition requires at least 2 plies to pass (1 full move)
-        if self.position_stack_len < 2 {
+        
+        // A repetition requires at least 4 plies to pass (2 full moves) 
+        // for the same position to occur a second time on your turn.
+        if self.position_stack_len < 4 {
             return false;
         }
+
+        // Initialize to 1 because the current position is the 1st occurrence
+        let mut curr_count = 1;
 
         // Start 2 plies back (the last time it was this player's turn)
         let mut i = self.position_stack_len - 2;
@@ -127,13 +130,12 @@ impl<'a> SearchWorker<'a> {
         loop {
             if self.traversed_positions[i] == current_hash {
                 curr_count += 1;
-
                 if curr_count == 3 {
                     return true;
                 }
             }
 
-            // Underflow protection: break out if we cannot step back 2 more plies
+            // Clean underflow protection and loop exit
             if i >= 2 {
                 i -= 2;
             } else {
@@ -289,10 +291,8 @@ impl<'a> SearchWorker<'a> {
         for forward_move in &gen_moves {
             // Check LMR Eligibility
             lmr_eligibility = false;
-            if depth >= 3 && moves_tried > 2 {
-                if !king_in_check && matches!(forward_move.move_type, MoveFlag::MOVE) {
-                    lmr_eligibility = true;
-                }
+            if depth >= 3 && moves_tried > 2 && !king_in_check && matches!(forward_move.move_type, MoveFlag::MOVE) {
+                lmr_eligibility = true;
             }
 
             // Push move (handles UCI, board state, hash, and history internally)
