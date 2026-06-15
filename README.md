@@ -4,7 +4,7 @@
 
 A hybrid desktop chess application pairing a responsive PySide6 user interface with a high-performance, multithreaded Rust engine core capable of evaluating millions of positions per second.
 
-The engine has been unofficially benchmarked and validated against 30000 Elo bots on Chess.com.
+The engine has been unofficially benchmarked and validated against 3000 Elo bots on Chess.com.
 
 ## 1. Python Presentation & Validation Layer
     
