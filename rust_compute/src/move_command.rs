@@ -20,6 +20,12 @@ impl ForwardMove {
             pv_score: 0,
         }
     }
+
+    pub fn eq(&self, other: &Self) -> bool {
+        self.start_sq == other.start_sq 
+            && self.end_sq == other.end_sq 
+            && self.move_type == other.move_type
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
