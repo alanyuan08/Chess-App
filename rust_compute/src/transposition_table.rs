@@ -162,12 +162,18 @@ impl TranspositionTable {
                 match bucket.depth_preferred.compare_exchange_weak(
                     current_dp,
                     new_packed,
-                    Ordering::Release,
+                    Ordering::Relaxed,
                     Ordering::Relaxed,
                 ) {
                     Ok(_) => {
                         if current_dp != 0 {
-                            bucket.always_replace.store(current_dp, Ordering::Release);
+                            let current_ar = bucket.always_replace.load(Ordering::Relaxed);
+                            let existing_ar_depth = ((current_ar >> 32) & 0xFF) as i8 as i32;
+                            
+                            // Only overwrite always_replace if our demoted data is higher quality
+                            if existing_dp_depth >= existing_ar_depth {
+                                bucket.always_replace.store(current_dp, Ordering::Relaxed);
+                            }
                         }
                         return;
                     }
@@ -176,7 +182,13 @@ impl TranspositionTable {
             } else {
                 // --- SLOT 2: FALLBACK TO ALWAYS REPLACE ---
                 // If it's too shallow for the depth slot, directly write it here.
-                bucket.always_replace.store(new_packed, Ordering::Release);
+                let current_ar = bucket.always_replace.load(Ordering::Relaxed);
+                let existing_ar_depth = ((current_ar >> 32) & 0xFF) as i8 as i32;
+                
+                // Only store shallow entries if they are deeper than the current fallback entry
+                if depth >= existing_ar_depth {
+                    bucket.always_replace.store(new_packed, Ordering::Relaxed);
+                }
                 return;
             }
         }

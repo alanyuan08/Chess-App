@@ -20,13 +20,13 @@ The engine has been unofficially benchmarked and validated against 3000 Elo bots
 
 - **Adversarial Search:** Implements Minimax search enhanced by Alpha-Beta pruning and a Quiescence search to eliminate horizon-effect instability
 
-- **Deep Evaluation:** Combines Iterative Deepening with Principal Variation Search (PVS) to regularly achieve search depths of 10+ plies. (Average Move is approximately 20 seconds to 1 minutes)
+- **Deep Evaluation:** Combines Iterative Deepening with Principal Variation Search (PVS) to regularly achieve search depths of 12+ plies. (Average Move is approximately 20 seconds to 1 minutes)
 
 - **Transposition Tables:** Caches previously evaluated board states to accelerate search paths and share data across threads
 
 - **Parallel Processing:** Scales performance across CPU threads using a lock-free concurrent tree search architecture (Lazy SMP)
 
-- **Performance Benchmark:** Processes approximately 8.2 million nodes per second (NPS) on an Apple M4 Pro chip. (8 Performance Core Only - 4.5 GHz + On-Chip Cache Memory - 39.5 MB)
+- **Performance Benchmark:** Processes approximately 20 million nodes per second (NPS) on an Apple M4 Pro chip. (8 Performance Core Only - 4.5 GHz + On-Chip Cache Memory - 39.5 MB)
 
 > **Note:**: The transposition table implementation (transposition_table.rs) utilized AI-assisted generation and relies on open-source algorithmic paradigms. I do not claim sole authorship over this specific module.
 

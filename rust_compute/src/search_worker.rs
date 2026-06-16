@@ -22,6 +22,9 @@ pub struct SearchWorker<'a>  {
 
     traversed_positions: [u64; 1024],
     position_stack_len: usize,
+
+    killer_move_table: [[Option<ForwardMove>; MAX_DEPTH as usize]; 2],
+    thread_id: i32
 }
 
 impl<'a> SearchWorker<'a> {
@@ -44,24 +47,51 @@ impl<'a> SearchWorker<'a> {
             position_stack_len: 0, 
             
             nodes_processed: 0,
-            transposition_table
+            transposition_table,
+
+            killer_move_table: [[None; MAX_DEPTH as usize]; 2],
+            thread_id: 0,
+        }
+    }
+
+    pub fn from_game_state(
+        transposition_table: &'a TranspositionTable, 
+        search_worker: &SearchWorker,
+        thread_id: i32
+    ) -> Self {
+        Self {
+            // History move records are left blank as they aren't needed for future searches
+            history: [None; 1024],
+            history_index: search_worker.history_index,
+
+            // INSTANTLY copy the fully evaluated board configuration (Blazing fast bitboard clone)
+            chess_board: search_worker.chess_board.clone(),
+
+            // Populate our repetition detection array
+            traversed_positions: search_worker.traversed_positions,
+            position_stack_len: search_worker.position_stack_len, 
+            
+            nodes_processed: 0,
+            transposition_table,
+
+            killer_move_table: [[None; MAX_DEPTH as usize]; 2],
+            thread_id
         }
     }
 
     // Search Entry Point
-    pub fn root_search(&mut self, thread_id: i32, 
+    pub fn root_search(&mut self,
         max_depth: i32, stop_signal: &AtomicBool) -> (Option<ForwardMove>, usize){
         // Start the timer
         let start_time = Instant::now();
-        let time_limit = Duration::from_secs(15);
+        let time_limit = Duration::from_secs(DEPTH_SEARCH_LIMIT);
 
         // Thread_id = 0 is the main thread, the rest are helper threads
-        let (start_depth, depth_step) = if thread_id == 0 {
-            (1, 1) 
+        let start_depth = if self.thread_id == 0 {
+            1
         } else {
-            let start = 2 + (thread_id % 2);
-            let step = 2; 
-            (start, step)
+            // Subtle offset: Helpers start at depth 2 or 3, but move up 1 depth at a time.
+            2 + (self.thread_id % 2)
         };
 
         // --- ITERATIVE DEEPENING LOOP ---
@@ -70,9 +100,7 @@ impl<'a> SearchWorker<'a> {
 
         while depth <= max_depth {
             if stop_signal.load(Ordering::Relaxed) || start_time.elapsed() >= time_limit {
-                if thread_id == 0 {
-                    stop_signal.store(true, Ordering::Relaxed);
-                }
+                stop_signal.store(true, Ordering::Relaxed);
                 break;
             }
             
@@ -82,8 +110,9 @@ impl<'a> SearchWorker<'a> {
             if !stop_signal.load(Ordering::Relaxed){
                 best_move_overall = result.best_move;
 
-                if thread_id == 0 {
-                    println!("[Master Thread] Completed Depth: {} | Best Move Score: {:?}", depth, result.best_move);
+                if self.thread_id == 0 {
+                    println!("[Master Thread] Completed Depth: {} | Best Move Score: {:?}", 
+                        depth, result.best_move);
                     if depth >= PV_DEPTH { 
                         stop_signal.store(true, Ordering::Relaxed);
                         break;
@@ -93,7 +122,7 @@ impl<'a> SearchWorker<'a> {
                 break;
             }
 
-            depth += depth_step;
+            depth += 1;
         }
             
         (best_move_overall, self.nodes_processed)
@@ -208,6 +237,27 @@ impl<'a> SearchWorker<'a> {
         base_r.clamp(1, 2)
     }
 
+    // Store Killer Move - No Captures
+    fn store_killer_move(&mut self, new_killer_move: ForwardMove, depth: i32) {
+        // Store Non-Captures for Killer Move
+        if matches!(new_killer_move.move_type, 
+            MoveFlag::CAPTURE | MoveFlag::ENPASSANT | MoveFlag::PROMOTIONQUEEN
+        ) {
+            return;
+        }
+
+        let depth_idx = depth as usize;
+
+        // If this move is already our primary killer, do nothing
+        if self.killer_move_table[0][depth_idx] == Some(new_killer_move) {
+            return;
+        }
+        
+        // Later Moves would case a stronger beta cutoff
+        self.killer_move_table[1][depth_idx] = self.killer_move_table[0][depth_idx];
+        self.killer_move_table[0][depth_idx] = Some(new_killer_move);
+    }
+
     // Process Negamax
     fn negamax(&mut self, depth: i32, ply: i32, mut alpha: i32, mut beta: i32, 
         mut pv_move_hint: Option<ForwardMove>, stop_signal: &AtomicBool) -> SearchResult {
@@ -276,12 +326,13 @@ impl<'a> SearchWorker<'a> {
             };
         }
 
-        let mut best_move = None;
+        let mut best_move = None;   
         let mut legal_moves_played = 0;
         let mut best_score = -INFINITY;
 
         let mut gen_moves = ArrayVec::<ForwardMove, 256>::new();
-        self.chess_board.generate_moves(&mut gen_moves, pv_move_hint);
+        self.chess_board.generate_moves(&mut gen_moves, pv_move_hint, 
+            depth, &self.killer_move_table);
 
         // Late Move Reduction 
         let mut lmr_eligibility;
@@ -305,14 +356,27 @@ impl<'a> SearchWorker<'a> {
             }
 
             // Move is Legal, Forward Move Time Cat
-            legal_moves_played += 1;
+            legal_moves_played += 1;        
             self.process_time_cat_forward(*forward_move);
 
             // LMR Reduction
             let mut negamax_result;
             if lmr_eligibility {
-                let reduction = self.calculate_lmr_reduction(depth, moves_tried);
-                negamax_result = self.negamax(depth - reduction, ply + 1, -beta, -alpha, None, stop_signal);
+                let mut reduction = self.calculate_lmr_reduction(depth, moves_tried);
+                // Introduce Lazy SMP Divergence
+                if self.thread_id > 0 {
+                    // Even threads search slightly deeper on quiet lines, odd threads prune harder
+                    if self.thread_id % 2 == 0 {
+                        reduction += 1; // Prune deeper paths aggressively
+                    } else {
+                        // Skip certain reductions entirely to look for hidden tactical refutations
+                        if moves_tried > 6 { reduction = reduction.saturating_sub(1); }
+                    }
+                }
+
+                let reduced_depth = (depth - 1 - reduction).max(1);
+
+                negamax_result = self.negamax(reduced_depth, ply + 1,  -alpha - 1, -alpha, None, stop_signal);
 
                 if -negamax_result.score > alpha {
                     negamax_result = self.negamax(depth - 1, ply + 1, -beta, -alpha, None, stop_signal);
@@ -339,6 +403,9 @@ impl<'a> SearchWorker<'a> {
                 self.transposition_table.store(
                     hash, best_score, ply, best_move, depth, HashFlag::LOWERBOUND
                 );
+
+                // Move Triggered a Beta Cutoff - Store as Killer Move
+                self.store_killer_move(*forward_move, depth);
 
                 return SearchResult { score: best_score, best_move };
             }
@@ -475,7 +542,8 @@ impl<'a> SearchWorker<'a> {
 
         if king_in_check {
             // King IS in check: Generate all Moves
-            self.chess_board.generate_moves(&mut gen_moves, pv_move_hint);
+            self.chess_board.generate_moves(&mut gen_moves, pv_move_hint, 
+                depth, &self.killer_move_table);
         } else {
             // King is NOT in check: Only generate captures, promotions, etc.
             self.filter_psuedo_legal_quiescence_moves(&mut gen_moves);
@@ -533,7 +601,8 @@ impl<'a> SearchWorker<'a> {
     fn filter_psuedo_legal_quiescence_moves(&mut self, 
         gen_moves: &mut ArrayVec::<ForwardMove, 256>
     ) {
-        self.chess_board.generate_moves(gen_moves, None);
+        self.chess_board.generate_moves(gen_moves, None, 
+            -1, &self.killer_move_table);
         gen_moves.retain(|cmd| {
             matches!(
                 cmd.move_type,
