@@ -6,6 +6,7 @@ use crate::rook_mask::*;
 use crate::queen_mask::*;
 use crate::move_command::*;
 use crate::zobrist_hash::*;
+use crate::chess_game::*;
 use arrayvec::ArrayVec;
 use timecat::prelude::*;
 
@@ -270,7 +271,9 @@ impl ChessBoard {
     // Generate Pseudo-Moves - Only Validate King Safety for Castle / King Movement
     pub fn generate_moves(&mut self, 
         gen_moves: &mut ArrayVec::<ForwardMove, 256>, 
-        pv_move_hint: Option<ForwardMove>
+        pv_move_hint: Option<ForwardMove>,
+        depth: i32,
+        killer_move_table: &[[Option<ForwardMove>; MAX_DEPTH as usize]; 2]
     ) {        
         let player_index = self.player_index(self.active_player);
         let opp_index = self.player_index(self.opponent_player());
@@ -296,14 +299,30 @@ impl ChessBoard {
             }
         }
         
-        // Allocate PV Move in Front
-        if let Some(hint) = pv_move_hint {
-            if let Some(cmd) = gen_moves.iter_mut().find(|m| {
-                m.start_sq == hint.start_sq && 
-                m.end_sq == hint.end_sq && 
-                m.move_type == hint.move_type
-            }) {
-                cmd.pv_score = -2_000_000;
+        if depth >= 0 {
+            // 1. Allocate PV Move in Front (Highest Priority)
+            if let Some(hint) = pv_move_hint {
+                // Rust automatically uses your custom PartialEq logic via ==
+                if let Some(cmd) = gen_moves.iter_mut().find(|m| **m == hint) {
+                    cmd.pv_score = -2_000_000; 
+                }
+            }
+            // 2. Allocate Killer Moves (High Priority, but below PV move)
+
+            // Primary Killer
+            let killer_0 = killer_move_table[0][depth as usize];
+            if killer_0 != pv_move_hint {
+                if let Some(cmd) = gen_moves.iter_mut().find(|m| Some(**m) == killer_0) {
+                    cmd.pv_score = 200;
+                }
+            }
+
+            // Secondary Killer
+            let killer_1 = killer_move_table[1][depth as usize];
+            if killer_1 != pv_move_hint {
+                if let Some(cmd) = gen_moves.iter_mut().find(|m| Some(**m) == killer_1) {
+                    cmd.pv_score = 210;
+                }
             }
         }
 

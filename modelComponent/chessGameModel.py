@@ -37,7 +37,7 @@ class ChessGameModel():
     # Move Piece
     def movePiece(self, cmd: MoveCommand):
         # Move the Chess Piece
-        if cmd.moveType != MoveCommandType.NULL: 
+        if cmd and cmd.moveType != MoveCommandType.NULL: 
             self.chessBoard.movePiece(cmd)
 
         if self.currOpeningMove:
