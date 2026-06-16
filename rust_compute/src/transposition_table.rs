@@ -152,44 +152,47 @@ impl TranspositionTable {
         let new_packed = Self::pack_entry(move_id, score as i16, depth, flag, key, ply);
 
         // --- SLOT 1: DEPTH PREFERRED ---
-        let mut current_dp = bucket.depth_preferred.load(Ordering::Relaxed);
-        loop {
-            let existing_dp_depth = ((current_dp >> 32) & 0xFF) as i8 as i32;
+        let current_dp = bucket.depth_preferred.load(Ordering::Relaxed);
+        let existing_dp_depth = ((current_dp >> 32) & 0xFF) as i8 as i32;
 
-            if depth >= existing_dp_depth {
-                // If the new entry is deeper, overwrite depth_preferred.
-                // Demote the displaced deep entry down into the always_replace slot.
-                match bucket.depth_preferred.compare_exchange_weak(
-                    current_dp,
-                    new_packed,
-                    Ordering::Relaxed,
-                    Ordering::Relaxed,
-                ) {
-                    Ok(_) => {
-                        if current_dp != 0 {
-                            let current_ar = bucket.always_replace.load(Ordering::Relaxed);
-                            let existing_ar_depth = ((current_ar >> 32) & 0xFF) as i8 as i32;
-                            
-                            // Only overwrite always_replace if our demoted data is higher quality
-                            if existing_dp_depth >= existing_ar_depth {
-                                bucket.always_replace.store(current_dp, Ordering::Relaxed);
-                            }
-                        }
-                        return;
+        if depth >= existing_dp_depth {
+            // If the new entry is deeper, overwrite depth_preferred.
+            // Demote the displaced deep entry down into the always_replace slot.
+            if bucket.depth_preferred.compare_exchange_weak(
+                current_dp,
+                new_packed,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ).is_ok() {
+                if current_dp != 0 {
+                    let current_ar = bucket.always_replace.load(Ordering::Relaxed);
+                    let existing_ar_depth = ((current_ar >> 32) & 0xFF) as i8 as i32;
+                    
+                    // Only overwrite always_replace if our demoted data is higher quality
+                    if existing_dp_depth >= existing_ar_depth {
+                        let _ = bucket.always_replace.compare_exchange_weak(
+                            current_ar,
+                            current_dp,
+                            Ordering::Relaxed,
+                            Ordering::Relaxed,
+                        );
                     }
-                    Err(actual) => current_dp = actual,
                 }
-            } else {
-                // --- SLOT 2: FALLBACK TO ALWAYS REPLACE ---
-                // If it's too shallow for the depth slot, directly write it here.
-                let current_ar = bucket.always_replace.load(Ordering::Relaxed);
-                let existing_ar_depth = ((current_ar >> 32) & 0xFF) as i8 as i32;
-                
-                // Only store shallow entries if they are deeper than the current fallback entry
-                if depth >= existing_ar_depth {
-                    bucket.always_replace.store(new_packed, Ordering::Relaxed);
-                }
-                return;
+            }
+        } else {
+            // --- SLOT 2: FALLBACK TO ALWAYS REPLACE ---
+            // If it's too shallow for the depth slot, directly write it here.
+            let current_ar = bucket.always_replace.load(Ordering::Relaxed);
+            let existing_ar_depth = ((current_ar >> 32) & 0xFF) as i8 as i32;
+            
+            // Only store shallow entries if they are deeper than the current fallback entry
+            if depth >= existing_ar_depth {
+                let _ = bucket.always_replace.compare_exchange_weak(
+                    current_ar,
+                    new_packed,
+                    Ordering::Relaxed, // Correct: Purely atomic numeric update
+                    Ordering::Relaxed,
+                );
             }
         }
     }
