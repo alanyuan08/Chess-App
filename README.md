@@ -18,17 +18,17 @@ The engine has been unofficially benchmarked and validated against 3000 Elo bots
 
 - **Bitboard Move Generation:** Maximizes throughput by computing all pseudo-legal move paths across millions of positions per second
 
-- **Adversarial Search:** Implements Minimax search enhanced by Alpha-Beta pruning and a Quiescence search to eliminate horizon-effect instability
+- **Adversarial Search:** Implements Minimax search enhanced by Alpha-Beta pruning and a Quiescence search to eliminate horizon-effect instability.
+
+- **Advanced Pruning:** Uses Killer Move Heuristics and Late Move Reduction to improve the alpha / beta cutoff. The algorithm does not utilize Null-Move Pruning as it is currently using the Timecat NNUE for board evaluation and it is unable to process psuedo-moves
 
 - **Deep Evaluation:** Combines Iterative Deepening with Principal Variation Search (PVS) to regularly achieve search depths of 12+ plies. (Average Move is approximately 20 seconds to 1 minutes)
 
-- **Transposition Tables:** Caches previously evaluated board states to accelerate search paths and share data across threads
+- **Transposition Tables:** Caches previously evaluated board states to accelerate search paths and share data across threads. The tables uses the Condon-Thompson Replacement method to increase efficiency of L1 / L2 / L3 caches. 
 
 - **Parallel Processing:** Scales performance across CPU threads using a lock-free concurrent tree search architecture (Lazy SMP)
 
 - **Performance Benchmark:** Processes approximately 20 million nodes per second (NPS) on an Apple M4 Pro chip. (8 Performance Core Only - 4.5 GHz + On-Chip Cache Memory - 39.5 MB)
-
-> **Note:**: The transposition table implementation (transposition_table.rs) utilized AI-assisted generation and relies on open-source algorithmic paradigms. I do not claim sole authorship over this specific module.
 
 ## 3. Neural Network Evaluation
 
