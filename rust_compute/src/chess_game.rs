@@ -9,14 +9,14 @@ use crate::rook_mask::*;
 use crate::transposition_table::*;
 use crate::search_worker::*;
 
-pub const PV_DEPTH: i32 = 13;
+pub const PV_DEPTH: i32 = 14;
 pub const MAX_DEPTH: i32 = 20;
 
 // When a thread finishes, if it exceeds the time, it will send the 
 // termination signal to the other threads.
 
 // The other threads the single every 2048 executions
-pub const DEPTH_SEARCH_LIMIT: u64 = 20;
+pub const DEPTH_SEARCH_LIMIT: u64 = 15;
 
 pub const INFINITY: i32 = 32000;
 pub const MATE_VALUE: i32 = 30000;
@@ -26,9 +26,8 @@ pub const MATE_VALUE: i32 = 30000;
 // Heterogeneous Thread Migration between Performance and Efficiency
 pub const NUM_THREADS: i32 = 8;
 
-// The Cache should live inside the L1 / L2 / L3 space to avoid the 
-// expensive memory access from RAM.
-pub const CACHE_SIZE: usize = 128;
+// Condon-Thompson Bucket Transposition Table
+pub const CACHE_SIZE: usize = 64;
 
 #[pyclass]
 pub struct ChessGame {
