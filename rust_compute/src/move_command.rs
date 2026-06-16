@@ -1,4 +1,4 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub struct ForwardMove {
     pub start_sq: usize,
     pub end_sq: usize,
@@ -20,13 +20,18 @@ impl ForwardMove {
             pv_score: 0,
         }
     }
+}
 
-    pub fn eq(&self, other: &Self) -> bool {
+// Custom PartialEq to exclude pv_score from equality checks
+impl PartialEq for ForwardMove {
+    fn eq(&self, other: &Self) -> bool {
         self.start_sq == other.start_sq 
             && self.end_sq == other.end_sq 
             && self.move_type == other.move_type
     }
 }
+
+impl Eq for ForwardMove {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UndoMove {
