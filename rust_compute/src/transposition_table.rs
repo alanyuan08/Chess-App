@@ -164,19 +164,17 @@ impl TranspositionTable {
                 Ordering::Relaxed,
                 Ordering::Relaxed,
             ).is_ok() {
-                if current_dp != 0 {
-                    let current_ar = bucket.always_replace.load(Ordering::Relaxed);
-                    let existing_ar_depth = ((current_ar >> 32) & 0xFF) as i8 as i32;
-                    
-                    // Only overwrite always_replace if our demoted data is higher quality
-                    if existing_dp_depth >= existing_ar_depth {
-                        let _ = bucket.always_replace.compare_exchange_weak(
-                            current_ar,
-                            current_dp,
-                            Ordering::Relaxed,
-                            Ordering::Relaxed,
-                        );
-                    }
+                let current_ar = bucket.always_replace.load(Ordering::Relaxed);
+                let existing_ar_depth = ((current_ar >> 32) & 0xFF) as i8 as i32;
+
+                // Only overwrite always_replace if our demoted data is higher quality
+                if current_dp != 0 && existing_dp_depth >= existing_ar_depth {
+                    let _ = bucket.always_replace.compare_exchange_weak(
+                        current_ar,
+                        current_dp,
+                        Ordering::Relaxed,
+                        Ordering::Relaxed,
+                    );
                 }
             }
         } else {
