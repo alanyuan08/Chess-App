@@ -5,6 +5,7 @@ use std::cmp;
 
 use crate::move_command::*;
 use crate::chess_game::*;
+use crate::lmr_table::*;
 
 use crate::parser::*;
 use crate::chess_board::*;
@@ -232,9 +233,7 @@ impl<'a> SearchWorker<'a> {
     // A simple, linear-logarithmic approximation using integer division:
     // R increases slowly as depth and move count grow.
     fn calculate_lmr_reduction(&mut self, depth: i32, moves_tried: i32) -> i32 {
-        let base_r = 1 + (depth / 8) + (moves_tried / 12);
-
-        base_r.clamp(1, 2)
+        LMR_TABLE[depth as usize][moves_tried as usize]
     }
 
     // Store Killer Move - No Captures
