@@ -6,6 +6,7 @@ pub mod knight_mask;
 pub mod pawn_mask;
 pub mod rook_mask;
 pub mod queen_mask;
+pub mod lmr_table;
 
 pub mod move_command;
 pub mod chess_board;

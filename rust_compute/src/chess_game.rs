@@ -6,6 +6,7 @@ use std::time::Instant;
 
 use crate::bishop_mask::*;
 use crate::rook_mask::*;
+use crate::lmr_table::*;
 use crate::transposition_table::*;
 use crate::search_worker::*;
 
@@ -16,7 +17,7 @@ pub const MAX_DEPTH: i32 = 20;
 // termination signal to the other threads.
 
 // The other threads the single every 2048 executions
-pub const DEPTH_SEARCH_LIMIT: u64 = 15;
+pub const DEPTH_SEARCH_LIMIT: u64 = 25;
 
 pub const INFINITY: i32 = 32000;
 pub const MATE_VALUE: i32 = 30000;
@@ -138,4 +139,5 @@ impl ChessGame {
 pub fn init_attack_tables() {
     let _ = *BISHOP_ATTACKS;
     let _ = *ROOK_ATTACKS;
+    let _ = *LMR_TABLE;
 }
