@@ -56,6 +56,8 @@ impl ChessGame {
         // Search Time
         let start_time = Instant::now();
 
+        self.nodes_processed.store(0, Ordering::Relaxed);
+
         // Shared stop signal across all M4 Pro performance cores
         let stop_search = Arc::new(AtomicBool::new(false));
 
@@ -65,6 +67,8 @@ impl ChessGame {
         // Clone Search Worker
         let mut clone_search_worker = SearchWorker::new(tt_ref);
         clone_search_worker.process_moves(prev_moves);
+
+        // Reset Count
 
         let worker_source_ptr: &SearchWorker<'_> = &clone_search_worker;
 
