@@ -22,7 +22,7 @@ The engine has been unofficially benchmarked and validated against 3000 Elo bots
 
 - **Advanced Pruning:** Uses Killer Move Heuristics and Late Move Reduction to improve the alpha / beta cutoff. The algorithm does not utilize Null-Move Pruning as it is currently using the Timecat NNUE for board evaluation and it is unable to process psuedo-moves
 
-- **Deep Evaluation:** Combines Iterative Deepening with Principal Variation Search (PVS) to regularly achieve search depths of 12+ plies. (Average Move is approximately 20 seconds to 1 minutes)
+- **Deep Evaluation:** Combines Iterative Deepening with Principal Variation Search (PVS) to regularly achieve search depths of 14+ plies. (Average Move is approximately 20 seconds to 1 minutes)
 
 - **Transposition Tables:** Caches previously evaluated board states to accelerate search paths and share data across threads. The tables uses the Condon-Thompson Replacement method to increase efficiency of L1 / L2 / L3 caches. 
 
@@ -49,7 +49,7 @@ Playing as [black|white]
 
 # Playing Level
 
-The Chess AI has been tested and consistently drew against ELO 3000 chess.com bots.
+The Chess AI has been tested against ELO 3000+ chess.com bots. There is controversy that this score is inflated by 100-150+ ELO points. 
 
 - [WIN - ELO 3200 Bot](https://www.chess.com/analysis/game/computer/1617707258/analysis)
 - [DRAW - ELO 3200 Bot](https://www.chess.com/analysis/game/computer/1562860054/analysis)
