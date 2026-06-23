@@ -52,6 +52,8 @@ Playing as [black|white]
 The Chess AI has been tested and consistently drew against ELO 3000 chess.com bots.
 
 - [DRAW - ELO 3200 Bot](https://www.chess.com/analysis/game/computer/1562860054/analysis)
+- [DRAW - ELO 3200 Bot](https://www.chess.com/analysis/game/computer/1574164820/analysis)
+
 - [WIN - ELO 2900 Bot](https://www.chess.com/analysis/game/computer/1550643276/analysis)
 - [WIN - ELO 2900 Bot](https://www.chess.com/analysis/game/computer/1554932080/analysis)
 
