@@ -233,7 +233,13 @@ impl<'a> SearchWorker<'a> {
     // A simple, linear-logarithmic approximation using integer division:
     // R increases slowly as depth and move count grow.
     fn calculate_lmr_reduction(&mut self, depth: i32, moves_tried: i32) -> i32 {
-        LMR_TABLE[depth as usize][moves_tried as usize]
+        // Clamp depth to 0..=64
+        let d = depth.clamp(0, 63) as usize;
+        
+        // Clamp moves_tried to 0..=64
+        let m = moves_tried.clamp(0, 63) as usize;
+
+        LMR_TABLE[d][m]
     }
 
     // Store Killer Move - No Captures
