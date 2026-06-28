@@ -20,11 +20,11 @@ The engine has been unofficially benchmarked and validated against 3000 Elo bots
 
 - **Adversarial Search:** Implements Minimax search enhanced by Alpha-Beta pruning and a Quiescence search to eliminate horizon-effect instability.
 
-- **Advanced Pruning:** Uses Killer Move Heuristics and Late Move Reduction to improve the alpha / beta cutoff. The algorithm does not utilize Null-Move Pruning as it is currently using the Timecat NNUE for board evaluation and it is unable to process psuedo-moves
+- **Advanced Pruning:** Uses Killer Move Heuristics and Late Move Reduction to improve the alpha / beta cutoff. The algorithm does not utilize Null-Move Pruning as it is currently using the Timeca[...]
 
 - **Deep Evaluation:** Combines Iterative Deepening with Principal Variation Search (PVS) to regularly achieve search depths of 14+ plies. (Average Move is approximately 20 seconds to 1 minutes)
 
-- **Transposition Tables:** Caches previously evaluated board states to accelerate search paths and share data across threads. The tables uses the Condon-Thompson Replacement method to increase efficiency of L1 / L2 / L3 caches. 
+- **Transposition Tables:** Caches previously evaluated board states to accelerate search paths and share data across threads. The tables uses the Condon-Thompson Replacement method to increase ef[...]
 
 - **Parallel Processing:** Scales performance across CPU threads using a lock-free concurrent tree search architecture (Lazy SMP)
 
@@ -34,18 +34,33 @@ The engine has been unofficially benchmarked and validated against 3000 Elo bots
 
 - **NNUE Integration:** Features an incrementally updated Efficiently Updatable Neural Network (NNUE) paired with the Universal Chess Interface (UCI) protocol.
 
-> **Current Limitations:**: The engine currently utilizes the Timecat NNUE backend; This dependency will need to be removed prior to Computer Chess Rating Listing (CCRL) submission.
+- **UCI Protocol Support:** Standalone UCI server for FastChess integration and CCRL rating list submission.
 
-> **Future Roadmap:**: This dependency will be replaced with a custom, self-trained NNUE framework designed to handle perspective shifts during abstract pruning phases.
+> **Current Status:** The engine now supports full UCI protocol compliance, enabling compatibility with FastChess, CuteChess, and other UCI interfaces. See [FastChess Integration Guide](fastchess_integration.md) for details.
+
+> **Roadmap:** Custom NNUE training framework to replace Timecat dependency, enabling CCRL submission without external dependencies.
 
 # Running the App
 
 ## Prerequisites
 
-The user nedes Python 3, PySide6, and Cargo (Rust) installed on their machine.
+The user needs Python 3, PySide6, and Cargo (Rust) installed on their machine.
 
+### Desktop GUI Mode
 Playing as [black|white]
-- /run.sh [black|white]
+```bash
+./run.sh [black|white]
+```
+
+### UCI Server Mode (FastChess Integration)
+
+```bash
+cd rust_compute
+cargo build --release
+./target/release/chess_app
+```
+
+The UCI server will listen for FastChess commands on standard input/output.
 
 # Playing Level
 
@@ -54,6 +69,23 @@ The Chess AI has been tested against ELO 3000+ chess.com bots. There is controve
 - [WIN - ELO 3200 Bot](https://www.chess.com/analysis/game/computer/1617707258/analysis)
 - [DRAW - ELO 3200 Bot](https://www.chess.com/analysis/game/computer/1562860054/analysis)
 - [DRAW - ELO 3200 Bot](https://www.chess.com/analysis/game/computer/1574164820/analysis)
+
+## FastChess Integration
+
+For automated testing and CCRL rating submission:
+
+```bash
+# Build UCI server
+cd rust_compute && cargo build --release
+
+# Run with FastChess
+fastchess -engine1 "./target/release/chess_app" \
+  -engine2 "stockfish" \
+  -games 100 \
+  -concurrency 4
+```
+
+See [FastChess Integration Guide](fastchess_integration.md) for complete instructions.
 
 ## Contact
 
