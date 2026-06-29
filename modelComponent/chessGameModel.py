@@ -80,4 +80,5 @@ class ChessGameModel():
         
         # Rust Compute Next Move
         uci_move = self.game_engine.compute_next_move(self.returnChessMoves())
+        print(uci_move)
         return self.chessBoard.uci_to_move_command(uci_move)
