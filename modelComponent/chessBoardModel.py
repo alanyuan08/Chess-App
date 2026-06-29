@@ -2,7 +2,7 @@
 from appEnums import PieceType, Player, MoveCommandType, PROMOTION_MAP
 
 # Model 
-from modelComponent.moveCommand import MoveCommand
+from modelComponent.moveCommand import MoveCommand, move_command_to_uci
 from modelComponent.chessPieceModel import ChessPieceModel
 from modelComponent.chessBoardZobrist import ChessBoardZobrist
 
@@ -32,7 +32,7 @@ class ChessBoardModel():
         self.blackKingSquareRow = 7
         self.blackKingSquareCol = 4
 
-        # Used to Store previous Moves in 
+        # Previous Moves in UCI Format
         self.previousMoves = []
 
         # Use for Zobrist Hash
@@ -68,6 +68,28 @@ class ChessBoardModel():
             return True
         else:
             return False
+
+    def uci_to_move_command(self, uci: str) -> MoveCommand:
+        """
+        Convert a UCI string like 'e2e4' or 'g7g8q' into a MoveCommand.
+        """
+        start_file = ord(uci[0]) - ord('a')
+        start_rank = int(uci[1]) - 1
+        end_file = ord(uci[2]) - ord('a')
+        end_rank = int(uci[3]) - 1
+
+        promotion = None
+        if len(uci) == 5:
+            promo_char = uci[4]
+            promotion = PROMOTION_MAP.get(promo_char.upper(), None)
+
+        # Validate and build MoveCommand using your existing logic
+        cmd = self.validateMove(start_rank, start_file, end_rank, end_file, self.playerTurn)
+
+        if promotion is not None:
+            cmd.moveType = promotion
+
+        return cmd
 
     @staticmethod
     def opponent(player: Player):
@@ -212,9 +234,8 @@ class ChessBoardModel():
         self.forwardPosition()
 
         # Append Previous Position
-        self.previousMoves.append(
-            f"{cmd.startCol}{cmd.startRow}{cmd.endCol}{cmd.endRow}{cmd.moveType.value}"
-        )
+        uciMoveCommand = move_command_to_uci(cmd)
+        self.previousMoves.append(uciMoveCommand)
 
         # Create a new copy of the removed Piece
         return removedPiece, prevEnPassant

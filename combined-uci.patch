@@ -1,0 +1,169 @@
+diff --git a/src/search/search_worker.rs b/src/search/search_worker.rs
+index 9876543..abcd123 100644
+--- a/src/search/search_worker.rs
++++ b/src/search/search_worker.rs
+@@ -1,6 +1,7 @@
+ use crate::board::Board;
+ use crate::search::Move;
+
+ pub struct SearchWorker {
+-    // old: board created per search
+-    // board: Board,
++    pub board: Board,
+     engine: YourEngineType,
+ }
+
+-impl SearchWorker {
+-    pub fn new() -> Self {
+-        SearchWorker { engine: YourEngineType::new() }
+-    }
++impl SearchWorker {
++    pub fn new(board: Board) -> Self {
++        SearchWorker {
++            board,
++            engine: YourEngineType::new(),
++        }
++    }
+
+     pub fn search(&mut self, depth: u32) -> Option<Move> {
+-        let mut board = Board::new();
+-        self.engine.search(&mut board, depth)
++        // Use persistent board
++        self.engine.search(&mut self.board, depth)
+     }
+ }
+diff --git a/src/chess_game.rs b/src/chess_game.rs
+index 1234567..abcdef0 100644
+--- a/src/chess_game.rs
++++ b/src/chess_game.rs
+@@ -1,6 +1,7 @@
+ use pyo3::prelude::*;
+ use pyo3::types::PyString;
+
++use crate::board::Board;
+ use crate::search::{SearchWorker, Move};
+
+ #[pyclass]
+@@ -10,6 +11,7 @@ pub struct ChessGame {
+     worker: SearchWorker,
+ }
+
++fn sq_to_uci(sq: u8) -> String {
++    let file = (sq % 8) as u8;
++    let rank = (sq / 8) as u8;
++    format!("{}{}", (b'a' + file) as char, (b'1' + rank) as char)
++}
+
++fn move_to_uci(mv: &Move) -> String {
++    let mut s = format!("{}{}", sq_to_uci(mv.start_sq), sq_to_uci(mv.end_sq));
++
++    if mv.is_promotion() {
++        let promo = match mv.promotion_piece {
++            crate::pieces::PieceType::Queen => 'q',
++            crate::pieces::PieceType::Rook => 'r',
++            crate::pieces::PieceType::Bishop => 'b',
++            crate::pieces::PieceType::Knight => 'n',
++            _ => 'q',
++        };
++        s.push(promo);
++    }
++
++    s
++}
+
+ #[pymethods]
+ impl ChessGame {
+     #[new]
+     pub fn new() -> Self {
+-        ChessGame { worker: SearchWorker::new() }
++        // SearchWorker now contains a persistent board
++        ChessGame {
++            worker: SearchWorker::new(Board::new())
++        }
+     }
+
+     pub fn search(&mut self, py: Python, depth: u32) -> PyResult<PyObject> {
+-        let final_best_move = self.worker.search(depth);
+-
+-        if let Some(mv) = final_best_move {
+-            let move_type_value = mv.move_type as i32;
+-            let enum_instance = move_command_type_enum.call1((move_type_value,))?;
+-
+-            let args = (
+-                (mv.start_sq / 8) as i32,
+-                (mv.start_sq % 8) as i32,
+-                (mv.end_sq / 8) as i32,
+-                (mv.end_sq % 8) as i32,
+-                enum_instance,
+-            ).into_pyobject(py)?;
+-
+-            let move_command_instance = move_command_class.call1(args)?;
+-            Ok(move_command_instance)
+-        } else {
+-            Ok(py.None())
+-        }
++        let best = self.worker.search(depth);
++
++        if let Some(mv) = best {
++            // Persist board state between searches
++            self.worker.board.make_move(mv);
++
++            // Convert to UCI string
++            let uci = move_to_uci(&mv);
++            Ok(PyString::new(py, &uci).into())
++        } else {
++            Ok(py.None())
++        }
+     }
+ }
+diff --git a/frontend/chess_client.py b/frontend/chess_client.py
+index 1234567..abcdef0 100644
+--- a/frontend/chess_client.py
++++ b/frontend/chess_client.py
+@@ -1,6 +1,7 @@
+-import MoveCommand
++from typing import Optional
+
+ class ChessClient:
+     def __init__(self, game, board, depth=6):
+         self.game = game
+         self.board = board
+         self.depth = depth
+@@ -45,18 +46,46 @@ class ChessClient:
+     def make_engine_move(self):
+-        mv = self.game.search(self.depth)
+-        # old: mv is MoveCommand object
+-        self.board.apply_move(mv)
++        # Engine now returns a UCI string like "e2e4" or "g7g8q"
++        uci = self.game.search(self.depth)
++        if uci is None:
++            return
++        self.board_push_uci(uci)
+
+     def make_player_move(self, start_sq, end_sq, promotion: Optional[str] = None):
+-        mv = MoveCommand(start_sq, end_sq, promotion)
+-        self.game.apply_move(mv)
++        uci = self._coords_to_uci(start_sq, end_sq, promotion)
++        self.game.apply_move(uci)
++        self.board_push_uci(uci)
+
++    def _coords_to_uci(self, start_sq, end_sq, promotion: Optional[str]) -> str:
++        start = self._sq_to_uci(start_sq)
++        end = self._sq_to_uci(end_sq)
++        promo = promotion or ""
++        return f"{start}{end}{promo}"
+
++    def _sq_to_uci(self, sq) -> str:
++        row, col = sq
++        file_char = chr(ord("a") + col)
++        rank_char = str(row + 1)
++        return f"{file_char}{rank_char}"
+
++    def board_push_uci(self, uci: str):
++        if hasattr(self.board, "push_uci"):
++            self.board.push_uci(uci)
++        else:
++            start = uci[0:2]
++            end = uci[2:4]
++            promo = uci[4] if len(uci) == 5 else None
++            self.board.apply_uci_move(start, end, promo)
