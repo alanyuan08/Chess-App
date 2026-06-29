@@ -30,7 +30,7 @@ pub struct SearchWorker<'a>  {
 
 impl<'a> SearchWorker<'a> {
     pub fn new(
-        transposition_table: &'a TranspositionTable, 
+        transposition_table: &'a TranspositionTable,
     ) -> Self {
         Self {
             history: [None; 1024],
@@ -177,10 +177,11 @@ impl<'a> SearchWorker<'a> {
     }
 
     pub fn process_moves(&mut self, prev_moves: Vec<String>) {
-        for prev_move in &prev_moves {
+        for uci_move in &prev_moves {
             if self.history_index >= 1024 { break; } 
 
-            let move_command: ForwardMove = parse_forward_move(prev_move);
+            let move_command: ForwardMove = 
+                parse_forward_move_with_board(uci_move, &self.chess_board);
             self.process_forward_move(move_command);
             
             self.process_time_cat_forward(move_command);

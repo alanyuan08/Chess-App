@@ -155,6 +155,23 @@ pub enum BoardPiece {
     BKING = 12,
 }
 
+pub fn is_pawn(piece: BoardPiece) -> bool {
+    matches!(piece, BoardPiece::WPAWN | BoardPiece::BPAWN)
+}
+
+pub fn is_king(piece: BoardPiece) -> bool {
+    matches!(piece, BoardPiece::WKING | BoardPiece::BKING)
+}
+
+pub fn is_some(piece: BoardPiece) -> bool {
+    !matches!(piece, BoardPiece::NONE)
+}
+
+pub fn is_none(piece: BoardPiece) -> bool {
+    matches!(piece, BoardPiece::NONE)
+}
+
+
 pub fn piece_value(piece_type: BoardPiece) -> i32 {
     match piece_type {
         BoardPiece::WPAWN | BoardPiece::BPAWN => {

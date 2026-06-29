@@ -79,4 +79,5 @@ class ChessGameModel():
             return self.currOpeningMove.randomSubsequentCmd()
         
         # Rust Compute Next Move
-        return self.game_engine.compute_next_move(self.returnChessMoves())
+        uci_move = self.game_engine.compute_next_move(self.returnChessMoves())
+        return self.chessBoard.uci_to_move_command(uci_move)

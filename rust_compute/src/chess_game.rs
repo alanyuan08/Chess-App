@@ -1,5 +1,6 @@
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use pyo3::prelude::*;
+use pyo3::types::PyString;
 use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
@@ -9,6 +10,7 @@ use crate::rook_mask::*;
 use crate::lmr_table::*;
 use crate::transposition_table::*;
 use crate::search_worker::*;
+use crate::parser::*;
 
 pub const PV_DEPTH: i32 = 14;
 pub const MAX_DEPTH: i32 = 20;
@@ -46,11 +48,12 @@ impl ChessGame {
         }
     }
 
+    // Prev Moves provided in UCI Format
     pub fn compute_next_move<'py>(
         &self,
         py: Python<'py>, 
         prev_moves: Vec<String>
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<Bound<'py, PyString>> {
         let mut final_best_move = None;
 
         // Search Time
@@ -111,30 +114,20 @@ impl ChessGame {
         let node_procesed =  self.nodes_processed.load(Ordering::Relaxed);
         println!("{} Nodes Procesed in {} milliseconds", 
             node_procesed, elapsed_time.as_millis());
-        
-        // Python Import
-        let module = py.import("modelComponent.moveCommand")?;
-        let move_command_class = module.getattr("MoveCommand")?;
-
-        let enum_mod = py.import("appEnums")?;
-        let move_command_type_enum = enum_mod.getattr("MoveCommandType")?;
-
+                
         if let Some(mv) = final_best_move {
-            let move_type_value = mv.move_type as i32;
-            let enum_instance = move_command_type_enum.call1((move_type_value,))?;
+            let uci = parse_uci(mv);
 
-            let args = (
-                (mv.start_sq / 8) as i32,
-                (mv.start_sq % 8) as i32,
-                (mv.end_sq / 8) as i32,
-                (mv.end_sq % 8) as i32,
-                enum_instance,
-            ).into_pyobject(py)?;
+            // Step 1: Bound<PyString>
+            let py_str = PyString::new(py, &uci);
 
-            let move_command_instance = move_command_class.call1(args)?;
-            Ok(move_command_instance)
+            // Step 2: Bound<PyString> → Py<PyString>
+            let py_obj = py_str.into_pyobject(py)?.unbind();
+
+            // Step 3: Py<PyString> → Bound<PyAny>
+            Ok(py_obj.into_bound(py))
         } else {
-            Ok(py.None().into_bound(py))
+            Ok(PyString::new(py, ""))
         }
     }
 }
