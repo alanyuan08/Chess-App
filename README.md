@@ -40,10 +40,6 @@ The engine has been unofficially benchmarked and validated against 3000 Elo bots
 
 # Running the App
 
-## Prerequisites
-
-The user nedes Python 3, PySide6, and Cargo (Rust) installed on their machine.
-
 Playing as [black|white]
 - /run.sh [black|white]
 

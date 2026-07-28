@@ -2,5 +2,8 @@ __pycache__/
 **/.DS_Store
 dist/
 build/
-.venv/s
+.venv
+.tf_venv
 **/target
+nnue-training/*.csv
+nnue-training/nnue_weights.bin
