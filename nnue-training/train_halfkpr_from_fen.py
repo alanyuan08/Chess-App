@@ -168,10 +168,10 @@ def train_nnue_on_fens(data_file_path):
 
     # Cast boolean mask to float for safe, broadcastable mathematical selection
     # Black's turn, stm_float == 1.0, White's Turn stm_float == 0.0
-    stm_float = keras.ops.cast(stm_input, dtype="float32")
+    stm_float = 0.0
     
     # Multiplex perspectives seamlessly
-    first_half = stm_float * b_act + (1.0 + stm_float) * w_act
+    first_half = stm_float * b_act + (1.0 - stm_float) * w_act
     second_half = stm_float * w_act + (1.0 - stm_float) * b_act
 
     # Concat and output feed forward structure
