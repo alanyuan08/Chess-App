@@ -83,34 +83,49 @@ def dataset_generator(file_path, batch_size=128):
             # Skip header line if present
             next(f, None)
             
-            w_batch, b_batch, y_batch = [], [], []
+            w_batch, b_batch, stm_batch, y_batch = [], [], [], []
             for line in f:
-                if not line.strip(): continue
-                # Split on comma, semicolon, or tab delimiter
+                if not line.strip(): 
+                    continue
+
                 parts = re.split(r'[;,]', line.strip())
-                if len(parts) < 2: continue
+                if len(parts) < 2: 
+                    continue
                 
-                fen = parts[0]
+                fen = parts[0].strip()
+                fen_tokens = fen.split()
+                if len(fen_tokens) < 2:
+                    continue
+
+                # Determine active side: False for White to move, True for Black to move
+                is_black_turn = (fen_tokens[1] == 'b')
+
                 try:
-                    # Centipawn score can be heavily volatile. 
-                    # Sigmoid scale or dividing by ~400 prevents exploding loss.
-                    score = float(parts[1]) / 400.0
-                    # Clamp absurd evaluations to prevent gradient explosions
-                    score = np.clip(score, -3.0, 3.0)
+                    raw_score = float(parts[1])
+                    if is_black_turn:
+                        raw_score *= -1.0
+
+                    score = np.clip(raw_score / 400.0, -3.0, 3.0)
                 except ValueError:
                     continue
                 
                 w_feats, b_feats = parse_fen_to_features(fen)
                 w_batch.append(w_feats)
                 b_batch.append(b_feats)
+                stm_batch.append([is_black_turn])
                 y_batch.append(score)
                 
                 if len(w_batch) == batch_size:
                     yield (
-                        {"white_features": np.array(w_batch), "black_features": np.array(b_batch)},
-                        np.array(y_batch).reshape(-1, 1)
+                        {
+                            "white_features": np.array(w_batch), 
+                            "black_features": np.array(b_batch),
+                            "side_to_move": np.array(stm_batch, dtype=bool)
+                        },
+                        np.array(y_batch, dtype=np.float32).reshape(-1, 1)
                     )
-                    w_batch, b_batch, y_batch = [], [], []
+                    # Reset all trackers completely for the next iteration step
+                    w_batch, b_batch, stm_batch, y_batch = [], [], [], []
 
 # --- 3. CUSTOM NNUE TRANSFORMER LAYER ---
 class FeatureTransformer(layers.Layer):
@@ -140,6 +155,7 @@ def train_nnue_on_fens(data_file_path):
     # Inputs
     white_input = layers.Input(shape=(INPUT_FEATURES,), name="white_features")
     black_input = layers.Input(shape=(INPUT_FEATURES,), name="black_features")
+    stm_input = layers.Input(shape=(1,), dtype="bool", name="side_to_move")
 
     # Shared Accumulator Layer
     transformer = FeatureTransformer(HIDDEN_SIZE, name="accumulator_layer")
@@ -150,12 +166,27 @@ def train_nnue_on_fens(data_file_path):
     w_act = keras.ops.clip(w_acc, 0.0, 1.0)
     b_act = keras.ops.clip(b_acc, 0.0, 1.0)
 
+    # Cast boolean mask to float for safe, broadcastable mathematical selection
+    # Black's turn, stm_float == 1.0, White's Turn stm_float == 0.0
+    stm_float = keras.ops.cast(stm_input, dtype="float32")
+    
+    # Multiplex perspectives seamlessly
+    first_half = stm_float * b_act + (1.0 - stm_float) * w_act
+    second_half = stm_float * w_act + (1.0 - stm_float) * b_act
+
     # Concat and output feed forward structure
-    merged = layers.Concatenate()([w_act, b_act])
-    x = layers.Dense(32, activation="relu")(merged)
+    merged = layers.Concatenate()([first_half, second_half])       # Shape: (Batch, 512)
+    
+    # Hidden Layer 2 (Standard NNUE)
+    x = layers.Dense(32, activation="relu")(merged)     # Shape: (Batch, 32)
+    
+    # Hidden Layer 3 (The Missing Layer)
+    x = layers.Dense(32, activation="relu")(x)          # Shape: (Batch, 32)
+    
+    # Output Layer
     output = layers.Dense(1, activation="linear", name="chess_eval")(x)
 
-    model = Model(inputs=[white_input, black_input], outputs=output)
+    model = Model(inputs=[white_input, black_input, stm_input], outputs=output)
     model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.001), loss="mse")
 
     # Wrap the generator in a tf.data runtime pipeline
@@ -166,6 +197,7 @@ def train_nnue_on_fens(data_file_path):
             {
                 "white_features": tf.TensorSpec(shape=(batch_size, INPUT_FEATURES), dtype=tf.float32),
                 "black_features": tf.TensorSpec(shape=(batch_size, INPUT_FEATURES), dtype=tf.float32),
+                "side_to_move": tf.TensorSpec(shape=(batch_size, 1), dtype=tf.bool),
             },
             tf.TensorSpec(shape=(batch_size, 1), dtype=tf.float32)
         )
@@ -173,7 +205,16 @@ def train_nnue_on_fens(data_file_path):
 
     print("\n--- Model compilation complete. Commencing Training Step ---")
     # Steps per epoch represents: Total Records / Batch Size
-    model.fit(train_dataset, steps_per_epoch=1000, epochs=5)
+    lr_scheduler = tf.keras.callbacks.ReduceLROnPlateau(
+        monitor='loss', 
+        factor=0.5, 
+        patience=2, 
+        verbose=1, 
+        min_lr=1e-5
+    )
+
+    # Pass the callback into your fit runner
+    model.fit(train_dataset, steps_per_epoch=2000, epochs=20, callbacks=[lr_scheduler])
     
     return model
 
