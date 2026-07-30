@@ -76,7 +76,7 @@ def parse_fen_to_features(fen_string):
     return white_features, black_features
 
 # --- 2. PIPELINE GENERATOR FOR TENSORFLOW ---
-def dataset_generator(hf_dataset, batch_size=128, min_depth=14):
+def dataset_generator(hf_dataset, batch_size=128, min_depth=20):
     """
     Streams and processes rows from the Lichess Hugging Face dataset.
     Extracts FEN tokens, normalizes scores relative to the side to move, 
@@ -89,7 +89,8 @@ def dataset_generator(hf_dataset, batch_size=128, min_depth=14):
             raw_score = row.get("cp")
             depth_str = row.get("depth") # Depth field from Lichess dataset
             
-            if not fen or raw_score is None or not depth_str:
+            # Check for depth first
+            if not fen or depth_str is None:
                 continue
 
             try:  
@@ -170,10 +171,15 @@ def train_nnue_on_fens():
     model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.001), loss="mse")
 
     # Load the streaming dataset directly from Hugging Face
-    dset = load_dataset("mateuszgrzyb/lichess-stockfish-normalized", split="train", streaming=True)
-    gen = dataset_generator(dset, batch_size=256)
+
+   # Factory function to fresh-load the stream every time from_generator requests it
+    def create_fresh_generator():
+        # NOTE: dataset_generator function must accept a factory/fresh instance
+        dset = load_dataset("Lichess/chess-position-evaluations", split="train", streaming=True)
+        return dataset_generator(dset, batch_size=BATCH_SIZE)
+
     train_dataset = tf.data.Dataset.from_generator(
-        lambda: gen,
+        create_fresh_generator,
         output_signature=(
             {
                 "white_features": tf.TensorSpec(shape=(BATCH_SIZE, INPUT_FEATURES), dtype=tf.float32),
