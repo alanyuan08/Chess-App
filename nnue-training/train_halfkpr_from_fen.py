@@ -3,11 +3,14 @@ import numpy as np
 import tensorflow as tf
 import keras
 from tensorflow.keras import layers, Model
-import struct
+from datasets import load_dataset
 
 # --- CONSTANTS ---
 INPUT_FEATURES = 64 * 64 * 12  # 49,152
 HIDDEN_SIZE = 256
+SCALE_MAX = 127.0
+
+BATCH_SIZE = 256
 
 # Map FEN character to an integer type 0-11
 PIECE_MAP = {
@@ -73,102 +76,77 @@ def parse_fen_to_features(fen_string):
     return white_features, black_features
 
 # --- 2. PIPELINE GENERATOR FOR TENSORFLOW ---
-def dataset_generator(file_path, batch_size=128):
+def dataset_generator(hf_dataset, batch_size=128, min_depth=14):
     """
-    Reads lines of text formatted as "FEN,Score" or "FEN;Score".
-    Parses and yields mini-batches efficiently.
+    Streams and processes rows from the Lichess Hugging Face dataset.
+    Extracts FEN tokens, normalizes scores relative to the side to move, 
+    and yields structured mini-batches for TensorFlow.
     """
     while True:
-        with open(file_path, 'r') as f:
-            # Skip header line if present
-            next(f, None)
+        w_batch, b_batch, stm_batch, y_batch = [], [], [], []
+        for row in hf_dataset:
+            fen = row.get("fen")
+            raw_score = row.get("cp")
+            depth_str = row.get("depth") # Depth field from Lichess dataset
             
-            w_batch, b_batch, stm_batch, y_batch = [], [], [], []
-            for line in f:
-                if not line.strip(): 
+            if not fen or raw_score is None or not depth_str:
+                continue
+
+            try:  
+                # 1. Filter by minimum search depth
+                if int(depth_str) < min_depth:
                     continue
 
-                parts = re.split(r'[;,]', line.strip())
-                if len(parts) < 2: 
-                    continue
-                
-                fen = parts[0].strip()
+                # 2. Extract Active Turn
                 fen_tokens = fen.split()
-                if len(fen_tokens) < 2:
-                    continue
-
-                # Determine active side: False for White to move, True for Black to move
                 is_black_turn = (fen_tokens[1] == 'b')
-
-                try:
-                    raw_score = float(parts[1])
-                    if is_black_turn:
-                        raw_score *= -1.0
-
-                    score = np.clip(raw_score / 400.0, -3.0, 3.0)
-                except ValueError:
-                    continue
                 
-                w_feats, b_feats = parse_fen_to_features(fen)
-                w_batch.append(w_feats)
-                b_batch.append(b_feats)
-                stm_batch.append([is_black_turn])
-                y_batch.append(score)
-                
-                if len(w_batch) == batch_size:
-                    yield (
-                        {
-                            "white_features": np.array(w_batch), 
-                            "black_features": np.array(b_batch),
-                            "side_to_move": np.array(stm_batch, dtype=bool)
-                        },
-                        np.array(y_batch, dtype=np.float32).reshape(-1, 1)
-                    )
-                    # Reset all trackers completely for the next iteration step
-                    w_batch, b_batch, stm_batch, y_batch = [], [], [], []
+                # 3. Scale and normalize perspective
+                raw_score = float(raw_score)
+                if is_black_turn:
+                    raw_score *= -1.0
 
-# --- 3. CUSTOM NNUE TRANSFORMER LAYER ---
-class FeatureTransformer(layers.Layer):
-    def __init__(self, hidden_size, **kwargs):
-        super(FeatureTransformer, self).__init__(**kwargs)
-        self.hidden_size = hidden_size
-
-    def build(self, input_shape):
-        self.kernel = self.add_weight(
-            shape=(INPUT_FEATURES, self.hidden_size),
-            initializer=tf.keras.initializers.RandomNormal(stddev=0.01),
-            trainable=True,
-            name="nnue_weights"
-        )
-        self.bias = self.add_weight(
-            shape=(self.hidden_size,),
-            initializer="zeros",
-            trainable=True,
-            name="nnue_biases"
-        )
-
-    def call(self, inputs):
-        return tf.matmul(inputs, self.kernel) + self.bias
+                score = np.clip(raw_score / 400.0, -3.0, 3.0)
+            except (ValueError, TypeError, IndexError):
+                continue
+            
+            w_feats, b_feats = parse_fen_to_features(fen)
+            w_batch.append(w_feats)
+            b_batch.append(b_feats)
+            stm_batch.append([is_black_turn])
+            y_batch.append(score)
+            
+            if len(w_batch) == batch_size:
+                yield (
+                    {
+                        "white_features": np.array(w_batch), 
+                        "black_features": np.array(b_batch),
+                        "side_to_move": np.array(stm_batch, dtype=bool)
+                    },
+                    np.array(y_batch, dtype=np.float32).reshape(-1, 1)
+                )
+                # Reset all trackers completely for the next iteration step
+                w_batch, b_batch, stm_batch, y_batch = [], [], [], []
 
 # --- 4. MODEL DESIGN & TRAINING RUNNER ---
-def train_nnue_on_fens(data_file_path):
+def train_nnue_on_fens():
     # Inputs
     white_input = layers.Input(shape=(INPUT_FEATURES,), name="white_features")
     black_input = layers.Input(shape=(INPUT_FEATURES,), name="black_features")
     stm_input = layers.Input(shape=(1,), dtype="bool", name="side_to_move")
 
     # Shared Accumulator Layer
-    transformer = FeatureTransformer(HIDDEN_SIZE, name="accumulator_layer")
+    transformer = layers.Dense(256, activation=None, name="accumulator_layer") 
     w_acc = transformer(white_input)
     b_acc = transformer(black_input)
 
     # Clipped ReLU Activation: clamp(0.0, 1.0)
-    w_act = keras.ops.clip(w_acc, 0.0, 1.0)
-    b_act = keras.ops.clip(b_acc, 0.0, 1.0)
+    w_act = keras.ops.clip(w_acc, 0.0, SCALE_MAX)
+    b_act = keras.ops.clip(b_acc, 0.0, SCALE_MAX)
 
     # Cast boolean mask to float for safe, broadcastable mathematical selection
     # Black's turn, stm_float == 1.0, White's Turn stm_float == 0.0
-    stm_float = 0.0
+    stm_float = keras.ops.cast(stm_input, dtype="float32")
     
     # Multiplex perspectives seamlessly
     first_half = stm_float * b_act + (1.0 - stm_float) * w_act
@@ -184,22 +162,25 @@ def train_nnue_on_fens(data_file_path):
     x = layers.Dense(32, activation="relu")(x)          # Shape: (Batch, 32)
     
     # Output Layer
-    output = layers.Dense(1, activation="linear", name="chess_eval")(x)
+    raw_eval = layers.Dense(1, activation="linear", name="chess_eval")(x)
+
+    output = keras.ops.clip(raw_eval, -3.0, 3.0)
 
     model = Model(inputs=[white_input, black_input, stm_input], outputs=output)
     model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.001), loss="mse")
 
-    # Wrap the generator in a tf.data runtime pipeline
-    batch_size = 256
+    # Load the streaming dataset directly from Hugging Face
+    dset = load_dataset("mateuszgrzyb/lichess-stockfish-normalized", split="train", streaming=True)
+    gen = dataset_generator(dset, batch_size=256)
     train_dataset = tf.data.Dataset.from_generator(
-        lambda: dataset_generator(data_file_path, batch_size),
+        lambda: gen,
         output_signature=(
             {
-                "white_features": tf.TensorSpec(shape=(batch_size, INPUT_FEATURES), dtype=tf.float32),
-                "black_features": tf.TensorSpec(shape=(batch_size, INPUT_FEATURES), dtype=tf.float32),
-                "side_to_move": tf.TensorSpec(shape=(batch_size, 1), dtype=tf.bool),
+                "white_features": tf.TensorSpec(shape=(BATCH_SIZE, INPUT_FEATURES), dtype=tf.float32),
+                "black_features": tf.TensorSpec(shape=(BATCH_SIZE, INPUT_FEATURES), dtype=tf.float32),
+                "side_to_move": tf.TensorSpec(shape=(BATCH_SIZE, 1), dtype=tf.bool),
             },
-            tf.TensorSpec(shape=(batch_size, 1), dtype=tf.float32)
+            tf.TensorSpec(shape=(BATCH_SIZE, 1), dtype=tf.float32)
         )
     )
 
@@ -208,66 +189,60 @@ def train_nnue_on_fens(data_file_path):
     lr_scheduler = tf.keras.callbacks.ReduceLROnPlateau(
         monitor='loss', 
         factor=0.5, 
-        patience=2, 
+        patience=3, 
         verbose=1, 
         min_lr=1e-5
     )
 
     # Pass the callback into your fit runner
-    model.fit(train_dataset, steps_per_epoch=2000, epochs=20, callbacks=[lr_scheduler])
+    model.fit(train_dataset, steps_per_epoch=15000, epochs=30, callbacks=[lr_scheduler])
     
     return model
 
-def export_nnue_to_rust(model, filename="nnue_weights.bin"):
-    print(f"\n--- Exporting NNUE Model to {filename} ---")
-    
-    # 1. Extract Layers
-    ft_layer = model.get_layer("accumulator_layer")
-    dense_32 = model.layers[-2]  # The intermediate Dense(32) layer
-    output_layer = model.layers[-1]  # The final Dense(1) layer
-    
-    # 2. Extract Floating-Point Arrays
-    w_ft, b_ft = ft_layer.kernel.numpy(), ft_layer.bias.numpy()
-    w_d32, b_d32 = dense_32.kernel.numpy(), dense_32.bias.numpy()
-    w_out, b_out = output_layer.kernel.numpy(), output_layer.bias.numpy()
-
-    # 3. Define Quantization Factors (Scaling floats to integers)
-    # Standard NNUE uses these standard quantization scales:
-    SCALE_FT = 255      # Scale factor for accumulator layer
-    SCALE_OUT = 64      # Scale factor for subsequent layers
-
-    print("Quantizing weights into integer formats...")
-    # Quantize to int16 (Accumulator layer matches int16)
-    q_w_ft = np.clip(w_ft * SCALE_FT, -32768, 32767).astype(np.int16)
-    q_b_ft = np.clip(b_ft * SCALE_FT, -32768, 32767).astype(np.int16)
-    
-    # Quantize subsequent layers to int8 or int16. For simplicity in Rust, we use int16 here.
-    q_w_d32 = np.clip(w_d32 * SCALE_OUT, -32768, 32767).astype(np.int16)
-    q_b_d32 = np.clip(b_d32 * SCALE_FT * SCALE_OUT, -32768, 32767).astype(np.int32) # Biases scale quadratically
-    
-    q_w_out = np.clip(w_out * SCALE_OUT, -32768, 32767).astype(np.int16)
-    q_b_out = np.clip(b_out * SCALE_FT * SCALE_OUT * SCALE_OUT, -2147483648, 2147483647).astype(np.int32)
-
-    # 4. Stream sequentially out to raw bytes
-    with open(filename, "wb") as f:
-        # Layer 1: Feature Transformer
-        f.write(q_w_ft.tobytes())   # Shape: [49152, 256] -> 25,165,824 bytes
-        f.write(q_b_ft.tobytes())   # Shape: [256]        -> 512 bytes
+def export_dense_nnue_for_rust(model, file_path="model.nnue"):
+    with open(file_path, "wb") as f:
+        print("--- Commencing Weight Quantization & Serialization for Rust ---")
         
-        # Layer 2: Hidden Dense Layer
-        f.write(q_w_d32.tobytes())  # Shape: [512, 32]    -> 32,768 bytes
-        f.write(q_b_d32.tobytes())  # Shape: [32]         -> 128 bytes (int32)
+        # 1. First Layer (Accumulator Layer) -> Quantize to i16
+        # Matches shape (49152, 256) and bias (256,)
+        acc_layer = model.get_layer("accumulator_layer")
+        w1, b1 = acc_layer.get_weights()
         
-        # Layer 3: Output Neuron
-        f.write(q_w_out.tobytes())  # Shape: [32, 1]      -> 64 bytes
-        f.write(q_b_out.tobytes())  # Shape: [1]          -> 4 bytes (int32)
+        # Scale factor 127.0 matches your clamp(0.0, 1.0) normalized range
+        f.write(np.round(w1 * 127.0).astype(np.int16).tobytes())
+        f.write(np.round(b1 * 127.0).astype(np.int16).tobytes())
+        print(f"-> Accumulator Layer weights serialized. Shape: {w1.shape}")
 
-    print(f"Success! Saved completed binary model framework to {filename}")
+        # 2. Hidden Layer 2 -> Quantize to i8 weights / i32 biases
+        # Matches shape (512, 32) and bias (32,)
+        # Note: We look up by index or custom name to avoid default naming collisions
+        layer2 = [l for l in model.layers if isinstance(l, layers.Dense) and l.name != "accumulator_layer" and l.name != "chess_eval"][0]
+        w2, b2 = layer2.get_weights()
+        f.write(np.round(w2 * 64.0).astype(np.int8).tobytes())
+        f.write(np.round(b2 * 64.0).astype(np.int32).tobytes())
+        print(f"-> Hidden Layer 2 weights serialized. Shape: {w2.shape}")
+
+        # 3. Hidden Layer 3 -> Quantize to i8 weights / i32 biases
+        # Matches shape (32, 32) and bias (32,)
+        layer3 = [l for l in model.layers if isinstance(l, layers.Dense) and l.name != "accumulator_layer" and l.name != "chess_eval"][1]
+        w3, b3 = layer3.get_weights()
+        f.write(np.round(w3 * 64.0).astype(np.int8).tobytes())
+        f.write(np.round(b3 * 64.0).astype(np.int32).tobytes())
+        print(f"-> Hidden Layer 3 weights serialized. Shape: {w3.shape}")
+
+        # 4. Output Layer -> Quantize to i8 weights / i32 biases
+        # Matches shape (32, 1) and bias (1,)
+        output_layer = model.get_layer("chess_eval")
+        w4, b4 = output_layer.get_weights()
+        f.write(np.round(w4 * 64.0).astype(np.int8).tobytes())
+        f.write(np.round(b4 * 64.0).astype(np.int32).tobytes())
+        print(f"-> Output Layer weights serialized. Shape: {w4.shape}")
+
+    print(f"\n[SUCCESS] NNUE file successfully compiled and written to: {file_path}")
 
 
 if __name__ == "__main__":
-    DATA_PATH = "FilteredEvals.csv" 
+    # Load the streaming dataset directly from Hugging Face
+    trained_model = train_nnue_on_fens()
 
-    trained_model = train_nnue_on_fens(DATA_PATH)
-
-    export_nnue_to_rust(trained_model, "nnue_weights.bin")
+    export_dense_nnue_for_rust(trained_model, "nnue_weights.bin")
