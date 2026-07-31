@@ -8,7 +8,7 @@ from datasets import load_dataset
 # --- CONSTANTS ---
 INPUT_FEATURES = 64 * 64 * 12  # 49,152
 HIDDEN_SIZE = 256
-SCALE_MAX = 127.0
+SCALE_MAX = 1.0
 
 BATCH_SIZE = 256
 DATASET_NAME = "mateuszgrzyb/lichess-stockfish-normalized"
