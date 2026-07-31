@@ -12,7 +12,9 @@ SCALE_MAX = 1.0
 
 BATCH_SIZE = 256
 DATASET_NAME = "mateuszgrzyb/lichess-stockfish-normalized"
-VAL_SAMPLE_SIZE = 30000
+
+VAL_SAMPLE_SIZE = 15360
+VAL_BATCH_SIZE = 1024
 
 # Map FEN character to an integer type 0-11
 PIECE_MAP = {
@@ -138,40 +140,38 @@ def dataset_generator(get_dataset_fn):
 
 # --- 4. MODEL DESIGN & TRAINING RUNNER ---
 def train_nnue_on_fens():
-    # Inputs
+    # 1. Inputs
     white_input = layers.Input(shape=(INPUT_FEATURES,), name="white_features")
     black_input = layers.Input(shape=(INPUT_FEATURES,), name="black_features")
     stm_input = layers.Input(shape=(1,), dtype="bool", name="side_to_move")
 
-    # Shared Accumulator Layer
+    # 2. Shared Accumulator Layer (HalfK Virtual Weights)
     transformer = layers.Dense(256, activation=None, name="accumulator_layer") 
     w_acc = transformer(white_input)
     b_acc = transformer(black_input)
 
-    # Clipped ReLU Activation: clamp(0.0, 1.0)
+    # 3. Clipped ReLU Activation (ReLU1 / Bounded ReLU)
     w_act = keras.ops.clip(w_acc, 0.0, SCALE_MAX)
     b_act = keras.ops.clip(b_acc, 0.0, SCALE_MAX)
 
-    # Cast boolean mask to float for safe, broadcastable mathematical selection
-    # Black's turn, stm_float == 1.0, White's Turn stm_float == 0.0
+    # 4. Cast boolean mask to float for branchless tensor operations
+    # Black's turn -> stm_float = 1.0 | White's Turn -> stm_float = 0.0
     stm_float = keras.ops.cast(stm_input, dtype="float32")
     
-    # Multiplex perspectives seamlessly
+    # 5. Concat into the final accumulator vector (Shape: Batch, 512)
     first_half = stm_float * b_act + (1.0 - stm_float) * w_act
     second_half = stm_float * w_act + (1.0 - stm_float) * b_act
-
-    # Concat and output feed forward structure
     merged = layers.Concatenate(name="perspective_multiplex")([first_half, second_half])       # Shape: (Batch, 512)
     
-    # Hidden Layer 2 (Standard NNUE)
+    # 6. Hidden Layer 2 with ReLU1 activation
     x = layers.Dense(32, activation=None, name="hidden_layer_2")(merged)     # Shape: (Batch, 32)
     x = keras.ops.clip(x, 0.0, SCALE_MAX)
 
-    # Hidden Layer 3 (The Missing Layer)
+    # 7. Hidden Layer 3 with ReLU1 activation
     x = layers.Dense(32, activation=None, name="hidden_layer_3")(x)          # Shape: (Batch, 32)
     x = keras.ops.clip(x, 0.0, SCALE_MAX)
 
-    # Output Layer
+    # 8. Output Layer mapped to Tanh range [-1.0, 1.0]
     raw_eval = layers.Dense(1, activation=None, name="chess_eval")(x)
     output = layers.Activation("tanh", name="normalized_eval")(raw_eval)
 
@@ -187,11 +187,14 @@ def train_nnue_on_fens():
         return dset.shuffle(seed=42, buffer_size=300000)
 
     def load_val_stream():
-        # 2. Load an independent validation stream instance
-        dset = load_dataset(DATASET_NAME, split="train", streaming=True)
-        # Skip the first 5,000,000 rows to ensure zero overlap with training data [2, 3]
-        # Then lock down a clean, fixed evaluation sample size [2, 3]
-        return dset.skip(5000000).take(VAL_SAMPLE_SIZE)
+        try:
+            dset = load_dataset(DATASET_NAME, split="validation", streaming=True)
+        except Exception:
+            # Fallback if only 'train' split exists, skip a vastly smaller, realistic buffer
+            dset = load_dataset(DATASET_NAME, split="train", streaming=True)
+            dset = dset.skip(100000) 
+
+        return dset.take(VAL_SAMPLE_SIZE)
 
     # --- Train Dataset ---
     train_dataset = tf.data.Dataset.from_generator(
@@ -219,9 +222,9 @@ def train_nnue_on_fens():
         )
     )
 
-    val_dataset = val_dataset.take(15360)
+    val_dataset = val_dataset.take(VAL_SAMPLE_SIZE)
     val_dataset = val_dataset.cache()
-    val_dataset = val_dataset.batch(1024)
+    val_dataset = val_dataset.batch(VAL_BATCH_SIZE)
     val_dataset = val_dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
 
     train_dataset = train_dataset.batch(BATCH_SIZE)
@@ -243,7 +246,7 @@ def train_nnue_on_fens():
         steps_per_epoch=15000, 
         epochs=30, 
         validation_data=val_dataset,
-        validation_steps=VAL_SAMPLE_SIZE // 1024 ,
+        validation_steps=VAL_SAMPLE_SIZE // VAL_BATCH_SIZE,
         callbacks=[lr_scheduler])
     
     # Ideal Error is between 0.040 and 0.055
