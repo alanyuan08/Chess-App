@@ -11,6 +11,8 @@ HIDDEN_SIZE = 256
 SCALE_MAX = 127.0
 
 BATCH_SIZE = 256
+DATASET_NAME = "mateuszgrzyb/lichess-stockfish-normalized"
+VAL_SAMPLE_SIZE = 30000
 
 # Map FEN character to an integer type 0-11
 PIECE_MAP = {
@@ -76,58 +78,63 @@ def parse_fen_to_features(fen_string):
     return white_features, black_features
 
 # --- 2. PIPELINE GENERATOR FOR TENSORFLOW ---
-def dataset_generator(hf_dataset, batch_size=128, min_depth=20):
+def dataset_generator(get_dataset_fn):
     """
     Streams and processes rows from the Lichess Hugging Face dataset.
     Extracts FEN tokens, normalizes scores relative to the side to move, 
     and yields structured mini-batches for TensorFlow.
     """
     while True:
-        w_batch, b_batch, stm_batch, y_batch = [], [], [], []
+        # Simply load the stream once
+        hf_dataset = get_dataset_fn()
+
         for row in hf_dataset:
             fen = row.get("fen")
             raw_score = row.get("cp")
-            depth_str = row.get("depth") # Depth field from Lichess dataset
+            mate = row.get("mate")
             
-            # Check for depth first
-            if not fen or depth_str is None:
-                continue
-
             try:  
-                # 1. Filter by minimum search depth
-                if int(depth_str) < min_depth:
-                    continue
-
-                # 2. Extract Active Turn
+                # 1. Extract Active Turn
                 fen_tokens = fen.split()
                 is_black_turn = (fen_tokens[1] == 'b')
                 
-                # 3. Scale and normalize perspective
-                raw_score = float(raw_score)
+                # 2. Assign absolute White-relative score
+                if raw_score is not None:
+                    raw_score = float(raw_score)
+                elif mate is not None:
+                    mate_val = int(mate)
+                    # Calculate baseline penalty purely based on distance, ignoring sign
+                    distance_penalty = abs(mate_val) * 10.0
+                    
+                    if mate_val > 0:
+                        raw_score = 25000.0 - distance_penalty   # White forces mate
+                    else:
+                        raw_score = -25000.0 + distance_penalty  # Black forces mate
+                else:
+                    continue 
+
+                # 2. Scale and normalize perspective
                 if is_black_turn:
                     raw_score *= -1.0
 
-                score = np.clip(raw_score / 400.0, -3.0, 3.0)
+                score = np.tanh(raw_score / 410.0)
             except (ValueError, TypeError, IndexError):
                 continue
             
             w_feats, b_feats = parse_fen_to_features(fen)
-            w_batch.append(w_feats)
-            b_batch.append(b_feats)
-            stm_batch.append([is_black_turn])
-            y_batch.append(score)
             
-            if len(w_batch) == batch_size:
-                yield (
-                    {
-                        "white_features": np.array(w_batch), 
-                        "black_features": np.array(b_batch),
-                        "side_to_move": np.array(stm_batch, dtype=bool)
-                    },
-                    np.array(y_batch, dtype=np.float32).reshape(-1, 1)
-                )
-                # Reset all trackers completely for the next iteration step
-                w_batch, b_batch, stm_batch, y_batch = [], [], [], []
+            w_feats_flat = np.array(w_feats, dtype=np.float32).flatten()
+            b_feats_flat = np.array(b_feats, dtype=np.float32).flatten()
+            
+            yield (
+                {
+                    "white_features": w_feats_flat, 
+                    "black_features": b_feats_flat,
+                    "side_to_move": np.array([is_black_turn], dtype=bool)
+                },
+                np.array([score], dtype=np.float32).flatten()
+            )
+
 
 # --- 4. MODEL DESIGN & TRAINING RUNNER ---
 def train_nnue_on_fens():
@@ -154,55 +161,92 @@ def train_nnue_on_fens():
     second_half = stm_float * w_act + (1.0 - stm_float) * b_act
 
     # Concat and output feed forward structure
-    merged = layers.Concatenate()([first_half, second_half])       # Shape: (Batch, 512)
+    merged = layers.Concatenate(name="perspective_multiplex")([first_half, second_half])       # Shape: (Batch, 512)
     
     # Hidden Layer 2 (Standard NNUE)
-    x = layers.Dense(32, activation="relu")(merged)     # Shape: (Batch, 32)
-    
+    x = layers.Dense(32, activation=None, name="hidden_layer_2")(merged)     # Shape: (Batch, 32)
+    x = keras.ops.clip(x, 0.0, SCALE_MAX)
+
     # Hidden Layer 3 (The Missing Layer)
-    x = layers.Dense(32, activation="relu")(x)          # Shape: (Batch, 32)
-    
+    x = layers.Dense(32, activation=None, name="hidden_layer_3")(x)          # Shape: (Batch, 32)
+    x = keras.ops.clip(x, 0.0, SCALE_MAX)
+
     # Output Layer
-    raw_eval = layers.Dense(1, activation="linear", name="chess_eval")(x)
+    raw_eval = layers.Dense(1, activation=None, name="chess_eval")(x)
+    output = layers.Activation("tanh", name="normalized_eval")(raw_eval)
 
-    output = keras.ops.clip(raw_eval, -3.0, 3.0)
+    model = Model(
+        inputs=[white_input, black_input, stm_input],
+        outputs=output)
+    model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.0003), loss="mse")
 
-    model = Model(inputs=[white_input, black_input, stm_input], outputs=output)
-    model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.001), loss="mse")
+    def load_train_stream():
+        # 1. Load the main training stream
+        dset = load_dataset(DATASET_NAME, split="train", streaming=True)
+        # Shuffle the training stream independently
+        return dset.shuffle(seed=42, buffer_size=300000)
 
-    # Load the streaming dataset directly from Hugging Face
+    def load_val_stream():
+        # 2. Load an independent validation stream instance
+        dset = load_dataset(DATASET_NAME, split="train", streaming=True)
+        # Skip the first 5,000,000 rows to ensure zero overlap with training data [2, 3]
+        # Then lock down a clean, fixed evaluation sample size [2, 3]
+        return dset.skip(5000000).take(VAL_SAMPLE_SIZE)
 
-   # Factory function to fresh-load the stream every time from_generator requests it
-    def create_fresh_generator():
-        # NOTE: dataset_generator function must accept a factory/fresh instance
-        dset = load_dataset("Lichess/chess-position-evaluations", split="train", streaming=True)
-        return dataset_generator(dset, batch_size=BATCH_SIZE)
-
+    # --- Train Dataset ---
     train_dataset = tf.data.Dataset.from_generator(
-        create_fresh_generator,
+        lambda: dataset_generator(load_train_stream),
         output_signature=(
             {
-                "white_features": tf.TensorSpec(shape=(BATCH_SIZE, INPUT_FEATURES), dtype=tf.float32),
-                "black_features": tf.TensorSpec(shape=(BATCH_SIZE, INPUT_FEATURES), dtype=tf.float32),
-                "side_to_move": tf.TensorSpec(shape=(BATCH_SIZE, 1), dtype=tf.bool),
+                "white_features": tf.TensorSpec(shape=(INPUT_FEATURES,), dtype=tf.float32),
+                "black_features": tf.TensorSpec(shape=(INPUT_FEATURES,), dtype=tf.float32),
+                "side_to_move": tf.TensorSpec(shape=(1,), dtype=tf.bool),
             },
-            tf.TensorSpec(shape=(BATCH_SIZE, 1), dtype=tf.float32)
+            tf.TensorSpec(shape=(1,), dtype=tf.float32)
         )
     )
+
+    # --- Validation Dataset ---
+    val_dataset = tf.data.Dataset.from_generator(
+        lambda: dataset_generator(load_val_stream),
+        output_signature=(
+            {
+                "white_features": tf.TensorSpec(shape=(INPUT_FEATURES,), dtype=tf.float32),
+                "black_features": tf.TensorSpec(shape=(INPUT_FEATURES,), dtype=tf.float32),
+                "side_to_move": tf.TensorSpec(shape=(1,), dtype=tf.bool),
+            },
+            tf.TensorSpec(shape=(1,), dtype=tf.float32)
+        )
+    )
+
+    val_dataset = val_dataset.take(15360)
+    val_dataset = val_dataset.cache()
+    val_dataset = val_dataset.batch(1024)
+    val_dataset = val_dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
+
+    train_dataset = train_dataset.batch(BATCH_SIZE)
+    train_dataset = train_dataset.prefetch(tf.data.AUTOTUNE)
 
     print("\n--- Model compilation complete. Commencing Training Step ---")
     # Steps per epoch represents: Total Records / Batch Size
     lr_scheduler = tf.keras.callbacks.ReduceLROnPlateau(
-        monitor='loss', 
+        monitor='val_loss', 
         factor=0.5, 
-        patience=3, 
+        patience=1, 
         verbose=1, 
         min_lr=1e-5
     )
 
     # Pass the callback into your fit runner
-    model.fit(train_dataset, steps_per_epoch=15000, epochs=30, callbacks=[lr_scheduler])
+    model.fit(
+        train_dataset, 
+        steps_per_epoch=15000, 
+        epochs=30, 
+        validation_data=val_dataset,
+        validation_steps=VAL_SAMPLE_SIZE // 1024 ,
+        callbacks=[lr_scheduler])
     
+    # Ideal Error is between 0.040 and 0.055
     return model
 
 def export_dense_nnue_for_rust(model, file_path="model.nnue"):
@@ -214,25 +258,25 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
         acc_layer = model.get_layer("accumulator_layer")
         w1, b1 = acc_layer.get_weights()
         
-        # Scale factor 127.0 matches your clamp(0.0, 1.0) normalized range
-        f.write(np.round(w1 * 127.0).astype(np.int16).tobytes())
-        f.write(np.round(b1 * 127.0).astype(np.int16).tobytes())
+        # Scale factor 128.0 enables quick bit-shifts in Rust (>> 7)
+        f.write(np.round(w1.T * 128.0).astype(np.int16).tobytes())
+        f.write(np.round(b1 * 128.0).astype(np.int16).tobytes())
         print(f"-> Accumulator Layer weights serialized. Shape: {w1.shape}")
 
         # 2. Hidden Layer 2 -> Quantize to i8 weights / i32 biases
         # Matches shape (512, 32) and bias (32,)
         # Note: We look up by index or custom name to avoid default naming collisions
-        layer2 = [l for l in model.layers if isinstance(l, layers.Dense) and l.name != "accumulator_layer" and l.name != "chess_eval"][0]
+        layer2 = model.get_layer("hidden_layer_2") 
         w2, b2 = layer2.get_weights()
-        f.write(np.round(w2 * 64.0).astype(np.int8).tobytes())
+        f.write(np.round(w2.T * 64.0).astype(np.int8).tobytes())
         f.write(np.round(b2 * 64.0).astype(np.int32).tobytes())
         print(f"-> Hidden Layer 2 weights serialized. Shape: {w2.shape}")
 
         # 3. Hidden Layer 3 -> Quantize to i8 weights / i32 biases
         # Matches shape (32, 32) and bias (32,)
-        layer3 = [l for l in model.layers if isinstance(l, layers.Dense) and l.name != "accumulator_layer" and l.name != "chess_eval"][1]
+        layer3 = model.get_layer("hidden_layer_3")
         w3, b3 = layer3.get_weights()
-        f.write(np.round(w3 * 64.0).astype(np.int8).tobytes())
+        f.write(np.round(w3.T * 64.0).astype(np.int8).tobytes())
         f.write(np.round(b3 * 64.0).astype(np.int32).tobytes())
         print(f"-> Hidden Layer 3 weights serialized. Shape: {w3.shape}")
 
@@ -240,8 +284,8 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
         # Matches shape (32, 1) and bias (1,)
         output_layer = model.get_layer("chess_eval")
         w4, b4 = output_layer.get_weights()
-        f.write(np.round(w4 * 64.0).astype(np.int8).tobytes())
-        f.write(np.round(b4 * 64.0).astype(np.int32).tobytes())
+        f.write(np.round(w4.T * 127.0).astype(np.int16).tobytes())
+        f.write(np.round(b4 * 127.0).astype(np.int32).tobytes())
         print(f"-> Output Layer weights serialized. Shape: {w4.shape}")
 
     print(f"\n[SUCCESS] NNUE file successfully compiled and written to: {file_path}")

@@ -34,9 +34,9 @@ The engine has been unofficially benchmarked and validated against 3000 Elo bots
 
 - **NNUE Integration:** Features an incrementally updated Efficiently Updatable Neural Network (NNUE) paired with the Universal Chess Interface (UCI) protocol.
 
-- **NNUE Training Data:** The NNUE training data uses a set of chess positions in Forsyth-Edwards-Notation and evaluated using Stockfish with a depth of 0. 
+- **NNUE Training Data:** The NNUE training data uses a set of chess positions in Forsyth-Edwards-Notation with a depth of 10+ provided.
 
-- [Chess FENs + Evaluations dataset](https://www.kaggle.com/datasets/dev102/chess-fens-evaluations-dataset?resource=download)
+- [Chess FENs + Evaluations dataset](https://huggingface.co/datasets/Lichess/chess-position-evaluations)
 
 > **Current Limitations:**: The engine currently utilizes the Timecat NNUE backend; This dependency will need to be removed prior to Computer Chess Rating Listing (CCRL) submission.
 
