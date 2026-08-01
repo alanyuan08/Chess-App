@@ -1,5 +1,6 @@
 # Impoprt
 import secrets
+from typing import Optional
 
 # Enum
 from appEnums import Player, MoveCommandType, PieceType

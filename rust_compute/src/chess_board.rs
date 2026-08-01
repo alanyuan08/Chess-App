@@ -197,14 +197,14 @@ impl ChessBoard {
         }
     }
 
-    // Timecat FEN 
-    pub fn timecat_print_fen(&mut self) {
-        println!("{}", self.timecat_board);
-    }
-
     // Undo Time Cat Move
     pub fn timecat_pop_move(&mut self) {
         let _ = self.timecat_board.pop();
+    }
+
+    // Timecat FEN 
+    pub fn timecat_print_fen(&mut self) {
+        println!("{}", self.timecat_board);
     }
 
     // Used to Calculate Castling / King Safety

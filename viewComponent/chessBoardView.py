@@ -2,7 +2,7 @@ from PySide6.QtWidgets import QGraphicsScene, QGraphicsPixmapItem
 from PySide6.QtGui import QPixmap
 
 # Import Enums
-from appEnums import PieceType, Player, MoveCommandType, PROMOTION_MAP
+from appEnums import GameState, PieceType, Player, MoveCommandType, PROMOTION_MAP
 
 # Import Model
 from modelComponent.chessBoardModel import ChessBoardModel

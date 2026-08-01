@@ -2,8 +2,9 @@ use std::sync::LazyLock;
 use crate::move_command::*;
 use rand::prelude::*;
 
-// Standard Piece Map: 6 pieces * 2 colours = 13 total
+// Standard Piece Map: 6 pieces * 2 colours = 12 total
 // We use indices 1-6 for White (P, N, B, R, Q, K) and 7-12 for Black
+// Zero Index
 const PIECE_TYPES: usize = 13;
 const SQUARES: usize = 64;
 const CASTLING: usize = 16;

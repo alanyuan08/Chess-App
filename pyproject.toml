@@ -11,3 +11,11 @@ build-backend = "maturin"
 
 [tool.maturin]
 manifest-path = "rust_compute/Cargo.toml"
+
+[project.optional-dependencies]
+training = [
+    "numpy",
+    "tensorflow",
+    "keras",
+    "datasets",
+]

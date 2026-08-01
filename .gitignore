@@ -2,5 +2,9 @@ __pycache__/
 **/.DS_Store
 dist/
 build/
-.venv/s
+.venv
+.tf_venv
 **/target
+nnue-training/*.csv
+nnue-training/*.bin
+nnue-training/*.keras
