@@ -32,11 +32,23 @@ The engine has been unofficially benchmarked and validated against 3000 Elo bots
 
 ## 3. Neural Network Evaluation
 
-- **NNUE Integration:** Features an incrementally updated Efficiently Updatable Neural Network (NNUE) paired with the Universal Chess Interface (UCI) protocol.
+- **NNUE Architecture:** The engine features a customized **HalfKA** perspective neural network utilizing a hybrid quantization layout. The architectural data pathways progress as follows:
+  
+  $$\text{Inputs (49,152)} \rightarrow \text{Accumulator (256)} \rightarrow \text{Multiplexed Perspective (512)} \rightarrow \text{Hidden 2 (64)} \rightarrow \text{Hidden 3 (32)} \rightarrow \text{Output (1)}$$
 
-- **NNUE Training Data:** The NNUE training data uses a set of chess positions in Forsyth-Edwards-Notation with a depth of 10+ provided.
+  - **Input Layer:** $12 \times 64 \times 64 = 49,152$ sparse features mapping active piece-square configurations relative to your own active King's position.
+  - **Accumulator Layer:** Shapes into $(49152, 256)$ weights and $(256,)$ biases quantized to signed 16-bit integers (`i16`). Uses branchless tensor multiplexing to concatenate White/Black points of view into a unified $512$-dimensional vector.
+    - *Activation:* Clipped/Bounded Linear ReLU ($\text{ReLU1}$) bounded strictly between `0.0` and `1.0`.
+  - **Hidden Layer 2:** Matrix transformation mapping $(512, 64)$ quantized to signed 8-bit weights (`i8`) and 32-bit biases (`i32`).
+    - *Activation:* Clipped/Bounded Linear ReLU ($\text{ReLU1}$) bounded strictly between `0.0` and `1.0`.
+  - **Hidden Layer 3:** Matrix transformation mapping $(64, 32)$ quantized to signed 8-bit weights (`i8`) and 32-bit biases (`i32`).
+    - *Activation:* Clipped/Bounded Linear ReLU ($\text{ReLU1}$) bounded strictly between `0.0` and `1.0`.
+  - **Output Layer:** Combines $(32, 1)$ outputs down to a single evaluation scalar using 8-bit weights (`i8`) and 32-bit biases (`i32`). Scaled dynamically by a target factor of $600.0$ to map output values straight to standard whole integer centipawns for the Alpha-Beta search tree.
+    - *Activation:* Hyperbolic Tangent ($\text{Tanh}$) bounded smoothly between `[-1.0, 1.0]`.
 
-- [Chess FENs + Evaluations dataset](https://huggingface.co/datasets/Lichess/chess-position-evaluations)
+- **NNUE Training Data:** The evaluation network is trained exclusively on normalized Stockfish evaluations mapped from standard Forsyth-Edwards Notation (FEN) profiles spanning varied positional lines and forced checkmate sequences.
+
+- **Dataset Source:** [mateuszgrzyb/lichess-stockfish-normalized](https://huggingface.co)
 
 > **Current Limitations:**: The engine currently utilizes the Timecat NNUE backend; This dependency will need to be removed prior to Computer Chess Rating Listing (CCRL) submission.
 

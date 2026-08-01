@@ -282,12 +282,9 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
         layer2 = model.get_layer("hidden_layer_2") 
         w2, b2 = layer2.get_weights()
         
-        # SAFE SCALE FOR SCALE_MAX=1.0: Scale by 32.0 to completely prevent i8 overflow.
-        # Max weight size allowed before overflow is now 4.0 instead of 2.0.
+        # Scale weights by 32.0 to completely prevent i8 overflow.
         w2_quant = np.clip(np.round(w2.T * 32.0), -128, 127).astype(np.int8)
-        
-        # The bias must match the combined scaling of previous stages:
-        # Accumulator scale (128) * Hidden 2 scale (32) = 4096
+        # Bias scale = Accumulator weight scale (128) * Hidden 2 weight scale (32) = 4096
         b2_quant = np.round(b2 * 4096.0).astype(np.int32)
         
         f.write(w2_quant.tobytes())
@@ -303,7 +300,7 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
         
         # Since Layer 2 outputs are clipped at 1.0, they have a virtual max integer value of 32.
         # Bias scale = Layer 2 output scale (32) * Hidden 3 weight scale (32) = 1024
-        b3_quant = np.round(b3 * 1024.0).astype(np.int32)
+        b3_quant = np.round(b3 * 32.0).astype(np.int32)
         
         f.write(w3_quant.tobytes())
         f.write(b3_quant.tobytes())

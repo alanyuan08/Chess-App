@@ -6,5 +6,5 @@ build/
 .tf_venv
 **/target
 nnue-training/*.csv
-nnue-training/nnue_weights.bin
-nnue-training/best_chess_nnue.keras
+nnue-training/*.bin
+nnue-training/*.keras
