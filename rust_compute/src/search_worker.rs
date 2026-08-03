@@ -1,6 +1,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Instant, Duration};
 use crate::transposition_table::*;
+use arrayvec::ArrayVec;
 use std::cmp;
 
 use crate::move_command::*;
@@ -9,7 +10,7 @@ use crate::lmr_table::*;
 
 use crate::parser::*;
 use crate::chess_board::*;
-use arrayvec::ArrayVec;
+use crate::nnue_network::*;
 
 #[derive(Clone)] 
 pub struct SearchWorker<'a>  {
@@ -25,12 +26,15 @@ pub struct SearchWorker<'a>  {
     position_stack_len: usize,
 
     killer_move_table: [[Option<ForwardMove>; MAX_DEPTH as usize]; 2],
-    thread_id: i32
+    thread_id: i32,
+
+    nnue_network: &'static NnueNetwork
 }
 
 impl<'a> SearchWorker<'a> {
     pub fn new(
         transposition_table: &'a TranspositionTable,
+        nnue_network: &'static NnueNetwork
     ) -> Self {
         Self {
             history: [None; 1024],
@@ -52,11 +56,14 @@ impl<'a> SearchWorker<'a> {
 
             killer_move_table: [[None; MAX_DEPTH as usize]; 2],
             thread_id: 0,
+
+            nnue_network
         }
     }
 
     pub fn from_game_state(
         transposition_table: &'a TranspositionTable, 
+        nnue_network: &'static NnueNetwork,
         search_worker: &SearchWorker,
         thread_id: i32
     ) -> Self {
@@ -76,7 +83,9 @@ impl<'a> SearchWorker<'a> {
             transposition_table,
 
             killer_move_table: [[None; MAX_DEPTH as usize]; 2],
-            thread_id
+            thread_id,
+
+            nnue_network
         }
     }
 

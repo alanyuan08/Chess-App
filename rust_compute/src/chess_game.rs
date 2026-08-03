@@ -40,7 +40,7 @@ pub const MODEL_PATH: &str = "nnue-training/nnue_weights.bin";
 pub struct ChessGame {
     nodes_processed: Arc<AtomicUsize>,
     transposition_table: Arc<TranspositionTable>,
-    nnue_network: Box<NnueNetwork>, 
+    nnue_network: &'static NnueNetwork, 
 }
 
 #[pymethods]
@@ -49,10 +49,13 @@ impl ChessGame {
     fn new() -> Self {
         let network_box = load_network_file(MODEL_PATH);
 
+        // Convert Box<NnueNetwork> into &'static NnueNetwork
+        let network_static: &'static NnueNetwork = Box::leak(network_box);
+
         Self {
             nodes_processed: Arc::new(AtomicUsize::new(0)),
             transposition_table: Arc::new(TranspositionTable::new(CACHE_SIZE)),
-            nnue_network: network_box,
+            nnue_network: network_static,
         }
     }
 
@@ -68,6 +71,7 @@ impl ChessGame {
         let start_time = Instant::now();
 
         self.nodes_processed.store(0, Ordering::Relaxed);
+        let network_ref = self.nnue_network;
 
         // Shared stop signal across all M4 Pro performance cores
         let stop_search = Arc::new(AtomicBool::new(false));
@@ -76,7 +80,7 @@ impl ChessGame {
         let nodes_counter_ref = &*self.nodes_processed;
         
         // Clone Search Worker
-        let mut clone_search_worker = SearchWorker::new(tt_ref);
+        let mut clone_search_worker = SearchWorker::new(tt_ref, network_ref);
         clone_search_worker.process_moves(prev_moves);
 
         // Reset Count
@@ -91,8 +95,9 @@ impl ChessGame {
                 let thread_stop_signal = Arc::clone(&stop_search);
 
                 let handle = s.spawn(move || {
-                    let mut search_worker = 
-                        SearchWorker::from_game_state(tt_ref, worker_ref, thread_id);
+                    let mut search_worker = SearchWorker::from_game_state(
+                        tt_ref, network_ref, worker_ref, thread_id
+                    );
 
                     let (thread_best_move, nodes_processed) = search_worker.root_search(
                         PV_DEPTH, 
