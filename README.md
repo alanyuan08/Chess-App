@@ -1,4 +1,4 @@
-# Chess AI
+# AlanBot Chess AI
 
 <img src="img/saved_game/saved_game.png" width="50%">
 

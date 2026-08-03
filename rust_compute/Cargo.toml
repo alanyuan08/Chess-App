@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 rand = "0.9"
 
+[build]
+# Forces the compiler to auto-vectorize loops into AVX2 / Neon SIMD registers
+rustflags = ["-C", "target-cpu=native"]
+
 [dependencies]
 const-random = "0.1"
 rand = "0.10.1"

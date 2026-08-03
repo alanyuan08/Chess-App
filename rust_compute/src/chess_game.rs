@@ -11,6 +11,7 @@ use crate::lmr_table::*;
 use crate::transposition_table::*;
 use crate::search_worker::*;
 use crate::parser::*;
+use crate::nnue_network::*;
 
 pub const PV_DEPTH: i32 = 14;
 pub const MAX_DEPTH: i32 = 20;
@@ -32,19 +33,26 @@ pub const NUM_THREADS: i32 = 8;
 // Condon-Thompson Bucket Transposition Table
 pub const CACHE_SIZE: usize = 64;
 
+// Model path
+pub const MODEL_PATH: &str = "nnue-training/nnue_weights.bin";
+
 #[pyclass]
 pub struct ChessGame {
     nodes_processed: Arc<AtomicUsize>,
     transposition_table: Arc<TranspositionTable>,
+    nnue_network: Box<NnueNetwork>, 
 }
 
 #[pymethods]
 impl ChessGame {
     #[new]
     fn new() -> Self {
+        let network_box = load_network_file(MODEL_PATH);
+
         Self {
             nodes_processed: Arc::new(AtomicUsize::new(0)),
-            transposition_table: Arc::new(TranspositionTable::new(CACHE_SIZE))
+            transposition_table: Arc::new(TranspositionTable::new(CACHE_SIZE)),
+            nnue_network: network_box,
         }
     }
 
@@ -72,7 +80,6 @@ impl ChessGame {
         clone_search_worker.process_moves(prev_moves);
 
         // Reset Count
-
         let worker_source_ptr: &SearchWorker<'_> = &clone_search_worker;
 
         thread::scope(|s| {
