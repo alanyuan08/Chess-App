@@ -14,7 +14,7 @@ pip install --upgrade pip
 pip install "../[training]" 
 
 # 3. Run your main training script
-# python train_halfkpr_from_fen.py
+python train_halfkpr_from_fen.py
 
 # 4. Upload Weights to Hugging Face
 brew install hf

@@ -272,18 +272,17 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
         w1, b1 = acc_layer.get_weights()
         
         # Scale by 128.0. Since activations are capped at 1.0, 
-        # the max accumulator output value is exactly 128.
         f.write(np.round(w1.T * 128.0).astype(np.int16).tobytes())
         f.write(np.round(b1 * 128.0).astype(np.int16).tobytes())
         print(f"-> Accumulator Layer serialized. Shape: {w1.shape} (i16)")
 
-        # 2. Hidden Layer 2 (512 -> 64)
+        # 2. Hidden Layer 2 (512 -> 64) - Dual Accumlator
+        # [Active Player - 256 / Passive Player - 256] Inputs
         layer2 = model.get_layer("hidden_layer_2") 
         w2, b2 = layer2.get_weights()
         
-        # Scale weights by 32.0 to completely prevent i8 overflow.
-        w2_quant = np.clip(np.round(w2.T * 32.0), -128, 127).astype(np.int8)
         # Bias scale = Accumulator weight scale (128) * Hidden 2 weight scale (32) = 4096
+        w2_quant = np.clip(np.round(w2.T * 32.0), -128, 127).astype(np.int8)
         b2_quant = np.round(b2 * 4096.0).astype(np.int32)
         
         f.write(w2_quant.tobytes())
@@ -291,30 +290,26 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
         print(f"-> Hidden Layer 2 serialized. Shape: {w2.shape} (i8 / i32)")
 
         # 3. Hidden Layer 3 (64 -> 32)
+        # Shift >> 7 / Div 128 
         layer3 = model.get_layer("hidden_layer_3")
         w3, b3 = layer3.get_weights()
         
-        # Scale weights by 32.0 to preserve precision without overflowing i8.
-        w3_quant = np.clip(np.round(w3.T * 32.0), -128, 127).astype(np.int8)
-        
-        # Since Layer 2 outputs are clipped at 1.0, they have a virtual max integer value of 32.
         # Bias scale = Layer 2 output scale (32) * Hidden 3 weight scale (32) = 1024
-        b3_quant = np.round(b3 * 32.0).astype(np.int32)
+        w3_quant = np.clip(np.round(w3.T * 32.0), -128, 127).astype(np.int8)
+        b3_quant = np.round(b3 * 1024.0).astype(np.int32)
         
         f.write(w3_quant.tobytes())
         f.write(b3_quant.tobytes())
         print(f"-> Hidden Layer 3 serialized. Shape: {w3.shape} (i8 / i32)")
 
         # 4. Output Layer (32 -> 1)
+        # Shift >> 5 / Div 32 
         output_layer = model.get_layer("chess_eval")
         w4, b4 = output_layer.get_weights()
         
-        # Max out the weights into the full i8 spectrum [-128, 127]
+        # (Scale x 127) + Bias(4064)
         w4_quant = np.clip(np.round(w4.T * 127.0), -128, 127).astype(np.int8)
-        
-        # Final evaluation scale maps your [-1.0, 1.0] Tanh range into your desired centipawn score.
-        # 600.0 means a completely winning position outputs +600 centipawns in Rust.
-        b4_quant = np.round(b4 * 600.0).astype(np.int32)
+        b4_quant = np.round(b4 * 4064.0).astype(np.int32)
         
         f.write(w4_quant.tobytes())
         f.write(b4_quant.tobytes())

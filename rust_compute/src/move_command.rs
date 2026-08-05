@@ -155,6 +155,16 @@ pub enum BoardPiece {
     BKING = 12,
 }
 
+impl BoardPiece {
+    /// Maps the BoardPiece enum to a 0..11 integer matching your Python layout.
+    /// Panic-free optimization since we filter out NONE at call sites.
+    #[inline(always)]
+    pub fn to_nnue_type(self) -> usize {
+        debug_assert!(self != BoardPiece::NONE);
+        (self as usize) - 1
+    }
+}
+
 pub fn is_pawn(piece: BoardPiece) -> bool {
     matches!(piece, BoardPiece::WPAWN | BoardPiece::BPAWN)
 }
