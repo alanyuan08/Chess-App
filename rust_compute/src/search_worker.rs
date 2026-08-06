@@ -207,7 +207,15 @@ impl<'a> SearchWorker<'a> {
         self.push_position();
 
         // Update NNUE Board
-        self.chess_board.timecat_push_move(self.nnue_network, forward_move);
+        // Runs BEFORE mutations occur because it depends on reading the original captured piece
+        let is_king_or_castle = move_piece == BoardPiece::WKING 
+            || move_piece == BoardPiece::BKING 
+            || mv.move_type == MoveFlag::KINGSIDECASTLE 
+            || mv.move_type == MoveFlag::QUEENSIDECASTLE;
+
+        if !is_king_or_castle {
+            self.chess_board.timecat_push_move(self.nnue_network, forward_move);
+        }
 
         let remove_piece = self.chess_board.execute_move(forward_move);
         let undo_move = UndoMove {
@@ -218,6 +226,15 @@ impl<'a> SearchWorker<'a> {
             prev_castle_rights,
             prev_en_passant,
         };
+
+        // Runs AFTER mutations occur so that the network anchors to the NEW King coordinates
+        if is_king_or_castle {
+            let new_w_king = self.kings.trailing_zeros() as usize;
+            let new_b_king = self.kings.trailing_zeros() as usize;
+
+            // Rebuilds the network flawlessly using the updated position and Rook files
+            self.accumulators.refresh_from_scratch(nn, &self.mailbox, new_w_king, new_b_king);
+        }
 
         self.history[self.history_index] = Some(undo_move);
         self.history_index += 1;
@@ -232,11 +249,28 @@ impl<'a> SearchWorker<'a> {
         if let Some(undo_move) = self.history[self.history_index].take() {
             self.pop_position();
 
-            // Accumulator Unmake Move
-            self.chess_board.timecat_pop_move(self.nnue_network, undo_move);
+            // Runs BEFORE mutations occur because it depends on reading the original captured piece
+            let is_king_or_castle = move_piece == BoardPiece::WKING 
+                || move_piece == BoardPiece::BKING 
+                || mv.move_type == MoveFlag::KINGSIDECASTLE 
+                || mv.move_type == MoveFlag::QUEENSIDECASTLE;
+
+            if !is_king_or_castle {
+                // Accumulator Unmake Move
+                self.chess_board.timecat_pop_move(self.nnue_network, undo_move);
+            }
             
             // ChessBoard Undo Move
             self.chess_board.unexecute_move(undo_move);
+
+            // Runs AFTER mutations occur so that the network anchors to the NEW King coordinates
+            if is_king_or_castle {
+                let new_w_king = self.kings.trailing_zeros() as usize;
+                let new_b_king = self.kings.trailing_zeros() as usize;
+
+                // Rebuilds the network flawlessly using the updated position and Rook files
+                self.accumulators.refresh_from_scratch(nn, &self.mailbox, new_w_king, new_b_king);
+            }
         }
     }
 

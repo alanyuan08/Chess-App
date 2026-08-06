@@ -133,17 +133,6 @@ impl BoardAccumulators {
     ) {
         let move_piece: BoardPiece = mailbox[mv.start_sq];
 
-        // --- EXCEPTION: KING MOVES ---
-        // If either king moves, escape immediately and trigger a full layer-1 refresh.
-        // Changing king locations changes the relative perspective feature-map boundaries.
-        if move_piece == BoardPiece::WKING || move_piece == BoardPiece::BKING 
-            || mv.move_type == MoveFlag::KINGSIDECASTLE 
-            || mv.move_type == MoveFlag::QUEENSIDECASTLE 
-        {            
-            self.refresh_from_scratch(nn, mailbox, w_king_sq, b_king_sq);
-            return;
-        }
-
         // --- 1. Identify Target Added Piece (Handles Promotions) ---
         // Default assume the moving piece arrives at the destination unchanged.
         // For promotion flags, replace the piece with its upgraded target.
@@ -223,16 +212,6 @@ impl BoardAccumulators {
         // At this point, unmake_move is called AFTER or DURING the board state rollback.
         // Retrieve the original moving piece from the board's mailbox.
         let move_piece: BoardPiece = mailbox[mv.start_sq];
-
-        // --- EXCEPTION: KING & CASTLE MOVES ---
-        // If a king or a castle move occurred, do nothing.
-        // These states are fully restored via a manual refresh_from_scratch call or historical state stack pop.
-        if move_piece == BoardPiece::WKING || move_piece == BoardPiece::BKING 
-            || mv.move_type == MoveFlag::KINGSIDECASTLE 
-            || mv.move_type == MoveFlag::QUEENSIDECASTLE 
-        {            
-            return;
-        }
 
         // --- 1. Identify Target Added Piece (Handles Promotions) ---
         // Reconstruct what piece was added to the board at mv.end_sq during make_move.
