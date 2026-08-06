@@ -208,29 +208,21 @@ impl BoardAccumulators {
         w_king_sq: usize, 
         b_king_sq: usize
     ) {
-        
-        // At this point, unmake_move is called AFTER or DURING the board state rollback.
-        // Retrieve the original moving piece from the board's mailbox.
-        let move_piece: BoardPiece = mailbox[mv.start_sq];
+        // Since bitboards haven't rolled back yet, the piece at the end square is the added piece
+        let added_piece: BoardPiece = mailbox[mv.end_sq];
 
-        // --- 1. Identify Target Added Piece (Handles Promotions) ---
-        // Reconstruct what piece was added to the board at mv.end_sq during make_move.
-        let mut added_piece = move_piece;
-        match mv.move_type {
-            MoveFlag::PROMOTIONQUEEN => {
-                added_piece = if move_piece == BoardPiece::WPAWN { BoardPiece::WQUEEN } else { BoardPiece::BQUEEN };
+        // --- 1. Identify Original Moving Piece (Reverse Promotion Logic) ---
+        // Work backward from the added piece and move flag to find what the piece originally was (always a pawn)
+        let move_piece = match mv.move_type {
+            MoveFlag::PROMOTIONQUEEN | MoveFlag::PROMOTIONROOK | MoveFlag::PROMOTIONBISHOP | MoveFlag::PROMOTIONKNIGHT => {
+                if added_piece == BoardPiece::WQUEEN || added_piece == BoardPiece::WROOK || added_piece == BoardPiece::WBISHOP || added_piece == BoardPiece::WKNIGHT {
+                    BoardPiece::WPAWN
+                } else {
+                    BoardPiece::BPAWN
+                }
             }
-            MoveFlag::PROMOTIONROOK => {
-                added_piece = if move_piece == BoardPiece::WPAWN { BoardPiece::WROOK } else { BoardPiece::BROOK };
-            }
-            MoveFlag::PROMOTIONBISHOP => {
-                added_piece = if move_piece == BoardPiece::WPAWN { BoardPiece::WBISHOP } else { BoardPiece::BBISHOP };
-            }
-            MoveFlag::PROMOTIONKNIGHT => {
-                added_piece = if move_piece == BoardPiece::WPAWN { BoardPiece::WKNIGHT } else { BoardPiece::BKNIGHT };
-            }
-            _ => {}
-        }
+            _ => added_piece,
+        };
 
         // --- 2. Identify Captured Piece Coordinate (Handles En Passant) ---
         // Reconstruct where the captured piece was located spatially on the matrix.

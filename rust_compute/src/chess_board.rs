@@ -24,7 +24,7 @@ pub struct ChessBoard {
     pub all_pieces: [u64; 2],
     pub occupied: u64,
     
-    mailbox: [BoardPiece; 64],
+    pub mailbox: [BoardPiece; 64],
 
     castling_rights: u8,
     en_passant: u64,
