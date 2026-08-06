@@ -165,6 +165,30 @@ impl BoardPiece {
     }
 }
 
+/// Flips a square vertically for Black's perspective (e.g., square 0/a1 becomes 56/a8)
+#[inline(always)]
+pub fn flip_square(sq: usize) -> usize {
+    sq ^ 63
+}
+
+/// Computes the unique index [0..49151] for a piece from a specific player's perspective
+#[inline(always)]
+pub fn get_feature_index(king_sq: usize, piece: BoardPiece, piece_sq: usize, is_black_active: bool) -> usize {
+    let mut piece_type = piece.to_nnue_type();
+
+    let (k_sq, p_sq, p_type) = if is_black_active {
+        // From Black's perspective, flip the board vertically and invert piece colors
+        // In Python layout: White pieces are 0..5, Black pieces are 6..11
+        let inverted_type = if piece_type < 6 { piece_type + 6 } else { piece_type - 6 };
+        (flip_square(king_sq), flip_square(piece_sq), inverted_type)
+    } else {
+        (king_sq, piece_sq, piece_type)
+    };
+
+    // Index Formula: (KingSquare * 768) + (PieceType * 64) + PieceSquare
+    (k_sq * 768) + (p_type * 64) + p_sq
+}
+
 pub fn is_pawn(piece: BoardPiece) -> bool {
     matches!(piece, BoardPiece::WPAWN | BoardPiece::BPAWN)
 }
@@ -180,7 +204,6 @@ pub fn is_some(piece: BoardPiece) -> bool {
 pub fn is_none(piece: BoardPiece) -> bool {
     matches!(piece, BoardPiece::NONE)
 }
-
 
 pub fn piece_value(piece_type: BoardPiece) -> i32 {
     match piece_type {

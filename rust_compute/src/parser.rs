@@ -40,6 +40,11 @@ pub fn parse_forward_move_with_board(uci: &str, board: &ChessBoard) -> ForwardMo
 
     let mut move_type = MoveFlag::MOVE;
 
+    // --- Capture ---
+    if is_some(end_piece) {
+        move_type = MoveFlag::CAPTURE;
+    }
+
     // --- Promotion ---
     if chars.len() == 5 {
         move_type = match chars[4] {
@@ -62,11 +67,6 @@ pub fn parse_forward_move_with_board(uci: &str, board: &ChessBoard) -> ForwardMo
         if start_file == 4 && end_file == 2 {
             move_type = MoveFlag::QUEENSIDECASTLE;
         }
-    }
-
-    // --- Capture ---
-    if is_some(end_piece) {
-        move_type = MoveFlag::CAPTURE;
     }
 
     // --- En Passant ---

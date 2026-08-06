@@ -231,6 +231,7 @@ impl<'a> SearchWorker<'a> {
         }
     }
 
+    // Replace with ForwardMove
     fn process_time_cat_forward(&mut self, forward_move: ForwardMove) {
         let uci_command: String = parse_uci(forward_move);
         self.chess_board.timecat_push_move(uci_command);
