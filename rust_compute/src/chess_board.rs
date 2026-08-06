@@ -7,6 +7,8 @@ use crate::queen_mask::*;
 use crate::move_command::*;
 use crate::zobrist_hash::*;
 use crate::chess_game::*;
+use crate::board_accumlator::*;
+use crate::nnue_network::*;
 use arrayvec::ArrayVec;
 use timecat::prelude::*;
 
@@ -32,8 +34,9 @@ pub struct ChessBoard {
     // Zobrist Hash
     zobrist_hash: u64,
 
-    // Time Cat board
-    timecat_board: Board,
+    // --- INTEGRATED NNUE ACCUMULATOR BASE ---
+    // Tracks the current Layer 1 features for White and Black concurrently
+    pub accumulators: BoardAccumulators,
 }
 
 pub const WHITE_KINGSIDE: u8 = 0b0001; // 1
@@ -69,10 +72,11 @@ impl ChessBoard {
             mailbox: [BoardPiece::NONE; 64],
             zobrist_hash: 0,
             timecat_board: Board::default(),
+            accumulators: BoardAccumulators::new(),
         }
     }
 
-    pub fn init_board(&mut self) {
+    pub fn init_board(&mut self, nn: &'static NnueNetwork) {
         for color in 0..2 {
             // Ranks: White = 0 & 1, Black = 6 & 7
             let piece_rank_offset = if color == 0 { 0 } else { 56 };
@@ -112,6 +116,12 @@ impl ChessBoard {
             // 5. Compute Zobrist
             self.zobrist_hash = self.compute_init_zobrist();
         }
+
+        let w_king_sq: usize = self.kings[0] as usize;
+        let b_king_sq: usize = self.kings[1] as usize;
+        self.accumulators.refresh_from_scratch(
+            nn, &self.mailbox, w_king_sq, b_king_sq
+        );    
     }
 
     // Compute Init Zobritist

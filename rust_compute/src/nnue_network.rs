@@ -1,3 +1,5 @@
+use crate::move_command::*;
+use crate::board_accumlator::*;
 use std::fs::File;
 use std::io::{Read, BufReader};
 
@@ -61,8 +63,6 @@ impl NnueNetwork {
             (1 * 4);         // output_bias (i32)
             // Total = Exactly 25,201,572 bytes
 
-        let file_metadata = std::fs::metadata(path)?;
-
         // Allocate a zeroed 25MB structure straight into the OS heap memory registry
         let mut network_box = unsafe {
             let layout = std::alloc::Layout::new::<Self>();
@@ -101,15 +101,15 @@ impl NnueNetwork {
         // Side to move (US) always fills the first 256 inputs.
         // Opponent (THEM) always fills the second 256 inputs.
         let (active_acc, opp_acc) = match active_player {
-            Side::White => (&accumulators.white, &accumulators.black),
-            Side::Black => (&accumulators.black, &accumulators.white),
+            Side::WHITE => (&accumulators.white, &accumulators.black),
+            Side::BLACK => (&accumulators.black, &accumulators.white),
         };
 
         // --- STEP 1: CONCATENATION & ACTIVATION (L1 -> L2) ---
         // Python Layer 1 scale = 128. Accumulator inputs are 0 or 1.
         for i in 0..256 {
-            buffer.l2_inputs[i] = active_acc[i].clamp(0, 127) as i8;
-            buffer.l2_inputs[i + 256] = opp_acc[i].clamp(0, 127) as i8;
+            buffer.l2_inputs[i] = active_acc.vals[i].clamp(0, 127) as i8;
+            buffer.l2_inputs[i + 256] = opp_acc.vals[i].clamp(0, 127) as i8;
         }
 
         // --- STEP 2: HIDDEN LAYER 2 (512 -> 64) ---

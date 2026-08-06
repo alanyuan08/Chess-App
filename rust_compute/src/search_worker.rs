@@ -42,7 +42,7 @@ impl<'a> SearchWorker<'a> {
 
             chess_board: {
                 let mut chess_board = ChessBoard::new();
-                chess_board.init_board();
+                chess_board.init_board(nnue_network);
                 chess_board
             },
 

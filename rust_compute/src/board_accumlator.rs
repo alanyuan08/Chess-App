@@ -3,30 +3,41 @@ use crate::move_command::*;
 use crate::chess_board::*;
 
 // Retain White / Black Accumulator values across Positions
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct Accumulator {
     pub vals: [i16; 256],
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct BoardAccumulators {
     pub white: Accumulator,
     pub black: Accumulator,
 }
 
 impl BoardAccumulators {
-    /// Re-reads the entire board layout from scratch to perform a full baseline refresh
-    pub fn refresh_from_scratch(&mut self, nn: &NnueNetwork, chess_board: &ChessBoard) {
-        // Retrieve King Squares
-        let w_king_sq: usize = chess_board.kings[0] as usize;
-        let b_king_sq: usize = chess_board.kings[1] as usize;
+    #[inline(always)]
+    pub const fn new() -> Self {
+        Self {
+            white: Accumulator { vals: [0i16; 256] },
+            black: Accumulator { vals: [0i16; 256] },
+        }
+    }
 
+    /// Re-reads the entire board layout from scratch to perform a full baseline refresh
+    pub fn refresh_from_scratch(
+        &mut self, 
+        nn: &NnueNetwork, 
+        mailbox: &[BoardPiece; 64], 
+        w_king_sq: usize, 
+        b_king_sq: usize
+    ) {
         // Reset both accumulators to the initial layer 1 baseline biases
         self.white.vals.copy_from_slice(&nn.l1_biases);
         self.black.vals.copy_from_slice(&nn.l1_biases);
 
         // Loop through every square on the board and add active pieces
         for sq in 0..64 {
-            let piece = chess_board.mailbox_piece(sq);
+            let piece = mailbox[sq];
             if piece != BoardPiece::NONE {
                 // Accumulate features for White's perspective (No rotation)
                 let w_idx = get_feature_index(w_king_sq, piece, sq, false);
@@ -45,12 +56,15 @@ impl BoardAccumulators {
 
     /// Progresses the network forward incrementally during move making
     #[inline(always)]
-    pub fn make_move(&mut self, nn: &NnueNetwork, mv: ForwardMove, chessboard: &ChessBoard) {
-        // Fetch baseline spatial state directly from your board arrays
-        let w_king_sq: usize = chessboard.kings[0] as usize;
-        let b_king_sq: usize = chessboard.kings[1] as usize;
-        
-        let move_piece: BoardPiece = chessboard.mailbox_piece(mv.start_sq);
+    pub fn make_move(
+        &mut self, 
+        nn: &NnueNetwork, 
+        mv: ForwardMove,
+        mailbox: &[BoardPiece; 64], 
+        w_king_sq: usize, 
+        b_king_sq: usize
+    ) {
+        let move_piece: BoardPiece = mailbox[mv.start_sq];
 
         // --- EXCEPTION: KING MOVES ---
         // If either king moves, escape immediately and trigger a full layer-1 refresh.
@@ -59,7 +73,7 @@ impl BoardAccumulators {
             || mv.move_type == MoveFlag::KINGSIDECASTLE 
             || mv.move_type == MoveFlag::QUEENSIDECASTLE 
         {            
-            self.refresh_from_scratch(nn, chessboard);
+            self.refresh_from_scratch(nn, mailbox, w_king_sq, b_king_sq);
             return;
         }
 
@@ -90,9 +104,9 @@ impl BoardAccumulators {
             } else {
                 mv.end_sq + 8 // Black captures White pawn hanging behind it
             };
-            (sq, chessboard.mailbox_piece(sq))
+            (sq, mailbox[sq])
         } else {
-            (mv.end_sq, chessboard.mailbox_piece(mv.end_sq))
+            (mv.end_sq, mailbox[mv.end_sq])
         };
 
         // --- 3. Compute Sparse Feature Indices ---

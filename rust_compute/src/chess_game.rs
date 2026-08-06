@@ -41,7 +41,6 @@ pub struct ChessGame {
     nodes_processed: Arc<AtomicUsize>,
     transposition_table: Arc<TranspositionTable>,
     nnue_network: &'static NnueNetwork, 
-    root_accumulators: BoardAccumulators,
 }
 
 #[pymethods]
@@ -54,18 +53,6 @@ impl ChessGame {
 
         // 2. Leak the Box memory to acquire an immutable reference for all search threads
         let network_static: &'static NnueNetwork = Box::leak(network_box);
-
-        // 3. Instantiate the root position's accumulator tracking state
-        let mut root_accumulators = BoardAccumulators {
-            white: Accumulator { vals: [0i16; 256] },
-            black: Accumulator { vals: [0i16; 256] },
-        };
-
-        // 4. Initialize the accumulators with the Layer 1 base network biases
-        // When setting up a new game, you will follow this with a call to:
-        // `root_accumulators.refresh_from_scratch(network_static, &starting_mailbox, w_king, b_king);`
-        root_accumulators.white.vals.copy_from_slice(&network_static.l1_biases);
-        root_accumulators.black.vals.copy_from_slice(&network_static.l1_biases);
 
         Self {
             nodes_processed: Arc::new(AtomicUsize::new(0)),
