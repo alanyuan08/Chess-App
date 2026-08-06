@@ -71,7 +71,6 @@ impl ChessBoard {
 
             mailbox: [BoardPiece::NONE; 64],
             zobrist_hash: 0,
-            timecat_board: Board::default(),
             accumulators: BoardAccumulators::new(),
         }
     }
@@ -195,26 +194,38 @@ impl ChessBoard {
         self.mailbox[target]
     }
 
-    // Return Time Cat Score
-    pub fn eval(&mut self) -> i32 {   
-        self.timecat_board.evaluate() as i32
+    // Return NNUE Eval
+    pub fn eval(&mut self, 
+        nn: &'static NnueNetwork, 
+        buffer: &mut NnueInferenceBuffer
+    ) -> i32 {   
+        self.accumulators.evaluate(
+            self.active_player, nn, buffer
+        )
     }
 
     // Forward Time Cat
-    pub fn timecat_push_move(&mut self, uci_input: String) {
-        if self.timecat_board.push_move(&uci_input).expect("ValidOrNullMove").is_none() {
-            panic!("Invalid UCI move or illegal move: {}", uci_input);
-        }
+    pub fn timecat_push_move(&mut self, 
+        nn: &'static NnueNetwork, 
+        mv: ForwardMove
+    ) {
+        let w_king_sq: usize = self.kings[0] as usize;
+        let b_king_sq: usize = self.kings[1] as usize;
+        self.accumulators.make_move(
+            nn, mv, &self.mailbox, w_king_sq, b_king_sq
+        )
     }
 
     // Undo Time Cat Move
-    pub fn timecat_pop_move(&mut self) {
-        let _ = self.timecat_board.pop();
-    }
-
-    // Timecat FEN 
-    pub fn timecat_print_fen(&mut self) {
-        println!("{}", self.timecat_board);
+    pub fn timecat_pop_move(&mut self, 
+        nn: &'static NnueNetwork,
+        mv: UndoMove
+    ) {
+        let w_king_sq: usize = self.kings[0] as usize;
+        let b_king_sq: usize = self.kings[1] as usize;
+        self.accumulators.unmake_move(
+            nn, mv, &self.mailbox, w_king_sq, b_king_sq
+        )
     }
 
     // Used to Calculate Castling / King Safety

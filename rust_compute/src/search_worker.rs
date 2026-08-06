@@ -28,7 +28,8 @@ pub struct SearchWorker<'a>  {
     killer_move_table: [[Option<ForwardMove>; MAX_DEPTH as usize]; 2],
     thread_id: i32,
 
-    nnue_network: &'static NnueNetwork
+    nnue_network: &'static NnueNetwork,
+    thread_buffer: NnueInferenceBuffer
 }
 
 impl<'a> SearchWorker<'a> {
@@ -56,7 +57,8 @@ impl<'a> SearchWorker<'a> {
 
             killer_move_table: [[None; MAX_DEPTH as usize]; 2],
             thread_id: 0,
-
+            
+            thread_buffer: NnueInferenceBuffer::new(),
             nnue_network
         }
     }
@@ -218,6 +220,19 @@ impl<'a> SearchWorker<'a> {
         self.history_index += 1;
     }
 
+    fn retrieve_last_move(&mut self) -> Option<UndoMove> {
+        if self.history_index == 0 {
+            return;
+        }
+
+        self.history_index -= 1;
+        if let Some(undo_move) = self.history[self.history_index].take() {
+            self.pop_position();
+
+            return undo_move;
+        }
+    }
+
     fn process_backward_move(&mut self) {
         if self.history_index == 0 {
             return;
@@ -227,18 +242,17 @@ impl<'a> SearchWorker<'a> {
         if let Some(undo_move) = self.history[self.history_index].take() {
             self.pop_position();
 
+            // ChessBoard Undo Move
             self.chess_board.unexecute_move(undo_move);
+            
+            // Accumulator Unmake Move
+            self.chess_board.timecat_pop_move(nnue_network, undo_move);
         }
     }
 
     // Replace with ForwardMove
     fn process_time_cat_forward(&mut self, forward_move: ForwardMove) {
-        let uci_command: String = parse_uci(forward_move);
-        self.chess_board.timecat_push_move(uci_command);
-    }
-
-    fn process_time_cat_backward(&mut self) {
-        self.chess_board.timecat_pop_move();
+        self.chess_board.timecat_push_move(nnue_network, forward_move);
     }
 
     // A simple, linear-logarithmic approximation using integer division:
@@ -404,7 +418,6 @@ impl<'a> SearchWorker<'a> {
             let score = -negamax_result.score;
 
             // Undo Move + TimeCat
-            self.process_time_cat_backward();
             self.process_backward_move();
 
             // Track maximum evaluations
@@ -472,7 +485,10 @@ impl<'a> SearchWorker<'a> {
     }
 
     fn board_eval(&mut self) -> i32 {
-        let static_eval = self.chess_board.eval();
+        let static_eval = self.chess_board.eval(
+            &self.nnue_network,
+            &self.thread_buffer
+        );
         self.nodes_processed += 1;
         static_eval
     }
@@ -584,7 +600,6 @@ impl<'a> SearchWorker<'a> {
             let score = -self.quiescence_search(-beta, -alpha, ply + 1, depth - 1, stop_signal);
             
             // Undo Move + TimeCat
-            self.process_time_cat_backward();
             self.process_backward_move();
 
             // Fail-soft updates

@@ -27,8 +27,8 @@ impl BoardAccumulators {
     /// Returns the final centipawn assessment.
     pub fn evaluate(
         &self, 
-        nn: &NnueNetwork, 
         active_player: Side,
+        nn: &NnueNetwork, 
         buffer: &mut NnueInferenceBuffer
     ) -> i32 {
         // --- PERSPECTIVE ROUTING ---
@@ -213,14 +213,17 @@ impl BoardAccumulators {
     }
 
     #[inline(always)]
-    pub fn unmake_move(&mut self, nn: &NnueNetwork, mv: UndoMove, chessboard: &ChessBoard) {
-        // Fetch baseline spatial state directly from your board arrays
-        let w_king_sq: usize = chessboard.kings[0] as usize;
-        let b_king_sq: usize = chessboard.kings[1] as usize;
+    pub fn unmake_move(&mut self, 
+        nn: &NnueNetwork, 
+        mv: UndoMove,
+        mailbox: &[BoardPiece; 64], 
+        w_king_sq: usize, 
+        b_king_sq: usize
+    ) {
         
         // At this point, unmake_move is called AFTER or DURING the board state rollback.
         // Retrieve the original moving piece from the board's mailbox.
-        let move_piece: BoardPiece = chessboard.mailbox_piece(mv.start_sq);
+        let move_piece: BoardPiece = mailbox[mv.start_sq];
 
         // --- EXCEPTION: KING & CASTLE MOVES ---
         // If a king or a castle move occurred, do nothing.
