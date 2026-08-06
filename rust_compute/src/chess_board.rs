@@ -203,30 +203,6 @@ impl ChessBoard {
         )
     }
 
-    // Forward Time Cat
-    pub fn timecat_push_move(&mut self, 
-        nn: &'static NnueNetwork, 
-        mv: ForwardMove
-    ) {
-        let w_king_sq = self.kings[0].trailing_zeros() as usize;
-        let b_king_sq = self.kings[1].trailing_zeros() as usize;
-        self.accumulators.make_move(
-            nn, mv, &self.mailbox, w_king_sq, b_king_sq
-        )
-    }
-
-    // Undo Time Cat Move
-    pub fn timecat_pop_move(&mut self, 
-        nn: &'static NnueNetwork,
-        mv: UndoMove
-    ) {
-        let w_king_sq = self.kings[0].trailing_zeros() as usize;
-        let b_king_sq = self.kings[1].trailing_zeros() as usize;
-        self.accumulators.unmake_move(
-            nn, mv, &self.mailbox, w_king_sq, b_king_sq
-        )
-    }
-
     // Used to Calculate Castling / King Safety
     pub fn compute_attack_targets(&self, attacking_side: Side) -> u64 {
         let mut attacks = 0u64;

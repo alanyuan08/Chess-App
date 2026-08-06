@@ -122,6 +122,9 @@ def dataset_generator(get_dataset_fn):
                 else:
                     continue
 
+                if is_black_turn:
+                    score_target = -score_target
+
                 score = np.tanh(score_target / 410.0)
             except (ValueError, TypeError, IndexError):
                 continue

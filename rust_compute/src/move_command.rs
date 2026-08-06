@@ -180,7 +180,7 @@ pub fn get_feature_index(king_sq: usize, piece: BoardPiece,
     let (k_sq, p_sq, p_type) = if is_black_active {
         // From Black's perspective, flip the board vertically and invert piece colors
         // In Python layout: White pieces are 0..5, Black pieces are 6..11
-        let inverted_type = if piece_type < 6 { piece_type + 6 } else { piece_type - 6 };
+        let inverted_type = (piece_type + 6) % 12;
         (flip_square(king_sq), flip_square(piece_sq), inverted_type)
     } else {
         (king_sq, piece_sq, piece_type)

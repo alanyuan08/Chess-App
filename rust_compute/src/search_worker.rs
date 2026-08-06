@@ -212,7 +212,13 @@ impl<'a> SearchWorker<'a> {
             || forward_move.move_type == MoveFlag::QUEENSIDECASTLE;
 
         if !is_king_or_castle {
-            self.chess_board.timecat_push_move(self.nnue_network, forward_move);
+            let w_king_sq = self.chess_board.kings[0].trailing_zeros() as usize;
+            let b_king_sq = self.chess_board.kings[1].trailing_zeros() as usize;
+            self.chess_board.accumulators.make_move(
+                self.nnue_network, 
+                forward_move, 
+                &self.chess_board.mailbox, w_king_sq, b_king_sq
+            )
         }
 
         let remove_piece = self.chess_board.execute_move(forward_move);
@@ -227,12 +233,15 @@ impl<'a> SearchWorker<'a> {
 
         // Runs AFTER mutations occur so that the network anchors to the NEW King coordinates
         if is_king_or_castle {
-            let new_w_king = self.chess_board.kings[0].trailing_zeros() as usize;
-            let new_b_king = self.chess_board.kings[1].trailing_zeros() as usize;
+            let restored_w_king = self.chess_board.kings[0].trailing_zeros() as usize;
+            let restored_b_king = self.chess_board.kings[1].trailing_zeros() as usize;
 
             // Rebuilds the network flawlessly using the updated position and Rook files
             self.chess_board.accumulators.refresh_from_scratch(
-                self.nnue_network, &self.chess_board.mailbox, new_w_king, new_b_king
+                self.nnue_network, 
+                &self.chess_board.mailbox, 
+                restored_w_king, 
+                restored_b_king
             );
         }
 
@@ -259,7 +268,15 @@ impl<'a> SearchWorker<'a> {
 
             if !is_king_or_castle {
                 // Accumulator Unmake Move
-                self.chess_board.timecat_pop_move(self.nnue_network, undo_move);
+                let w_king_sq = self.chess_board.kings[0].trailing_zeros() as usize;
+                let b_king_sq = self.chess_board.kings[1].trailing_zeros() as usize;
+                self.chess_board.accumulators.unmake_move(
+                    self.nnue_network,
+                    undo_move,
+                    &self.chess_board.mailbox,
+                    w_king_sq,
+                    b_king_sq
+                );
             }
             
             // ChessBoard Undo Move
@@ -268,12 +285,15 @@ impl<'a> SearchWorker<'a> {
 
             // Runs AFTER mutations occur so that the network anchors to the NEW King coordinates
             if is_king_or_castle {
-                let new_w_king = self.chess_board.kings[0].trailing_zeros() as usize;
-                let new_b_king = self.chess_board.kings[1].trailing_zeros() as usize;
+                let restored_w_king = self.chess_board.kings[0].trailing_zeros() as usize;
+                let restored_b_king = self.chess_board.kings[1].trailing_zeros() as usize;
 
                 // Rebuilds the network flawlessly using the updated position and Rook files
                 self.chess_board.accumulators.refresh_from_scratch(
-                    self.nnue_network, &self.chess_board.mailbox, new_w_king, new_b_king
+                    self.nnue_network, 
+                    &self.chess_board.mailbox, 
+                    restored_w_king, 
+                    restored_b_king
                 );
             }
         }

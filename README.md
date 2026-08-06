@@ -49,11 +49,6 @@ The engine has been unofficially benchmarked and validated against 3000 Elo bots
 - **NNUE Training Data:** The evaluation network is trained exclusively on normalized Stockfish evaluations mapped from standard Forsyth-Edwards Notation (FEN) profiles spanning varied positional lines and forced checkmate sequences.
 
 - **Dataset Source:** [mateuszgrzyb/lichess-stockfish-normalized](https://huggingface.co)
-
-> **Current Limitations:**: The engine currently utilizes the Timecat NNUE backend; This dependency will need to be removed prior to Computer Chess Rating Listing (CCRL) submission.
-
-> **Future Roadmap:**: This dependency will be replaced with a custom, self-trained NNUE framework designed to handle perspective shifts during abstract pruning phases.
-
 # Running the App
 
 Playing as [black|white]
