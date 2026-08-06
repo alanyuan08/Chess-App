@@ -13,7 +13,7 @@ use crate::search_worker::*;
 use crate::parser::*;
 use crate::nnue_network::*;
 
-pub const PV_DEPTH: i32 = 14;
+pub const PV_DEPTH: i32 = 4;
 pub const MAX_DEPTH: i32 = 20;
 
 // When a thread finishes, if it exceeds the time, it will send the 
