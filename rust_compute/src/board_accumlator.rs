@@ -22,6 +22,74 @@ impl BoardAccumulators {
             black: Accumulator { vals: [0i16; 256] },
         }
     }
+    
+    /// Computes the forward evaluation pass using the current accumulator states.
+    /// Returns the final centipawn assessment.
+    pub fn evaluate(
+        &self, 
+        nn: &NnueNetwork, 
+        active_player: Side,
+        buffer: &mut NnueInferenceBuffer
+    ) -> i32 {
+        // --- PERSPECTIVE ROUTING ---
+        // Side to move (US) always fills the first 256 inputs.
+        // Opponent (THEM) always fills the second 256 inputs.
+        let (active_acc, opp_acc) = match active_player {
+            Side::WHITE => (&self.white, &self.black),
+            Side::BLACK => (&self.black, &self.white),
+        };
+
+        // --- STEP 1: CONCATENATION & ACTIVATION (L1 -> L2) ---
+        // Python Layer 1 scale = 128. Accumulator inputs are 0 or 1.
+        for i in 0..256 {
+            buffer.l2_inputs[i] = active_acc.vals[i].clamp(0, 127) as i8;
+            buffer.l2_inputs[i + 256] = opp_acc.vals[i].clamp(0, 127) as i8;
+        }
+
+        // --- STEP 2: HIDDEN LAYER 2 (512 -> 64) ---
+        // Row-per-neuron transposed lookup layout maps to 256-bit AVX2 vector pipelines.
+        for neuron in 0..64 {
+            let mut sum: i32 = nn.l2_biases[neuron];
+            let row = &nn.l2_weights[neuron];
+
+            // Process all 512 concatenated inputs across the active board space
+            for i in 0..512 {
+                sum += (buffer.l2_inputs[i] as i32) * (row[i] as i32);
+            }
+
+            // Layer 2 internal sum scale = 4096 (128 * 32).
+            // Shift right by 7 (divide by 128) results in a Layer 3 input scale of 32 (4096 / 128).
+            let activated = sum >> 7;
+            buffer.l3_inputs[neuron] = activated.clamp(0, 127) as i8;
+        }
+
+        // --- STEP 3: HIDDEN LAYER 3 (64 -> 32) ---
+        for neuron in 0..32 {
+            let mut sum: i32 = nn.l3_biases[neuron];
+            let row = &nn.l3_weights[neuron];
+
+            for i in 0..64 {
+                sum += (buffer.l3_inputs[i] as i32) * (row[i] as i32);
+            }
+
+            // Layer 3 internal sum scale = 1024 (32 * 32).
+            // Shift right by 5 (divide by 32) preserves precision without clipping signals.
+            let activated = sum >> 5; 
+            buffer.l4_inputs[neuron] = activated.clamp(0, 127) as i8;
+        }
+
+        // --- STEP 4: OUTPUT LAYER (32 -> 1) ---
+        let mut final_sum: i32 = nn.output_bias[0];
+        let row = &nn.output_weights[0];
+
+        for i in 0..32 {
+            final_sum += (buffer.l4_inputs[i] as i32) * (row[i] as i32);
+        }
+
+        // Convert this integer range into a standard centipawn metric (where 1.0 pawn = 100 cp):
+        // Evaluation = (final_sum * 100) / 4064
+        (final_sum * 100) / 4064
+    }
 
     /// Re-reads the entire board layout from scratch to perform a full baseline refresh
     pub fn refresh_from_scratch(
