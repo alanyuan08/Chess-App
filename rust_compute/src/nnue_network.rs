@@ -1,11 +1,8 @@
 use std::fs::File;
-use std::io::Read;
-use std::mem;
-
-use crate::board_accumlator::*;
+use std::io::{Read, BufReader};
 
 /// Matches the exact memory layout of your exported Python binary.
-#[repr(C, packed)]
+#[repr(C, align(64))]
 #[derive(Clone, Copy)]
 pub struct NnueNetwork {
     // Layer 1: Accumulator (49152 inputs -> 256 outputs)
@@ -45,45 +42,69 @@ impl NnueInferenceBuffer {
     }
 }
 
-pub fn load_network_file(path: &str) -> Box<NnueNetwork> {
-    let mut file = File::open(path).expect("Could not find the NNUE file");
-    
-    // Allocate clean, zeroed memory on the Heap
-    let mut network = unsafe {
-        let layout = std::alloc::Layout::new::<NnueNetwork>();
-        let ptr = std::alloc::alloc_zeroed(layout) as *mut NnueNetwork;
-        if ptr.is_null() {
-            std::alloc::handle_alloc_error(layout);
-        }
-        Box::from_raw(ptr)
-    };
+impl NnueNetwork {
+    pub fn load_from_file(path: &str) -> std::io::Result<Box<Self>> {
+        let file = File::open(path)?;
+        let mut reader = BufReader::new(file);
 
-    // Calculate total byte size of your struct at compile time
-    let total_bytes = mem::size_of::<NnueNetwork>();
+        // --- PERFECT PACKED BYTE CALCULATION ---
+        // We calculate the exact raw bytes written by Python, completely bypassing 
+        // any padding added by the Rust compiler at the trailing end of the struct.
+        let packed_data_size = 
+            (12582912 * 2) + // l1_weights (i16)
+            (256 * 2)      + // l1_biases  (i16)
+            (64 * 512 * 1) + // l2_weights (i8)
+            (64 * 4)       + // l2_biases  (i32)
+            (32 * 64 * 1)  + // l3_weights (i8)
+            (32 * 4)       + // l3_biases  (i32)
+            (1 * 32 * 1)   + // output_weights (i8)
+            (1 * 4);         // output_bias (i32)
+            // Total = Exactly 25,201,572 bytes
 
-    // Safely read the file data directly into our newly allocated heap structure
-    unsafe {
-        let network_bytes = std::slice::from_raw_parts_mut(
-            &mut *network as *mut NnueNetwork as *mut u8, 
-            total_bytes
-        );
-        
-        file.read_exact(network_bytes).expect("Binary data size mismatch with NNUE struct!");
+        let file_metadata = std::fs::metadata(path)?;
+
+        // Allocate a zeroed 25MB structure straight into the OS heap memory registry
+        let mut network_box = unsafe {
+            let layout = std::alloc::Layout::new::<Self>();
+            let ptr = std::alloc::alloc_zeroed(layout) as *mut Self;
+            if ptr.is_null() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::OutOfMemory,
+                    "Failed to allocate heap space for NNUE",
+                ));
+            }
+            Box::from_raw(ptr)
+        };
+
+        // Map ONLY the exact packed slice footprint instead of `std::mem::size_of::<Self>()`
+        // This stops the file stream from requesting the 28 non-existent padding bytes.
+        let data_slice = unsafe {
+            std::slice::from_raw_parts_mut(
+                &mut *network_box as *mut Self as *mut u8,
+                packed_data_size,
+            )
+        };
+
+        reader.read_exact(data_slice)?;
+        Ok(network_box)
     }
 
-    network
-}
-
-impl NnueNetwork {
     /// Computes the forward evaluation pass using the current accumulator states.
     /// Returns the final centipawn assessment.
     pub fn evaluate(
         &self, 
-        active_acc: &[i16; 256],      // Active player to move
-        opp_acc: &[i16; 256],    // Passive opponent
+        active_player: Side,
+        accumulators: &BoardAccumulators,
         buffer: &mut NnueInferenceBuffer
     ) -> i32 {
-        
+        // --- PERSPECTIVE ROUTING ---
+        // Side to move (US) always fills the first 256 inputs.
+        // Opponent (THEM) always fills the second 256 inputs.
+        let (active_acc, opp_acc) = match active_player {
+            Side::White => (&accumulators.white, &accumulators.black),
+            Side::Black => (&accumulators.black, &accumulators.white),
+        };
+
         // --- STEP 1: CONCATENATION & ACTIVATION (L1 -> L2) ---
         // Python Layer 1 scale = 128. Accumulator inputs are 0 or 1.
         for i in 0..256 {

@@ -173,8 +173,9 @@ pub fn flip_square(sq: usize) -> usize {
 
 /// Computes the unique index [0..49151] for a piece from a specific player's perspective
 #[inline(always)]
-pub fn get_feature_index(king_sq: usize, piece: BoardPiece, piece_sq: usize, is_black_active: bool) -> usize {
-    let mut piece_type = piece.to_nnue_type();
+pub fn get_feature_index(king_sq: usize, piece: BoardPiece, 
+    piece_sq: usize, is_black_active: bool) -> usize {
+    let piece_type = piece.to_nnue_type();
 
     let (k_sq, p_sq, p_type) = if is_black_active {
         // From Black's perspective, flip the board vertically and invert piece colors

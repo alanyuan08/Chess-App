@@ -1,5 +1,6 @@
 use crate::nnue_network::*;
 use crate::move_command::*;
+use crate::chess_board::*;
 
 // Retain White / Black Accumulator values across Positions
 #[derive(Clone, Copy)]
@@ -14,15 +15,18 @@ pub struct BoardAccumulators {
 
 impl BoardAccumulators {
     /// Re-reads the entire board layout from scratch to perform a full baseline refresh
-    pub fn refresh_from_scratch(&mut self, nn: &NnueNetwork, 
-        pieces: &[BoardPiece; 64], w_king_sq: usize, b_king_sq: usize) {
+    pub fn refresh_from_scratch(&mut self, nn: &NnueNetwork, chess_board: &ChessBoard) {
+        // Retrieve King Squares
+        let w_king_sq: usize = chess_board.kings[0] as usize;
+        let b_king_sq: usize = chess_board.kings[1] as usize;
+
         // Reset both accumulators to the initial layer 1 baseline biases
         self.white.vals.copy_from_slice(&nn.l1_biases);
         self.black.vals.copy_from_slice(&nn.l1_biases);
 
         // Loop through every square on the board and add active pieces
         for sq in 0..64 {
-            let piece = pieces[sq];
+            let piece = chess_board.mailbox_piece(sq);
             if piece != BoardPiece::NONE {
                 // Accumulate features for White's perspective (No rotation)
                 let w_idx = get_feature_index(w_king_sq, piece, sq, false);
@@ -41,42 +45,83 @@ impl BoardAccumulators {
 
     /// Progresses the network forward incrementally during move making
     #[inline(always)]
-    pub fn make_move(&mut self, nn: &NnueNetwork, 
-        mv: ForwardMove, w_king_sq: usize, b_king_sq: usize) {
-        // If either king moves, trigger a clean refresh to redefine perspective baselines
-        if mv.piece == BoardPiece::WKING || mv.piece == BoardPiece::BKING {
-            // Assume you update the king squares in your board state *before* or *during* this branch
-            // self.refresh_from_scratch(nn, current_pieces, new_w_king, new_b_king);
+    pub fn make_move(&mut self, nn: &NnueNetwork, mv: ForwardMove, chessboard: &ChessBoard) {
+        // Fetch baseline spatial state directly from your board arrays
+        let w_king_sq: usize = chessboard.kings[0] as usize;
+        let b_king_sq: usize = chessboard.kings[1] as usize;
+        
+        let move_piece: BoardPiece = chessboard.mailbox_piece(mv.start_sq);
+
+        // --- EXCEPTION: KING MOVES ---
+        // If either king moves, escape immediately and trigger a full layer-1 refresh.
+        // Changing king locations changes the relative perspective feature-map boundaries.
+        if move_piece == BoardPiece::WKING || move_piece == BoardPiece::BKING 
+            || mv.move_type == MoveFlag::KINGSIDECASTLE 
+            || mv.move_type == MoveFlag::QUEENSIDECASTLE 
+        {            
+            self.refresh_from_scratch(nn, chessboard);
             return;
         }
 
-        // --- 1. Remove the moving piece from its origin square ---
-        let w_remove = get_feature_index(w_king_sq, mv.piece, mv.from, false);
-        let b_remove = get_feature_index(b_king_sq, mv.piece, mv.from, true);
-
-        // --- 2. Remove any captured enemy piece from the destination square ---
-        let mut w_cap_idx = None;
-        let mut b_cap_idx = None;
-        if let Some(cap) = mv.captured_piece {
-            w_cap_idx = Some(get_feature_index(w_king_sq, cap, mv.to, false));
-            b_cap_idx = Some(get_feature_index(b_king_sq, cap, mv.to, true));
+        // --- 1. Identify Target Added Piece (Handles Promotions) ---
+        // Default assume the moving piece arrives at the destination unchanged.
+        // For promotion flags, replace the piece with its upgraded target.
+        let mut added_piece = move_piece;
+        match mv.move_type {
+            MoveFlag::PROMOTIONQUEEN => {
+                added_piece = if move_piece == BoardPiece::WPAWN { BoardPiece::WQUEEN } else { BoardPiece::BQUEEN };
+            }
+            MoveFlag::PROMOTIONROOK => {
+                added_piece = if move_piece == BoardPiece::WPAWN { BoardPiece::WROOK } else { BoardPiece::BROOK };
+            }
+            MoveFlag::PROMOTIONBISHOP => {
+                added_piece = if move_piece == BoardPiece::WPAWN { BoardPiece::WBISHOP } else { BoardPiece::BBISHOP };
+            }
+            MoveFlag::PROMOTIONKNIGHT => {
+                added_piece = if move_piece == BoardPiece::WPAWN { BoardPiece::WKNIGHT } else { BoardPiece::BKNIGHT };
+            }
+            _ => {}
         }
 
-        // --- 3. Add the moving piece to its destination square ---
-        let w_add = get_feature_index(w_king_sq, mv.piece, mv.to, false);
-        let b_add = get_feature_index(b_king_sq, mv.piece, mv.to, true);
+        // --- 2. Identify Captured Piece & Coordinate (Handles En Passant) ---
+        let (captured_sq, captured_piece) = if mv.move_type == MoveFlag::ENPASSANT {
+            let sq = if move_piece == BoardPiece::WPAWN {
+                mv.end_sq - 8 // White captures Black pawn hanging behind it
+            } else {
+                mv.end_sq + 8 // Black captures White pawn hanging behind it
+            };
+            (sq, chessboard.mailbox_piece(sq))
+        } else {
+            (mv.end_sq, chessboard.mailbox_piece(mv.end_sq))
+        };
 
-        // --- 4. Parallel Hardware Update Block ---
-        // Loops are structured cleanly for compiler unrolling and auto-vectorization
+        // --- 3. Compute Sparse Feature Indices ---
+        // Remove old piece location
+        let w_remove = get_feature_index(w_king_sq, move_piece, mv.start_sq, false);
+        let b_remove = get_feature_index(b_king_sq, move_piece, mv.start_sq, true);
+
+        // Add new piece location
+        let w_add = get_feature_index(w_king_sq, added_piece, mv.end_sq, false);
+        let b_add = get_feature_index(b_king_sq, added_piece, mv.end_sq, true);
+
+        // Optional: Capture tracking
+        let mut w_cap_idx = None;
+        let mut b_cap_idx = None;
+        if captured_piece != BoardPiece::NONE {
+            w_cap_idx = Some(get_feature_index(w_king_sq, captured_piece, captured_sq, false));
+            b_cap_idx = Some(get_feature_index(b_king_sq, captured_piece, captured_sq, true));
+        }
+
+        // --- 4. High-Density Auto-Vectorized Parallel Loop Block ---
         for i in 0..256 {
-            // White Update Pipeline
+            // White Accumulator Lane Updates
             self.white.vals[i] -= nn.l1_weights[w_remove][i];
             if let Some(w_cap) = w_cap_idx {
                 self.white.vals[i] -= nn.l1_weights[w_cap][i];
             }
             self.white.vals[i] += nn.l1_weights[w_add][i];
 
-            // Black Update Pipeline
+            // Black Accumulator Lane Updates
             self.black.vals[i] -= nn.l1_weights[b_remove][i];
             if let Some(b_cap) = b_cap_idx {
                 self.black.vals[i] -= nn.l1_weights[b_cap][i];
@@ -85,38 +130,85 @@ impl BoardAccumulators {
         }
     }
 
-    /// Backtracks the network state perfectly when unmaking an evaluated move
     #[inline(always)]
-    pub fn unmake_move(&mut self, nn: &NnueNetwork, mv: UndoMove, w_king_sq: usize, b_king_sq: usize) {
-        if mv.piece == BoardPiece::WKING || mv.piece == BoardPiece::BKING {
-            // If the king moved, roll back using a clean board state reload
+    pub fn unmake_move(&mut self, nn: &NnueNetwork, mv: UndoMove, chessboard: &ChessBoard) {
+        // Fetch baseline spatial state directly from your board arrays
+        let w_king_sq: usize = chessboard.kings[0] as usize;
+        let b_king_sq: usize = chessboard.kings[1] as usize;
+        
+        // At this point, unmake_move is called AFTER or DURING the board state rollback.
+        // Retrieve the original moving piece from the board's mailbox.
+        let move_piece: BoardPiece = chessboard.mailbox_piece(mv.start_sq);
+
+        // --- EXCEPTION: KING & CASTLE MOVES ---
+        // If a king or a castle move occurred, do nothing.
+        // These states are fully restored via a manual refresh_from_scratch call or historical state stack pop.
+        if move_piece == BoardPiece::WKING || move_piece == BoardPiece::BKING 
+            || mv.move_type == MoveFlag::KINGSIDECASTLE 
+            || mv.move_type == MoveFlag::QUEENSIDECASTLE 
+        {            
             return;
         }
 
-        // To undo, reverse every sign from the make_move function:
-        // Add back old origin, add back the captured piece, remove the destination item
-        let w_add_origin = get_feature_index(w_king_sq, mv.piece, mv.from, false);
-        let b_add_origin = get_feature_index(b_king_sq, mv.piece, mv.from, true);
+        // --- 1. Identify Target Added Piece (Handles Promotions) ---
+        // Reconstruct what piece was added to the board at mv.end_sq during make_move.
+        let mut added_piece = move_piece;
+        match mv.move_type {
+            MoveFlag::PROMOTIONQUEEN => {
+                added_piece = if move_piece == BoardPiece::WPAWN { BoardPiece::WQUEEN } else { BoardPiece::BQUEEN };
+            }
+            MoveFlag::PROMOTIONROOK => {
+                added_piece = if move_piece == BoardPiece::WPAWN { BoardPiece::WROOK } else { BoardPiece::BROOK };
+            }
+            MoveFlag::PROMOTIONBISHOP => {
+                added_piece = if move_piece == BoardPiece::WPAWN { BoardPiece::WBISHOP } else { BoardPiece::BBISHOP };
+            }
+            MoveFlag::PROMOTIONKNIGHT => {
+                added_piece = if move_piece == BoardPiece::WPAWN { BoardPiece::WKNIGHT } else { BoardPiece::BKNIGHT };
+            }
+            _ => {}
+        }
+
+        // --- 2. Identify Captured Piece Coordinate (Handles En Passant) ---
+        // Reconstruct where the captured piece was located spatially on the matrix.
+        let captured_sq = if mv.move_type == MoveFlag::ENPASSANT {
+            if move_piece == BoardPiece::WPAWN {
+                mv.end_sq - 8 
+            } else {
+                mv.end_sq + 8 
+            }
+        } else {
+            mv.end_sq
+        };
+
+        // --- 3. Compute Sparse Feature Indices ---
+        // To undo, we ADD back the original piece to its starting square, 
+        // ADD back the captured piece to its capture square, and REMOVE the piece that reached the destination.
+        let w_add_origin = get_feature_index(w_king_sq, move_piece, mv.start_sq, false);
+        let b_add_origin = get_feature_index(b_king_sq, move_piece, mv.start_sq, true);
+
+        let w_remove_dest = get_feature_index(w_king_sq, added_piece, mv.end_sq, false);
+        let b_remove_dest = get_feature_index(b_king_sq, added_piece, mv.end_sq, true);
 
         let mut w_cap_idx = None;
         let mut b_cap_idx = None;
         if let Some(cap) = mv.captured_piece {
-            w_cap_idx = Some(get_feature_index(w_king_sq, cap, mv.to, false));
-            b_cap_idx = Some(get_feature_index(b_king_sq, cap, mv.to, true));
+            if cap != BoardPiece::NONE {
+                w_cap_idx = Some(get_feature_index(w_king_sq, cap, captured_sq, false));
+                b_cap_idx = Some(get_feature_index(b_king_sq, cap, captured_sq, true));
+            }
         }
 
-        let w_remove_dest = get_feature_index(w_king_sq, mv.piece, mv.to, false);
-        let b_remove_dest = get_feature_index(b_king_sq, mv.piece, mv.to, true);
-
+        // --- 4. Reverse Hardware Update Block (SIMD Auto-Vectorized) ---
         for i in 0..256 {
-            // Rollback White
+            // Rollback White Accumulator
             self.white.vals[i] += nn.l1_weights[w_add_origin][i];
             if let Some(w_cap) = w_cap_idx {
                 self.white.vals[i] += nn.l1_weights[w_cap][i];
             }
             self.white.vals[i] -= nn.l1_weights[w_remove_dest][i];
 
-            // Rollback Black
+            // Rollback Black Accumulator
             self.black.vals[i] += nn.l1_weights[b_add_origin][i];
             if let Some(b_cap) = b_cap_idx {
                 self.black.vals[i] += nn.l1_weights[b_cap][i];
