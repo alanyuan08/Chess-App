@@ -115,8 +115,8 @@ impl ChessBoard {
             self.zobrist_hash = self.compute_init_zobrist();
         }
 
-        let w_king_sq: usize = self.kings[0] as usize;
-        let b_king_sq: usize = self.kings[1] as usize;
+        let w_king_sq = self.kings[0].trailing_zeros() as usize;
+        let b_king_sq = self.kings[1].trailing_zeros() as usize;
         self.accumulators.refresh_from_scratch(
             nn, &self.mailbox, w_king_sq, b_king_sq
         );    
@@ -208,8 +208,8 @@ impl ChessBoard {
         nn: &'static NnueNetwork, 
         mv: ForwardMove
     ) {
-        let w_king_sq: usize = self.kings[0] as usize;
-        let b_king_sq: usize = self.kings[1] as usize;
+        let w_king_sq = self.kings[0].trailing_zeros() as usize;
+        let b_king_sq = self.kings[1].trailing_zeros() as usize;
         self.accumulators.make_move(
             nn, mv, &self.mailbox, w_king_sq, b_king_sq
         )
@@ -220,8 +220,8 @@ impl ChessBoard {
         nn: &'static NnueNetwork,
         mv: UndoMove
     ) {
-        let w_king_sq: usize = self.kings[0] as usize;
-        let b_king_sq: usize = self.kings[1] as usize;
+        let w_king_sq = self.kings[0].trailing_zeros() as usize;
+        let b_king_sq = self.kings[1].trailing_zeros() as usize;
         self.accumulators.unmake_move(
             nn, mv, &self.mailbox, w_king_sq, b_king_sq
         )
