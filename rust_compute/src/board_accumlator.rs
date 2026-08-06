@@ -134,7 +134,7 @@ impl BoardAccumulators {
         let move_piece: BoardPiece = mailbox[mv.start_sq];
 
         // --- 1. Identify Target Added Piece (Handles Promotions) ---
-        // Default assume the moving piece arrives at the destination unchanged.
+        // Default assume the moving piece arrives at the destination unchanged.    
         // For promotion flags, replace the piece with its upgraded target.
         let mut added_piece = move_piece;
         match mv.move_type {

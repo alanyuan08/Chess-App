@@ -258,7 +258,7 @@ def train_nnue_on_fens():
     model.fit(
         train_dataset, 
         steps_per_epoch=15000, 
-        epochs=30, 
+        epochs=3, 
         validation_data=val_dataset,
         validation_steps=VAL_SAMPLE_SIZE // VAL_BATCH_SIZE,
         callbacks=[checkpoint_cb])
