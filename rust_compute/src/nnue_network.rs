@@ -1,5 +1,3 @@
-use crate::move_command::*;
-use crate::board_accumlator::*;
 use std::fs::File;
 use std::io::{Read, BufReader};
 
@@ -22,26 +20,6 @@ pub struct NnueNetwork {
     // Layer 4: Output Layer (32 inputs -> 1 output)
     pub output_weights: [[i8; 32]; 1], // Transposed: row per output neuron
     pub output_bias: [i32; 1]
-}
-
-/// The runtime container holding the current calculation buffers.
-/// Allocated once per search thread to prevent runtime overhead.
-#[repr(C, align(64))]
-pub struct NnueInferenceBuffer {
-    pub l2_inputs: [i8; 512],
-    pub l3_inputs: [i8; 64],
-    pub l4_inputs: [i8; 32],
-}
-
-impl NnueInferenceBuffer {
-    /// Creates a zeroed instance on the stack or search stack allocation block
-    pub fn new() -> Self {
-        Self {
-            l2_inputs: [0i8; 512],
-            l3_inputs: [0i8; 64],
-            l4_inputs: [0i8; 32],
-        }
-    }
 }
 
 impl NnueNetwork {
@@ -87,5 +65,25 @@ impl NnueNetwork {
 
         reader.read_exact(data_slice)?;
         Ok(network_box)
+    }
+}
+
+/// The runtime container holding the current calculation buffers.
+/// Allocated once per search thread to prevent runtime overhead.
+#[repr(C, align(64))]
+pub struct NnueInferenceBuffer {
+    pub l2_inputs: [i8; 512],
+    pub l3_inputs: [i8; 64],
+    pub l4_inputs: [i8; 32],
+}
+
+impl NnueInferenceBuffer {
+    /// Creates a zeroed instance on the stack or search stack allocation block
+    pub fn new() -> Self {
+        Self {
+            l2_inputs: [0i8; 512],
+            l3_inputs: [0i8; 64],
+            l4_inputs: [0i8; 32],
+        }
     }
 }
