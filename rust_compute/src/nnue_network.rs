@@ -71,6 +71,7 @@ impl NnueNetwork {
 /// The runtime container holding the current calculation buffers.
 /// Allocated once per search thread to prevent runtime overhead.
 #[repr(C, align(64))]
+#[derive(Clone)]
 pub struct NnueInferenceBuffer {
     pub l2_inputs: [i8; 512],
     pub l3_inputs: [i8; 64],

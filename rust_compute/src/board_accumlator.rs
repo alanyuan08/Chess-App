@@ -1,6 +1,5 @@
 use crate::nnue_network::*;
 use crate::move_command::*;
-use crate::chess_board::*;
 
 // Retain White / Black Accumulator values across Positions
 #[derive(Debug, Clone, Copy)]

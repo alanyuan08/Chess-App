@@ -87,6 +87,7 @@ impl<'a> SearchWorker<'a> {
             killer_move_table: [[None; MAX_DEPTH as usize]; 2],
             thread_id,
 
+            thread_buffer: NnueInferenceBuffer::new(),
             nnue_network
         }
     }
@@ -194,8 +195,6 @@ impl<'a> SearchWorker<'a> {
             let move_command: ForwardMove = 
                 parse_forward_move_with_board(uci_move, &self.chess_board);
             self.process_forward_move(move_command);
-            
-            self.process_time_cat_forward(move_command);
         }
     }
 
@@ -204,7 +203,11 @@ impl<'a> SearchWorker<'a> {
         let prev_castle_rights = self.chess_board.castle_rights(); 
         let prev_en_passant = self.chess_board.en_passant();
 
+        // Push Move History
         self.push_position();
+
+        // Update NNUE Board
+        self.chess_board.timecat_push_move(self.nnue_network, forward_move);
 
         let remove_piece = self.chess_board.execute_move(forward_move);
         let undo_move = UndoMove {
@@ -220,19 +223,6 @@ impl<'a> SearchWorker<'a> {
         self.history_index += 1;
     }
 
-    fn retrieve_last_move(&mut self) -> Option<UndoMove> {
-        if self.history_index == 0 {
-            return;
-        }
-
-        self.history_index -= 1;
-        if let Some(undo_move) = self.history[self.history_index].take() {
-            self.pop_position();
-
-            return undo_move;
-        }
-    }
-
     fn process_backward_move(&mut self) {
         if self.history_index == 0 {
             return;
@@ -242,17 +232,12 @@ impl<'a> SearchWorker<'a> {
         if let Some(undo_move) = self.history[self.history_index].take() {
             self.pop_position();
 
+            // Accumulator Unmake Move
+            self.chess_board.timecat_pop_move(self.nnue_network, undo_move);
+            
             // ChessBoard Undo Move
             self.chess_board.unexecute_move(undo_move);
-            
-            // Accumulator Unmake Move
-            self.chess_board.timecat_pop_move(nnue_network, undo_move);
         }
-    }
-
-    // Replace with ForwardMove
-    fn process_time_cat_forward(&mut self, forward_move: ForwardMove) {
-        self.chess_board.timecat_push_move(nnue_network, forward_move);
     }
 
     // A simple, linear-logarithmic approximation using integer division:
@@ -386,8 +371,7 @@ impl<'a> SearchWorker<'a> {
             }
 
             // Move is Legal, Forward Move Time Cat
-            legal_moves_played += 1;        
-            self.process_time_cat_forward(*forward_move);
+            legal_moves_played += 1;
 
             // LMR Reduction
             let mut negamax_result;
@@ -487,7 +471,7 @@ impl<'a> SearchWorker<'a> {
     fn board_eval(&mut self) -> i32 {
         let static_eval = self.chess_board.eval(
             &self.nnue_network,
-            &self.thread_buffer
+            &mut self.thread_buffer
         );
         self.nodes_processed += 1;
         static_eval
@@ -594,7 +578,6 @@ impl<'a> SearchWorker<'a> {
 
             // Move is Legal, Forward Move Time Cat
             legal_moves_played += 1;
-            self.process_time_cat_forward(*forward_move);
 
             // Negamax search call
             let score = -self.quiescence_search(-beta, -alpha, ply + 1, depth - 1, stop_signal);

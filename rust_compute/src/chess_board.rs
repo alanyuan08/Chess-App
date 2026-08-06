@@ -10,7 +10,6 @@ use crate::chess_game::*;
 use crate::board_accumlator::*;
 use crate::nnue_network::*;
 use arrayvec::ArrayVec;
-use timecat::prelude::*;
 
 // 0 -> White / 1 -> Black
 #[derive(Debug, Clone)] 
