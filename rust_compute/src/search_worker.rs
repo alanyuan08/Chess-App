@@ -522,10 +522,7 @@ impl<'a> SearchWorker<'a> {
             }
         }
 
-        let mut static_eval = self.board_eval();
-        if self.chess_board.active_player() == Side::BLACK {
-            static_eval = -static_eval;
-        }
+        let static_eval = self.board_eval();
 
         if ply > MAX_DEPTH {
             return static_eval;
