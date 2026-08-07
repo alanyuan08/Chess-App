@@ -198,9 +198,15 @@ impl ChessBoard {
         nn: &'static NnueNetwork, 
         buffer: &mut NnueInferenceBuffer
     ) -> i32 {   
-        self.accumulators.evaluate(
+        let nnue_output = self.accumulators.evaluate(
             self.active_player, nn, buffer
-        )
+        );
+
+        if self.active_player == Side::WHITE {
+            -nnue_output
+        } else {
+            nnue_output
+        }
     }
 
     // Used to Calculate Castling / King Safety

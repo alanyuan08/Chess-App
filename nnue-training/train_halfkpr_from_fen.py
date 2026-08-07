@@ -143,7 +143,6 @@ def dataset_generator(get_dataset_fn):
                 np.array([score], dtype=np.float32).flatten()
             )
 
-
 # --- 4. MODEL DESIGN & TRAINING RUNNER ---
 def train_nnue_on_fens():
     # 1. Inputs
