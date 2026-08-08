@@ -4,6 +4,7 @@ import keras
 from tensorflow.keras import layers, Model
 from datasets import load_dataset
 import math
+import chess
 
 # --- CONSTANTS ---
 INPUT_FEATURES = 64 * 64 * 12  # 49,152
@@ -11,12 +12,12 @@ HIDDEN_SIZE = 256
 SCALE_MAX = 1.0
 
 BATCH_SIZE = 256
-DATASET_NAME = "mateuszgrzyb/lichess-stockfish-normalized"
+DATASET_NAME = "Lichess/chess-position-evaluations"
 BIN_SAVE_PATH = "nnue_weights.bin"
 
 VAL_SAMPLE_SIZE = 15360
-VAL_BATCH_SIZE = 1024
-VAL_START_ROW = 10000000 
+VAL_BATCH_SIZE = 256
+VAL_START_ROW = 10000 
 
 # Map FEN character to an integer type 0-11
 PIECE_MAP = {
@@ -74,7 +75,7 @@ def parse_fen_to_features(fen_string):
         # 1. Flip color associations cleanly: White (0..5) <-> Black (6..11)
         b_type = (p_type + 6) % 12
         
-        # 2. pply a full 180-degree board rotation using bitwise XOR 63
+        # 2. Apply a full 180-degree board rotation using bitwise XOR 63
         # This simultaneously mirrors the ranks vertically AND the files horizontally (A1 <-> H8)
         b_sq = p_sq ^ 63
         b_king_sq_rotated = black_king_sq ^ 63
@@ -101,47 +102,74 @@ def dataset_generator(get_dataset_fn):
             mate = row.get("mate")
             
             try:  
-                # 1. Extract Active Turn
-                fen_tokens = fen.split()
-                is_black_turn = (fen_tokens[1] == 'b')
-                
-                # 2. Assign absolute White-relative score
-                cp_val = float(raw_score) if (raw_score is not None and not math.isnan(raw_score)) else None
-                mate_val = int(mate) if (mate is not None and not math.isnan(mate)) else None
-                
-                # 4. Assign objective, White-relative baseline evaluation scores
-                if cp_val is not None:
-                    score_target = cp_val
-                elif mate_val is not None and mate_val != 0:
-                    # Penalize slow mates. 25000 sits safely above standard CP limits.
-                    distance_penalty = abs(mate_val) * 10.0
-                    if mate_val > 0:
-                        score_target = 25000.0 - distance_penalty  # White forces mate
+                if is_quiet_position(fen):
+                    # 1. Extract Active Turn
+                    fen_tokens = fen.split()
+                    is_black_turn = (fen_tokens[1] == 'b')
+                    
+                    # 2. Assign absolute White-relative score
+                    cp_val = float(raw_score) if (raw_score is not None and not math.isnan(raw_score)) else None
+                    mate_val = int(mate) if (mate is not None and not math.isnan(mate)) else None
+                    
+                    # 4. Assign objective, White-relative baseline evaluation scores
+                    if cp_val is not None:
+                        score_target = cp_val
+                    elif mate_val is not None and mate_val != 0:
+                        # Penalize slow mates. 25000 sits safely above standard CP limits.
+                        distance_penalty = abs(mate_val) * 10.0
+                        if mate_val > 0:
+                            score_target = 25000.0 - distance_penalty  # White forces mate
+                        else:
+                            score_target = -25000.0 + distance_penalty # Black forces mate
                     else:
-                        score_target = -25000.0 + distance_penalty # Black forces mate
-                else:
-                    continue
+                        continue
 
-                if is_black_turn:
-                    score_target = -score_target
+                    if is_black_turn:
+                        score_target = -score_target
 
-                score = np.tanh(score_target / 410.0)
+                    score = np.tanh(score_target / 410.0)
+                    w_feats, b_feats = parse_fen_to_features(fen)
+                    
+                    w_feats_flat = np.array(w_feats, dtype=np.float32).flatten()
+                    b_feats_flat = np.array(b_feats, dtype=np.float32).flatten()
+                    
+                    yield (
+                        {
+                            "white_features": w_feats_flat, 
+                            "black_features": b_feats_flat,
+                            "side_to_move": np.array([is_black_turn], dtype=bool)
+                        },
+                        np.array([score], dtype=np.float32).flatten()
+                    )
+                    
             except (ValueError, TypeError, IndexError):
                 continue
             
-            w_feats, b_feats = parse_fen_to_features(fen)
+
+# --- 3. FILTER QUIET POSITIONS ---
+def is_quiet_position(fen: str) -> bool:
+    try:
+        board = chess.Board(fen)
+        
+        # 1. Check is fast and necessary
+        if board.is_check():
+            return False
             
-            w_feats_flat = np.array(w_feats, dtype=np.float32).flatten()
-            b_feats_flat = np.array(b_feats, dtype=np.float32).flatten()
-            
-            yield (
-                {
-                    "white_features": w_feats_flat, 
-                    "black_features": b_feats_flat,
-                    "side_to_move": np.array([is_black_turn], dtype=bool)
-                },
-                np.array([score], dtype=np.float32).flatten()
-            )
+        # 2. OPTIMIZATION: Only generate pseudo-legal captures/promotions.
+        # This is massively faster than looping over board.legal_moves.
+        for move in board.generate_pseudo_legal_captures():
+            if board.is_legal(move):
+                return False
+                
+        # 3. Quick check for promotions that might not be captures
+        for move in board.generate_pseudo_legal_moves():
+            if move.promotion is not None and board.is_legal(move):
+                return False
+
+        return True
+    except (ValueError, IndexError):
+        return False
+
 
 # --- 4. MODEL DESIGN & TRAINING RUNNER ---
 def train_nnue_on_fens():
@@ -200,22 +228,21 @@ def train_nnue_on_fens():
         # 1. Load the main training stream
         dset = load_dataset(DATASET_NAME, split="train", streaming=True)
         # Shuffle the training stream independently
-        return dset.shuffle(seed=42, buffer_size=400000)
+        return dset.shuffle(seed=42, buffer_size=1000)
 
     def load_val_stream():
         dset = load_dataset(DATASET_NAME, split="train", streaming=True)
         
         # Move 10 million rows deep to build a bulletproof wall against training data leakage
-        dset = dset.skip(VAL_START_ROW)
-        return dset.take(VAL_SAMPLE_SIZE)
+        return dset.shuffle(seed=999, buffer_size=1000)
 
     # --- Train Dataset ---
     train_dataset = tf.data.Dataset.from_generator(
         lambda: dataset_generator(load_train_stream),
         output_signature=(
             {
-                "white_features": tf.TensorSpec(shape=(INPUT_FEATURES,), dtype=tf.float32),
-                "black_features": tf.TensorSpec(shape=(INPUT_FEATURES,), dtype=tf.float32),
+                "white_features": tf.TensorSpec(shape=(None,), dtype=tf.float32),
+                "black_features": tf.TensorSpec(shape=(None,), dtype=tf.float32),
                 "side_to_move": tf.TensorSpec(shape=(1,), dtype=tf.bool),
             },
             tf.TensorSpec(shape=(1,), dtype=tf.float32)
@@ -227,16 +254,14 @@ def train_nnue_on_fens():
         lambda: dataset_generator(load_val_stream),
         output_signature=(
             {
-                "white_features": tf.TensorSpec(shape=(INPUT_FEATURES,), dtype=tf.float32),
-                "black_features": tf.TensorSpec(shape=(INPUT_FEATURES,), dtype=tf.float32),
+                "white_features": tf.TensorSpec(shape=(None,), dtype=tf.float32),
+                "black_features": tf.TensorSpec(shape=(None,), dtype=tf.float32),
                 "side_to_move": tf.TensorSpec(shape=(1,), dtype=tf.bool),
             },
             tf.TensorSpec(shape=(1,), dtype=tf.float32)
         )
     )
 
-    val_dataset = val_dataset.take(VAL_SAMPLE_SIZE)
-    val_dataset = val_dataset.cache()
     val_dataset = val_dataset.batch(VAL_BATCH_SIZE)
     val_dataset = val_dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
 
@@ -256,8 +281,8 @@ def train_nnue_on_fens():
     # Pass the callback into your fit runner
     model.fit(
         train_dataset, 
-        steps_per_epoch=15000, 
-        epochs=30, 
+        steps_per_epoch=10000, 
+        epochs=20, 
         validation_data=val_dataset,
         validation_steps=VAL_SAMPLE_SIZE // VAL_BATCH_SIZE,
         callbacks=[checkpoint_cb])
