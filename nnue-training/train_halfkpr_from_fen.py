@@ -72,7 +72,7 @@ def parse_fen_to_features(fen_string):
         white_features[w_idx] = 1.0
         
         # --- BLACK PERSPECTIVE (Flipped & Rotated) ---
-        # 1. Flip color associations cleanly: White (0..5) <-> Black (6..11)
+        # Flip color associations cleanly: White (0..5) <-> Black (6..11)
         b_type = (p_type + 6) % 12
         
         # 2. Apply a full 180-degree board rotation using bitwise XOR 63

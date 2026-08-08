@@ -33,12 +33,12 @@ impl NnueNetwork {
         let packed_data_size = 
             (12582912 * 2) + // l1_weights (i16)
             (256 * 2)      + // l1_biases  (i16)
-            (64 * 512 * 1) + // l2_weights (i8)
+            (64 * 512) + // l2_weights (i8)
             (64 * 4)       + // l2_biases  (i32)
-            (32 * 64 * 1)  + // l3_weights (i8)
+            (32 * 64)  + // l3_weights (i8)
             (32 * 4)       + // l3_biases  (i32)
-            (1 * 32 * 1)   + // output_weights (i8)
-            (1 * 4);         // output_bias (i32)
+            (1 * 32)   + // output_weights (i8)
+            (4);         // output_bias (i32)
             // Total = Exactly 25,201,572 bytes
 
         // Allocate a zeroed 25MB structure straight into the OS heap memory registry
