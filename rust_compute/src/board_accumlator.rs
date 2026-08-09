@@ -30,6 +30,9 @@ impl BoardAccumulators {
         nn: &NnueNetwork, 
         buffer: &mut NnueInferenceBuffer
     ) -> i32 {
+        // Clear Buffer 
+        buffer.clear();
+
         // --- PERSPECTIVE ROUTING ---
         // Side to move (US) always fills the first 256 inputs.
         // Opponent (THEM) always fills the second 256 inputs.
@@ -86,8 +89,8 @@ impl BoardAccumulators {
         }
 
         // Convert this integer range into a standard centipawn metric (where 1.0 pawn = 100 cp):
-        // Evaluation = (final_sum * 100) / 4064
-        (final_sum * 100) / 4064
+        // Evaluation = (final_sum * 410) / 4064
+        (final_sum * 410) / 4064
     }
 
     /// Re-reads the entire board layout from scratch to perform a full baseline refresh

@@ -87,4 +87,13 @@ impl NnueInferenceBuffer {
             l4_inputs: [0i8; 32],
         }
     }
+    
+    /// Explicitly zeroes out all internal scratchpad arrays in-place.
+    /// This prevents historical calculations from bleeding into a new evaluation.
+    #[inline(always)]
+    pub fn clear(&mut self) {
+        self.l2_inputs.fill(0);
+        self.l3_inputs.fill(0);
+        self.l4_inputs.fill(0);
+    }
 }

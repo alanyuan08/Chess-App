@@ -4,7 +4,6 @@ import keras
 from tensorflow.keras import layers, Model
 from datasets import load_dataset
 import math
-import chess
 
 # --- CONSTANTS ---
 INPUT_FEATURES = 64 * 64 * 12  # 49,152
@@ -102,74 +101,54 @@ def dataset_generator(get_dataset_fn):
             mate = row.get("mate")
             
             try:  
-                if is_quiet_position(fen):
-                    # 1. Extract Active Turn
-                    fen_tokens = fen.split()
-                    is_black_turn = (fen_tokens[1] == 'b')
-                    
-                    # 2. Assign absolute White-relative score
-                    cp_val = float(raw_score) if (raw_score is not None and not math.isnan(raw_score)) else None
-                    mate_val = int(mate) if (mate is not None and not math.isnan(mate)) else None
-                    
-                    # 4. Assign objective, White-relative baseline evaluation scores
-                    if cp_val is not None:
-                        score_target = cp_val
-                    elif mate_val is not None and mate_val != 0:
-                        # Penalize slow mates. 25000 sits safely above standard CP limits.
-                        distance_penalty = abs(mate_val) * 10.0
-                        if mate_val > 0:
-                            score_target = 25000.0 - distance_penalty  # White forces mate
-                        else:
-                            score_target = -25000.0 + distance_penalty # Black forces mate
+                # 1. Extract Active Turn
+                fen_tokens = fen.split()
+                is_black_turn = (fen_tokens[1] == 'b')
+                
+                # 2. Assign absolute White-relative score
+                cp_val = float(raw_score) if (raw_score is not None and not math.isnan(raw_score)) else None
+                mate_val = int(mate) if (mate is not None and not math.isnan(mate)) else None
+                
+                # 4. Assign objective, White-relative baseline evaluation scores
+                if cp_val is not None:
+                    score_target = cp_val
+                elif mate_val is not None and mate_val != 0:
+                    # Treat all forced mates as a heavy material crushing advantage
+                    if mate_val > 0:
+                        score_target = 25000.0  # White forces mate
                     else:
-                        continue
+                        score_target = -25000.0 # Black forces mate
+                else:
+                    continue
 
-                    if is_black_turn:
-                        score_target = -score_target
+                if is_black_turn:
+                    score_target = -score_target
 
-                    score = np.tanh(score_target / 410.0)
-                    w_feats, b_feats = parse_fen_to_features(fen)
-                    
-                    w_feats_flat = np.array(w_feats, dtype=np.float32).flatten()
-                    b_feats_flat = np.array(b_feats, dtype=np.float32).flatten()
-                    
-                    yield (
-                        {
-                            "white_features": w_feats_flat, 
-                            "black_features": b_feats_flat,
-                            "side_to_move": np.array([is_black_turn], dtype=bool)
-                        },
-                        np.array([score], dtype=np.float32).flatten()
-                    )
-                    
+                # 5. Guard against gradient explosions by clipping values to a 15-pawn window
+                if score_target > 1500.0:  
+                    score_target = 1500.0
+                elif score_target < -1500.0: 
+                    score_target = -1500.0
+
+                # 6. Final linear scaling factor (1.0 = 410 centipawns)
+                score = score_target / 410.0 
+                
+                w_feats, b_feats = parse_fen_to_features(fen)
+                
+                w_feats_flat = np.array(w_feats, dtype=np.float32).flatten()
+                b_feats_flat = np.array(b_feats, dtype=np.float32).flatten()
+                
+                yield (
+                    {
+                        "white_features": w_feats_flat, 
+                        "black_features": b_feats_flat,
+                        "side_to_move": np.array([is_black_turn], dtype=bool)
+                    },
+                    np.array([score], dtype=np.float32).flatten()
+                )
+                
             except (ValueError, TypeError, IndexError):
                 continue
-            
-
-# --- 3. FILTER QUIET POSITIONS ---
-def is_quiet_position(fen: str) -> bool:
-    try:
-        board = chess.Board(fen)
-        
-        # 1. Check is fast and necessary
-        if board.is_check():
-            return False
-            
-        # 2. OPTIMIZATION: Only generate pseudo-legal captures/promotions.
-        # This is massively faster than looping over board.legal_moves.
-        for move in board.generate_pseudo_legal_captures():
-            if board.is_legal(move):
-                return False
-                
-        # 3. Quick check for promotions that might not be captures
-        for move in board.generate_pseudo_legal_moves():
-            if move.promotion is not None and board.is_legal(move):
-                return False
-
-        return True
-    except (ValueError, IndexError):
-        return False
-
 
 # --- 4. MODEL DESIGN & TRAINING RUNNER ---
 def train_nnue_on_fens():
@@ -204,23 +183,16 @@ def train_nnue_on_fens():
     x = layers.Dense(32, activation=None, name="hidden_layer_3")(x)          # Shape: (Batch, 32)
     x = keras.ops.clip(x, 0.0, SCALE_MAX)
 
-    # 8. Output Layer mapped to Tanh range [-1.0, 1.0]
-    raw_eval = layers.Dense(1, activation=None, name="chess_eval")(x)
-    output = layers.Activation("tanh", name="normalized_eval")(raw_eval)
+    # 8. Output Layer 
+    output = layers.Dense(1, activation=None, name="chess_eval")(x)
 
     model = Model(
         inputs=[white_input, black_input, stm_input],
         outputs=output)
     
-    total_training_steps = int(15000 * 30 * 1.1)
-    lr_schedule = tf.keras.optimizers.schedules.CosineDecay(
-        initial_learning_rate=1e-3,
-        decay_steps=total_training_steps,
-        alpha=0.0100
-    )
     model.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=lr_schedule), 
-        loss="mse",
+        optimizer=keras.optimizers.Adam(learning_rate=0.001),
+        loss="huber",
         metrics=["mae"]
     )
 
@@ -281,13 +253,12 @@ def train_nnue_on_fens():
     # Pass the callback into your fit runner
     model.fit(
         train_dataset, 
-        steps_per_epoch=10000, 
-        epochs=20, 
+        steps_per_epoch=15000, 
+        epochs=30, 
         validation_data=val_dataset,
         validation_steps=VAL_SAMPLE_SIZE // VAL_BATCH_SIZE,
         callbacks=[checkpoint_cb])
     
-    # Ideal Error is between 0.040 and 0.055
     return model
 
 def export_dense_nnue_for_rust(model, file_path="model.nnue"):
