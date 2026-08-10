@@ -254,7 +254,7 @@ def train_nnue_on_fens():
     def load_train_stream():
         # Only streams from our dedicated training data shard files
         return load_dataset(
-            "Lichess/chess-position-evaluations",
+            DATASET_NAME,
             data_files={"train": TRAIN_SHARDS},
             split="train",
             streaming=True
@@ -264,7 +264,7 @@ def train_nnue_on_fens():
         # Only streams from our dedicated validation data shard files
         # Bypasses percentage strings and sequential skipping freezes instantly!
         return load_dataset(
-            "Lichess/chess-position-evaluations",
+            DATASET_NAME,
             data_files={"train": VAL_SHARDS}, # Must specify 'train' key mapping to match HF structure
             split="train",
             streaming=True

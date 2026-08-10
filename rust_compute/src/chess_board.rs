@@ -70,7 +70,7 @@ impl ChessBoard {
 
             mailbox: [BoardPiece::NONE; 64],
             zobrist_hash: 0,
-            accumulators: BoardAccumulators::new(),
+            accumulators: BoardAccumulators::default(),
         }
     }
 

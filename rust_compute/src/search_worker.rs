@@ -58,7 +58,7 @@ impl<'a> SearchWorker<'a> {
             killer_move_table: [[None; MAX_DEPTH as usize]; 2],
             thread_id: 0,
             
-            thread_buffer: NnueInferenceBuffer::new(),
+            thread_buffer: NnueInferenceBuffer::default(),
             nnue_network
         }
     }
@@ -87,7 +87,7 @@ impl<'a> SearchWorker<'a> {
             killer_move_table: [[None; MAX_DEPTH as usize]; 2],
             thread_id,
 
-            thread_buffer: NnueInferenceBuffer::new(),
+            thread_buffer: NnueInferenceBuffer::default(),
             nnue_network
         }
     }
@@ -97,7 +97,7 @@ impl<'a> SearchWorker<'a> {
         max_depth: i32, stop_signal: &AtomicBool) -> (Option<ForwardMove>, usize){
         // Start the timer
         let start_time = Instant::now();
-        let time_limit = Duration::from_secs(DEPTH_SEARCH_LIMIT);
+        let time_limit = Duration::from_secs(SEARCH_TIME_LIMIT);
 
         // Thread_id = 0 is the main thread, the rest are helper threads
         let start_depth = if self.thread_id == 0 {
@@ -529,7 +529,7 @@ impl<'a> SearchWorker<'a> {
 
     fn board_eval(&mut self) -> i32 {
         let static_eval = self.chess_board.eval(
-            &self.nnue_network,
+            self.nnue_network,
             &mut self.thread_buffer
         );
         self.nodes_processed += 1;

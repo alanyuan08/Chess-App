@@ -81,16 +81,7 @@ pub struct NnueInferenceBuffer {
     pub l4_inputs: [i8; 32],
 }
 
-impl NnueInferenceBuffer {
-    /// Creates a zeroed instance on the stack or search stack allocation block
-    pub fn new() -> Self {
-        Self {
-            l2_inputs: [0i8; 512],
-            l3_inputs: [0i8; 64],
-            l4_inputs: [0i8; 32],
-        }
-    }
-    
+impl NnueInferenceBuffer {    
     /// Explicitly zeroes out all internal scratchpad arrays in-place.
     /// This prevents historical calculations from bleeding into a new evaluation.
     #[inline(always)]
@@ -98,5 +89,15 @@ impl NnueInferenceBuffer {
         self.l2_inputs.fill(0);
         self.l3_inputs.fill(0);
         self.l4_inputs.fill(0);
+    }
+}
+
+impl Default for NnueInferenceBuffer {
+    fn default() -> Self {
+        Self {
+            l2_inputs: [0i8; 512],
+            l3_inputs: [0i8; 64],
+            l4_inputs: [0i8; 32],
+        }
     }
 }
