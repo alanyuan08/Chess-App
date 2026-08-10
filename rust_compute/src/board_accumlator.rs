@@ -99,8 +99,8 @@ impl BoardAccumulators {
         let final_normalized = final_sum >> 7;
 
         // Convert the normalized integer score directly into engine centipawns.
-        // (Matches Python's target = score / 410.0 scaling factor perfectly)
-        final_normalized * 410
+        // (Matches Python's target = score / 100.0 scaling factor perfectly)
+        final_normalized * 100
     }
 
     /// Re-reads the entire board layout from scratch to perform a full baseline refresh

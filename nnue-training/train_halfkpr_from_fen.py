@@ -102,7 +102,7 @@ def dataset_generator(get_dataset_fn):
             mate = row.get("mate")
             
             try:  
-                # 1. CRITICAL STEP: Filter for Quiescent Data (Tactical Silence)
+                # 1. Filter for Quiescent Data (Tactical Silence)
                 board = chess.Board(fen)
                 
                 # Rule A: Skip if a forced tactical checkmate sequence is imminent
@@ -130,29 +130,29 @@ def dataset_generator(get_dataset_fn):
                 if is_tactical:
                     continue
 
-                # 1. Extract Active Turn
+                # 2. Extract Active Turn
                 fen_tokens = fen.split()
                 is_black_turn = (fen_tokens[1] == 'b')
+                score_target = 0.0
                 
-                # 2. Assign absolute White-relative score
-                cp_val = float(raw_score) if (raw_score is not None and not math.isnan(raw_score)) else None
-                
-                # 4. Assign objective, White-relative baseline evaluation scores
-                if cp_val is not None:
-                    score_target = cp_val
+                # 3. Drop Positions with Known Mate 
+                if raw_score is not None and not math.isnan(float(raw_score)):
+                    score_target = float(raw_score) 
+                else:
+                    continue 
 
-                # Clip the objective white-relative score first
-                if score_target > 1500.0:  
-                    score_target = 1500.0
-                elif score_target < -1500.0: 
-                    score_target = -1500.0
+                # 4. Clip Score
+                if score_target > 1000.0:  
+                    score_target = 1000.0
+                elif score_target < -1000.0: 
+                    score_target = -1000.0
 
-                # Then invert it for the active side to move
+                # 5. Invert for Side to move
                 if is_black_turn:
                     score_target = -score_target
 
                 # 6. Final linear scaling factor (1.0 = 410 centipawns)
-                score = score_target / 410.0 
+                score = score_target / 100.0
                 
                 w_feats, b_feats = parse_fen_to_features(fen)
                 
@@ -211,10 +211,9 @@ def train_nnue_on_fens():
         inputs=[white_input, black_input, stm_input],
         outputs=output)
     
-    huber_loss = keras.losses.Huber(delta=0.25)
     model.compile(
-        optimizer=keras.optimizers.Adam(learning_rate=0.001),
-        loss=huber_loss,
+        optimizer=keras.optimizers.Adam(learning_rate=0.005),
+        loss="mean_squared_error",
         metrics=["mae"]
     )
 
@@ -250,7 +249,7 @@ def train_nnue_on_fens():
             },
             tf.TensorSpec(shape=(1,), dtype=tf.float32)
         )
-    )
+    ).repeat()
 
     val_dataset = val_dataset.batch(VAL_BATCH_SIZE)
     val_dataset = val_dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
