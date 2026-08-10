@@ -24,20 +24,6 @@ PIECE_MAP = {
     'p': 6, 'b': 7, 'n': 8, 'r': 9, 'q': 10, 'k': 11
 }
 
-class NNUEExportCallback(keras.callbacks.Callback):
-    def __init__(self, export_fn, file_path="model_epoch_{epoch}.nnue"):
-        super().__init__()
-        self.export_fn = export_fn
-        self.file_path = file_path
-
-    def on_epoch_end(self, epoch, logs=None):
-        # Formats the filename with the current epoch number (1-indexed)
-        current_path = self.file_path.format(epoch=epoch + 1)
-        print(f"\n[Callback] Epoch {epoch + 1} complete. Auto-exporting binary...")
-        
-        # Calls your exact export_dense_nnue_for_rust function safely
-        self.export_fn(self.model, file_path=current_path)
-
 # --- 1. FEN TO NNUE ARCHITECTURE PARSER ---
 def parse_fen_to_features(fen_string):
     """
@@ -267,14 +253,13 @@ def train_nnue_on_fens():
     )
 
     # Pass the callback into your fit runner
-    export_cb = NNUEExportCallback(export_dense_nnue_for_rust)
     model.fit(
         train_dataset, 
         steps_per_epoch=15000, 
-        epochs=40, 
+        epochs=30, 
         validation_data=val_dataset,
         validation_steps=VAL_SAMPLE_SIZE // VAL_BATCH_SIZE,
-        callbacks=[checkpoint_cb, export_cb])
+        callbacks=[checkpoint_cb])
     
     return model
 
@@ -283,51 +268,41 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
         print("--- Commencing Weight Quantization & Serialization for Rust ---")
         
         # 1. Accumulator Layer (49152 -> 256)
+        # (i16) -> Scale up by 128 (2^7)
         acc_layer = model.get_layer("accumulator_layer")
         w1, b1 = acc_layer.get_weights()
-        
-        # Scale by 128.0. Since activations are capped at 1.0, 
         w1_quant = np.ascontiguousarray(np.round(w1 * 128.0)).astype(np.int16)
         b1_quant = np.round(b1 * 128.0).astype(np.int16)
         f.write(w1_quant.tobytes())
         f.write(b1_quant.tobytes())
         print(f"-> Accumulator Layer serialized. Shape: {w1.shape} (i16)")
 
-        # 2. Hidden Layer 2 (512 -> 64) - Dual Accumlator
-        # [Active Player - 256 / Passive Player - 256] Inputs
+        # 2. Hidden Layer 2 (512 -> 64)
+        # (i8 weights / i32 bias) -> Scale up by 32 (2^5)
         layer2 = model.get_layer("hidden_layer_2") 
         w2, b2 = layer2.get_weights()
-        
-        # Bias scale = Accumulator weight scale (128) * Hidden 2 weight scale (32) = 4096
         w2_quant = np.ascontiguousarray(np.clip(np.round(w2.T * 32.0), -128, 127).astype(np.int8))
-        b2_quant = np.round(b2 * 4096.0).astype(np.int32)
-        
+        b2_quant = np.round(b2 * 32.0).astype(np.int32) 
         f.write(w2_quant.tobytes())
         f.write(b2_quant.tobytes())
         print(f"-> Hidden Layer 2 serialized. Shape: {w2.shape} (i8 / i32)")
 
         # 3. Hidden Layer 3 (64 -> 32)
-        # Shift >> 7 / Div 128 
+        # (i8 weights / i32 bias) -> Scale up by 32 (2^5)
         layer3 = model.get_layer("hidden_layer_3")
         w3, b3 = layer3.get_weights()
-        
-        # Bias scale = Layer 2 output scale (32) * Hidden 3 weight scale (32) = 1024
         w3_quant = np.ascontiguousarray(np.clip(np.round(w3.T * 32.0), -128, 127).astype(np.int8))
-        b3_quant = np.round(b3 * 1024.0).astype(np.int32)
-        
+        b3_quant = np.round(b3 * 32.0).astype(np.int32)
         f.write(w3_quant.tobytes())
         f.write(b3_quant.tobytes())
         print(f"-> Hidden Layer 3 serialized. Shape: {w3.shape} (i8 / i32)")
 
         # 4. Output Layer (32 -> 1)
-        # Shift >> 5 / Div 32 
+        # (i16) -> Scale up by 128 (2^7)
         output_layer = model.get_layer("chess_eval")
         w4, b4 = output_layer.get_weights()
-        
-        # (Scale x 127) + Bias(4064)
-        w4_quant = np.ascontiguousarray(np.clip(np.round(w4.T * 127.0), -128, 127).astype(np.int8))
-        b4_quant = np.round(b4 * 4064.0).astype(np.int32)
-        
+        w4_quant = np.ascontiguousarray(np.clip(np.round(w4.T * 128.0), -128, 127).astype(np.int8))
+        b4_quant = np.round(b4 * 128.0).astype(np.int32)
         f.write(w4_quant.tobytes())
         f.write(b4_quant.tobytes())
         print(f"-> Output Layer serialized. Shape: {w4.shape} (i8 / i32)")
@@ -337,3 +312,5 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
 if __name__ == "__main__":
     # Load the streaming dataset directly from Hugging Face
     trained_model = train_nnue_on_fens()
+
+    export_dense_nnue_for_rust(trained_model, BIN_SAVE_PATH)

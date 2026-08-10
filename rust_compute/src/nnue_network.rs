@@ -10,15 +10,15 @@ pub struct NnueNetwork {
     pub l1_biases: [i16; 256],
 
     // Layer 2: Hidden 2 (512 inputs -> 64 outputs)
-    pub l2_weights: [[i8; 512]; 64], // Transposed: row per output neuron
+    pub l2_weights: [[i8; 512]; 64],
     pub l2_biases: [i32; 64],
 
     // Layer 3: Hidden 3 (64 inputs -> 32 outputs)
-    pub l3_weights: [[i8; 64]; 32],  // Transposed: row per output neuron
+    pub l3_weights: [[i8; 64]; 32],
     pub l3_biases: [i32; 32],
 
     // Layer 4: Output Layer (32 inputs -> 1 output)
-    pub output_weights: [[i8; 32]; 1], // Transposed: row per output neuron
+    pub output_weights: [[i8; 32]; 1],
     pub output_bias: [i32; 1]
 }
 
@@ -50,15 +50,15 @@ impl NnueNetwork {
                 reader.read_exact(byte_slice)
             };
 
-            // 1. Layer 1
+            // 1. Accumlator Layer
             read_field(&mut network_box.l1_weights as *mut _ as *mut u8, 49152 * 256, 2)?;
             read_field(&mut network_box.l1_biases as *mut _ as *mut u8, 256, 2)?;
 
-            // 2. Layer 2
+            // 2. Hidden Layer 2
             read_field(&mut network_box.l2_weights as *mut _ as *mut u8, 64 * 512, 1)?;
             read_field(&mut network_box.l2_biases as *mut _ as *mut u8, 64, 4)?;
 
-            // 3. Layer 3
+            // 3. Hidden Layer 3
             read_field(&mut network_box.l3_weights as *mut _ as *mut u8, 32 * 64, 1)?;
             read_field(&mut network_box.l3_biases as *mut _ as *mut u8, 32, 4)?;
 
