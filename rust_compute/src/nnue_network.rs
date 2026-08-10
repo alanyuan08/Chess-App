@@ -63,7 +63,7 @@ impl NnueNetwork {
             read_field(&mut network_box.l3_biases as *mut _ as *mut u8, 32, 4)?;
 
             // 4. Output Layer
-            read_field(&mut network_box.output_weights as *mut _ as *mut u8, 1 * 32, 1)?;
+            read_field(&mut network_box.output_weights as *mut _ as *mut u8, 32, 1)?;
             read_field(&mut network_box.output_bias as *mut _ as *mut u8, 1, 4)?;
         }
 

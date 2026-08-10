@@ -4,6 +4,7 @@ import keras
 from tensorflow.keras import layers, Model
 from datasets import load_dataset
 import math
+import chess
 
 # --- CONSTANTS ---
 INPUT_FEATURES = 64 * 64 * 12  # 49,152
@@ -101,25 +102,44 @@ def dataset_generator(get_dataset_fn):
             mate = row.get("mate")
             
             try:  
+                # 1. CRITICAL STEP: Filter for Quiescent Data (Tactical Silence)
+                board = chess.Board(fen)
+                
+                # Rule A: Skip if a forced tactical checkmate sequence is imminent
+                if mate is not None and not math.isnan(mate):
+                    continue
+
+                # Rule B: Skip if the side-to-move is currently under an active check
+                if board.is_check():
+                    continue
+
+                # Rule C: Skip if there are immediate tactical, forcing, or promoting legal options
+                # This ensures the network learns static values, not temporary tactical spikes
+                is_tactical = False
+                for move in board.legal_moves:
+                    # Check for regular captures and en passant captures
+                    if board.is_capture(move):
+                        is_tactical = True
+                        break
+                    
+                    # Check for pawn promotions (e.g., promoting to a Queen)
+                    if move.promotion is not None:
+                        is_tactical = True
+                        break
+
+                if is_tactical:
+                    continue
+
                 # 1. Extract Active Turn
                 fen_tokens = fen.split()
                 is_black_turn = (fen_tokens[1] == 'b')
                 
                 # 2. Assign absolute White-relative score
                 cp_val = float(raw_score) if (raw_score is not None and not math.isnan(raw_score)) else None
-                mate_val = int(mate) if (mate is not None and not math.isnan(mate)) else None
                 
                 # 4. Assign objective, White-relative baseline evaluation scores
                 if cp_val is not None:
                     score_target = cp_val
-                elif mate_val is not None and mate_val != 0:
-                    # Treat all forced mates as a heavy material crushing advantage
-                    if mate_val > 0:
-                        score_target = 25000.0  # White forces mate
-                    else:
-                        score_target = -25000.0 # Black forces mate
-                else:
-                    continue
 
                 # Clip the objective white-relative score first
                 if score_target > 1500.0:  
@@ -260,7 +280,7 @@ def train_nnue_on_fens():
     model.fit(
         train_dataset, 
         steps_per_epoch=15000, 
-        epochs=30, 
+        epochs=10, 
         validation_data=val_dataset,
         validation_steps=VAL_SAMPLE_SIZE // VAL_BATCH_SIZE,
         callbacks=[checkpoint_cb, lr_scheduler_cb])
