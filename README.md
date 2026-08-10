@@ -32,7 +32,7 @@ The engine has been unofficially benchmarked and validated against 3000 Elo bots
 
 ## 3. Neural Network Evaluation
 
-- **NNUE Architecture:** The engine features a customized **HalfPKA** perspective neural network utilizing a hybrid quantization layout. The architectural data pathways progress as follows:
+- **NNUE Architecture:** The engine features a customized **Dual-Perspective HalfKA** perspective neural network utilizing a hybrid quantization layout. The architectural data pathways progress as follows:
   
   $$\text{Inputs (49,152)} \rightarrow \text{Accumulator (256)} \rightarrow \text{Multiplexed Perspective (512)} \rightarrow \text{Hidden 2 (64)} \rightarrow \text{Hidden 3 (32)} \rightarrow \text{Output (1)}$$
 

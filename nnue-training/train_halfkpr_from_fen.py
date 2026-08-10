@@ -151,9 +151,12 @@ def dataset_generator(get_dataset_fn):
                 if is_black_turn:
                     score_target = -score_target
 
-                # 6. Final linear scaling factor (1.0 = 410 centipawns)
-                score = score_target / 100.0
-                
+                # 6. Convert to Pawns and Apply Sigmoid Transformation
+                # This naturally handles high scores asymptotically without a hard 1000 CP cap.
+                # Alpha=0.6 maps a +1.0 pawn advantage to ~65% win probability.
+                pawn_units = score_target / 100.0
+                alpha = 0.6
+                win_probability = 1.0 / (1.0 + math.exp(-alpha * pawn_units))
                 w_feats, b_feats = parse_fen_to_features(fen)
                 
                 w_feats_flat = np.array(w_feats, dtype=np.float32).flatten()
@@ -165,7 +168,7 @@ def dataset_generator(get_dataset_fn):
                         "black_features": b_feats_flat,
                         "side_to_move": np.array([is_black_turn], dtype=bool)
                     },
-                    np.array([score], dtype=np.float32).flatten()
+                    np.array([win_probability], dtype=np.float32).flatten()
                 )
                 
             except (ValueError, TypeError, IndexError):
@@ -213,7 +216,7 @@ def train_nnue_on_fens():
     
     model.compile(
         optimizer=keras.optimizers.Adam(learning_rate=0.005),
-        loss="mean_squared_error",
+        loss=tf.keras.losses.BinaryCrossentropy(from_logits=False), 
         metrics=["mae"]
     )
 

@@ -21,7 +21,18 @@ impl BoardAccumulators {
             black: Accumulator { vals: [0i16; 256] },
         }
     }
-    
+
+    #[inline(always)]
+    fn raw_logit_to_centipawns_i32(self, final_normalized: i32) -> i32 {
+        let alpha: f32 = 0.6;
+        
+        // 1. Calculate the raw float score in centipawns
+        let score_f32 = (final_normalized as f32 / alpha) * 100.0;
+        
+        // 2. Round to the nearest mathematical integer and cast to i32
+        score_f32.round() as i32
+    }
+        
     /// Computes the forward evaluation pass using the current accumulator states.
     /// Returns the final centipawn assessment.
     pub fn evaluate(
@@ -99,8 +110,7 @@ impl BoardAccumulators {
         let final_normalized = final_sum >> 7;
 
         // Convert the normalized integer score directly into engine centipawns.
-        // (Matches Python's target = score / 100.0 scaling factor perfectly)
-        final_normalized * 100
+        self.raw_logit_to_centipawns_i32(final_normalized)
     }
 
     /// Re-reads the entire board layout from scratch to perform a full baseline refresh
