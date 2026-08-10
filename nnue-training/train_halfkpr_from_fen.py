@@ -24,6 +24,20 @@ PIECE_MAP = {
     'p': 6, 'b': 7, 'n': 8, 'r': 9, 'q': 10, 'k': 11
 }
 
+class NNUEExportCallback(keras.callbacks.Callback):
+    def __init__(self, export_fn, file_path="model_epoch_{epoch}.nnue"):
+        super().__init__()
+        self.export_fn = export_fn
+        self.file_path = file_path
+
+    def on_epoch_end(self, epoch, logs=None):
+        # Formats the filename with the current epoch number (1-indexed)
+        current_path = self.file_path.format(epoch=epoch + 1)
+        print(f"\n[Callback] Epoch {epoch + 1} complete. Auto-exporting binary...")
+        
+        # Calls your exact export_dense_nnue_for_rust function safely
+        self.export_fn(self.model, file_path=current_path)
+
 # --- 1. FEN TO NNUE ARCHITECTURE PARSER ---
 def parse_fen_to_features(fen_string):
     """
@@ -121,14 +135,15 @@ def dataset_generator(get_dataset_fn):
                 else:
                     continue
 
-                if is_black_turn:
-                    score_target = -score_target
-
-                # 5. Guard against gradient explosions by clipping values to a 15-pawn window
+                # Clip the objective white-relative score first
                 if score_target > 1500.0:  
                     score_target = 1500.0
                 elif score_target < -1500.0: 
                     score_target = -1500.0
+
+                # Then invert it for the active side to move
+                if is_black_turn:
+                    score_target = -score_target
 
                 # 6. Final linear scaling factor (1.0 = 410 centipawns)
                 score = score_target / 410.0 
@@ -190,9 +205,10 @@ def train_nnue_on_fens():
         inputs=[white_input, black_input, stm_input],
         outputs=output)
     
+    huber_loss = keras.losses.Huber(delta=0.25)
     model.compile(
         optimizer=keras.optimizers.Adam(learning_rate=0.001),
-        loss="huber",
+        loss=huber_loss,
         metrics=["mae"]
     )
 
@@ -251,13 +267,14 @@ def train_nnue_on_fens():
     )
 
     # Pass the callback into your fit runner
+    export_cb = NNUEExportCallback(export_dense_nnue_for_rust)
     model.fit(
         train_dataset, 
         steps_per_epoch=15000, 
-        epochs=30, 
+        epochs=40, 
         validation_data=val_dataset,
         validation_steps=VAL_SAMPLE_SIZE // VAL_BATCH_SIZE,
-        callbacks=[checkpoint_cb])
+        callbacks=[checkpoint_cb, export_cb])
     
     return model
 
@@ -270,8 +287,10 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
         w1, b1 = acc_layer.get_weights()
         
         # Scale by 128.0. Since activations are capped at 1.0, 
-        f.write(np.round(w1.T * 128.0).astype(np.int16).tobytes())
-        f.write(np.round(b1 * 128.0).astype(np.int16).tobytes())
+        w1_quant = np.ascontiguousarray(np.round(w1 * 128.0)).astype(np.int16)
+        b1_quant = np.round(b1 * 128.0).astype(np.int16)
+        f.write(w1_quant.tobytes())
+        f.write(b1_quant.tobytes())
         print(f"-> Accumulator Layer serialized. Shape: {w1.shape} (i16)")
 
         # 2. Hidden Layer 2 (512 -> 64) - Dual Accumlator
@@ -280,7 +299,7 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
         w2, b2 = layer2.get_weights()
         
         # Bias scale = Accumulator weight scale (128) * Hidden 2 weight scale (32) = 4096
-        w2_quant = np.clip(np.round(w2.T * 32.0), -128, 127).astype(np.int8)
+        w2_quant = np.ascontiguousarray(np.clip(np.round(w2.T * 32.0), -128, 127).astype(np.int8))
         b2_quant = np.round(b2 * 4096.0).astype(np.int32)
         
         f.write(w2_quant.tobytes())
@@ -293,7 +312,7 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
         w3, b3 = layer3.get_weights()
         
         # Bias scale = Layer 2 output scale (32) * Hidden 3 weight scale (32) = 1024
-        w3_quant = np.clip(np.round(w3.T * 32.0), -128, 127).astype(np.int8)
+        w3_quant = np.ascontiguousarray(np.clip(np.round(w3.T * 32.0), -128, 127).astype(np.int8))
         b3_quant = np.round(b3 * 1024.0).astype(np.int32)
         
         f.write(w3_quant.tobytes())
@@ -306,7 +325,7 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
         w4, b4 = output_layer.get_weights()
         
         # (Scale x 127) + Bias(4064)
-        w4_quant = np.clip(np.round(w4.T * 127.0), -128, 127).astype(np.int8)
+        w4_quant = np.ascontiguousarray(np.clip(np.round(w4.T * 127.0), -128, 127).astype(np.int8))
         b4_quant = np.round(b4 * 4064.0).astype(np.int32)
         
         f.write(w4_quant.tobytes())
@@ -318,5 +337,3 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
 if __name__ == "__main__":
     # Load the streaming dataset directly from Hugging Face
     trained_model = train_nnue_on_fens()
-
-    export_dense_nnue_for_rust(trained_model, BIN_SAVE_PATH)

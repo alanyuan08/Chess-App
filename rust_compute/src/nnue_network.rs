@@ -27,21 +27,7 @@ impl NnueNetwork {
         let file = File::open(path)?;
         let mut reader = BufReader::new(file);
 
-        // --- PERFECT PACKED BYTE CALCULATION ---
-        // We calculate the exact raw bytes written by Python, completely bypassing 
-        // any padding added by the Rust compiler at the trailing end of the struct.
-        let packed_data_size = 
-            (12582912 * 2) + // l1_weights (i16)
-            (256 * 2)      + // l1_biases  (i16)
-            (64 * 512) + // l2_weights (i8)
-            (64 * 4)       + // l2_biases  (i32)
-            (32 * 64)  + // l3_weights (i8)
-            (32 * 4)       + // l3_biases  (i32)
-            (1 * 32)   + // output_weights (i8)
-            (4);         // output_bias (i32)
-            // Total = Exactly 25,201,572 bytes
-
-        // Allocate a zeroed 25MB structure straight into the OS heap memory registry
+        // Safe heap allocation to avoid stack overflows
         let mut network_box = unsafe {
             let layout = std::alloc::Layout::new::<Self>();
             let ptr = std::alloc::alloc_zeroed(layout) as *mut Self;
@@ -54,16 +40,33 @@ impl NnueNetwork {
             Box::from_raw(ptr)
         };
 
-        // Map ONLY the exact packed slice footprint instead of `std::mem::size_of::<Self>()`
-        // This stops the file stream from requesting the 28 non-existent padding bytes.
-        let data_slice = unsafe {
-            std::slice::from_raw_parts_mut(
-                &mut *network_box as *mut Self as *mut u8,
-                packed_data_size,
-            )
-        };
+        // --- SAFE SEQUENTIAL FIELD READING ---
+        // We get raw mutable byte slices for EACH field individually.
+        // This naturally skips any hidden padding bytes the compiler inserts!
+        unsafe {
+            // Helper closure to map any typed slice directly to a mutable u8 byte slice
+            let mut read_field = |ptr: *mut u8, elements_count: usize, element_size: usize| -> std::io::Result<()> {
+                let byte_slice = std::slice::from_raw_parts_mut(ptr, elements_count * element_size);
+                reader.read_exact(byte_slice)
+            };
 
-        reader.read_exact(data_slice)?;
+            // 1. Layer 1
+            read_field(&mut network_box.l1_weights as *mut _ as *mut u8, 49152 * 256, 2)?;
+            read_field(&mut network_box.l1_biases as *mut _ as *mut u8, 256, 2)?;
+
+            // 2. Layer 2
+            read_field(&mut network_box.l2_weights as *mut _ as *mut u8, 64 * 512, 1)?;
+            read_field(&mut network_box.l2_biases as *mut _ as *mut u8, 64, 4)?;
+
+            // 3. Layer 3
+            read_field(&mut network_box.l3_weights as *mut _ as *mut u8, 32 * 64, 1)?;
+            read_field(&mut network_box.l3_biases as *mut _ as *mut u8, 32, 4)?;
+
+            // 4. Output Layer
+            read_field(&mut network_box.output_weights as *mut _ as *mut u8, 1 * 32, 1)?;
+            read_field(&mut network_box.output_bias as *mut _ as *mut u8, 1, 4)?;
+        }
+
         Ok(network_box)
     }
 }
