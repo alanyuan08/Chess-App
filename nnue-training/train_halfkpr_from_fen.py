@@ -2,6 +2,7 @@ import numpy as np
 import tensorflow as tf
 import keras
 from tensorflow.keras import layers, Model
+from huggingface_hub import HfApi
 from datasets import load_dataset
 import math
 import chess
@@ -141,15 +142,15 @@ def dataset_generator(get_dataset_fn):
                 else:
                     continue 
 
-                # 4. Clip Score
+                # 4. Invert for Side to move
+                if is_black_turn:
+                    score_target = -score_target
+
+                # 5. Clip Score
                 if score_target > 1000.0:  
                     score_target = 1000.0
                 elif score_target < -1000.0: 
                     score_target = -1000.0
-
-                # 5. Invert for Side to move
-                if is_black_turn:
-                    score_target = -score_target
 
                 # 6. Convert to Pawns and Apply Sigmoid Transformation
                 # This naturally handles high scores asymptotically without a hard 1000 CP cap.
@@ -173,6 +174,26 @@ def dataset_generator(get_dataset_fn):
                 
             except (ValueError, TypeError, IndexError):
                 continue
+
+
+def get_lichess_shards():
+    """
+    Dynamically fetches the underlying parquet filenames from the Hugging Face hub repository.
+    Allows us to cleanly isolate validation files from training files without downloading them.
+    """
+    api = HfApi()
+    # Fetch all data files inside the dataset repository
+    files = api.list_repo_files(repo_id="Lichess/chess-position-evaluations", repo_type="dataset")
+    
+    # Filter for the core parquet data shards
+    parquet_files = sorted([f for f in files if f.endswith(".parquet")])
+    
+    # Reserve the final 2 files exclusively for validation testing (~10 million rows)
+    # The remaining files are allocated strictly for training
+    train_files = parquet_files[:-2]
+    val_files = parquet_files[-2:]
+    
+    return train_files, val_files
 
 # --- 4. MODEL DESIGN & TRAINING RUNNER ---
 def train_nnue_on_fens():
@@ -212,47 +233,68 @@ def train_nnue_on_fens():
 
     model = Model(
         inputs=[white_input, black_input, stm_input],
-        outputs=output)
+        outputs=output
+    )
     
+    def chess_probability_mae(y_true, y_pred):
+        # Pass the raw network logits through a sigmoid to get a 0-1 probability
+        pred_probs = tf.nn.sigmoid(y_pred)
+        # Now compare apples to apples (0-1 prediction vs 0-1 target)
+        return tf.reduce_mean(tf.abs(y_true - pred_probs))
+
     model.compile(
-        optimizer=keras.optimizers.Adam(learning_rate=0.005),
-        loss=tf.keras.losses.BinaryCrossentropy(from_logits=False), 
-        metrics=["mae"]
+        optimizer=keras.optimizers.Adam(learning_rate=0.001),
+        loss=tf.keras.losses.BinaryCrossentropy(from_logits=True), 
+        metrics=[chess_probability_mae]
     )
 
+    # Retrieve the file listings before launching our data loops
+    TRAIN_SHARDS, VAL_SHARDS = get_lichess_shards()
+
     def load_train_stream():
-        dset = load_dataset(DATASET_NAME, split="train", streaming=True)
-        return dset.shuffle(seed=42, buffer_size=10000)
+        # Only streams from our dedicated training data shard files
+        return load_dataset(
+            "Lichess/chess-position-evaluations",
+            data_files={"train": TRAIN_SHARDS},
+            split="train",
+            streaming=True
+        ).shuffle(seed=42, buffer_size=20000)
 
     def load_val_stream():
-        dset = load_dataset(DATASET_NAME, split="train", streaming=True)
-        return dset.skip(60_000_000).shuffle(seed=999, buffer_size=10000)
+        # Only streams from our dedicated validation data shard files
+        # Bypasses percentage strings and sequential skipping freezes instantly!
+        return load_dataset(
+            "Lichess/chess-position-evaluations",
+            data_files={"train": VAL_SHARDS}, # Must specify 'train' key mapping to match HF structure
+            split="train",
+            streaming=True
+        ).shuffle(seed=999, buffer_size=10000)
 
     # --- Train Dataset ---
     train_dataset = tf.data.Dataset.from_generator(
         lambda: dataset_generator(load_train_stream),
         output_signature=(
             {
-                "white_features": tf.TensorSpec(shape=(None,), dtype=tf.float32),
-                "black_features": tf.TensorSpec(shape=(None,), dtype=tf.float32),
+                "white_features": tf.TensorSpec(shape=(INPUT_FEATURES,), dtype=tf.float32),
+                "black_features": tf.TensorSpec(shape=(INPUT_FEATURES,), dtype=tf.float32),
                 "side_to_move": tf.TensorSpec(shape=(1,), dtype=tf.bool),
             },
             tf.TensorSpec(shape=(1,), dtype=tf.float32)
         )
-    ).repeat()
+    )
 
     # --- Validation Dataset ---
     val_dataset = tf.data.Dataset.from_generator(
         lambda: dataset_generator(load_val_stream),
         output_signature=(
             {
-                "white_features": tf.TensorSpec(shape=(None,), dtype=tf.float32),
-                "black_features": tf.TensorSpec(shape=(None,), dtype=tf.float32),
+                "white_features": tf.TensorSpec(shape=(INPUT_FEATURES,), dtype=tf.float32),
+                "black_features": tf.TensorSpec(shape=(INPUT_FEATURES,), dtype=tf.float32),
                 "side_to_move": tf.TensorSpec(shape=(1,), dtype=tf.bool),
             },
             tf.TensorSpec(shape=(1,), dtype=tf.float32)
         )
-    ).repeat()
+    )
 
     val_dataset = val_dataset.batch(VAL_BATCH_SIZE)
     val_dataset = val_dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
@@ -282,7 +324,7 @@ def train_nnue_on_fens():
     model.fit(
         train_dataset, 
         steps_per_epoch=15000, 
-        epochs=10, 
+        epochs=1, 
         validation_data=val_dataset,
         validation_steps=VAL_SAMPLE_SIZE // VAL_BATCH_SIZE,
         callbacks=[checkpoint_cb, lr_scheduler_cb])
