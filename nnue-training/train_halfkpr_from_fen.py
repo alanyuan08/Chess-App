@@ -174,14 +174,14 @@ def train_nnue_on_fens():
     # 5. Concat into the final accumulator vector (Shape: Batch, 512)
     first_half = stm_float * b_act + (1.0 - stm_float) * w_act
     second_half = stm_float * w_act + (1.0 - stm_float) * b_act
-    merged = layers.Concatenate(name="perspective_multiplex")([first_half, second_half])       # Shape: (Batch, 512)
+    merged = layers.Concatenate(name="perspective_multiplex")([first_half, second_half]) 
     
     # 6. Hidden Layer 2 with ReLU1 activation
-    x = layers.Dense(64, activation=None, name="hidden_layer_2")(merged)     # Shape: (Batch, 64)
+    x = layers.Dense(64, activation=None, name="hidden_layer_2")(merged)
     x = keras.ops.clip(x, 0.0, SCALE_MAX)
 
     # 7. Hidden Layer 3 with ReLU1 activation
-    x = layers.Dense(32, activation=None, name="hidden_layer_3")(x)          # Shape: (Batch, 32)
+    x = layers.Dense(32, activation=None, name="hidden_layer_3")(x)
     x = keras.ops.clip(x, 0.0, SCALE_MAX)
 
     # 8. Output Layer 
@@ -199,16 +199,12 @@ def train_nnue_on_fens():
     )
 
     def load_train_stream():
-        # 1. Load the main training stream
         dset = load_dataset(DATASET_NAME, split="train", streaming=True)
-        # Shuffle the training stream independently
-        return dset.shuffle(seed=42, buffer_size=1000)
+        return dset.shuffle(seed=42, buffer_size=10000)
 
     def load_val_stream():
         dset = load_dataset(DATASET_NAME, split="train", streaming=True)
-        
-        # Move 10 million rows deep to build a bulletproof wall against training data leakage
-        return dset.shuffle(seed=999, buffer_size=1000)
+        return dset.skip(60_000_000).shuffle(seed=999, buffer_size=10000)
 
     # --- Train Dataset ---
     train_dataset = tf.data.Dataset.from_generator(
@@ -252,6 +248,14 @@ def train_nnue_on_fens():
         verbose=1
     )
 
+    lr_scheduler_cb = tf.keras.callbacks.ReduceLROnPlateau(
+        monitor='val_loss',
+        factor=0.5,
+        patience=2,
+        min_lr=1e-5,
+        verbose=1
+    )
+
     # Pass the callback into your fit runner
     model.fit(
         train_dataset, 
@@ -259,7 +263,7 @@ def train_nnue_on_fens():
         epochs=30, 
         validation_data=val_dataset,
         validation_steps=VAL_SAMPLE_SIZE // VAL_BATCH_SIZE,
-        callbacks=[checkpoint_cb])
+        callbacks=[checkpoint_cb, lr_scheduler_cb])
     
     return model
 
