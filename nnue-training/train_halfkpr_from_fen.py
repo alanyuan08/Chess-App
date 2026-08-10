@@ -3,9 +3,6 @@ import tensorflow as tf
 import keras
 from tensorflow.keras import layers, Model
 from huggingface_hub import HfApi
-from datasets import load_dataset
-import math
-import chess
 
 # --- CONSTANTS ---
 INPUT_FEATURES = 64 * 64 * 12  # 49,152
@@ -19,6 +16,8 @@ BIN_SAVE_PATH = "nnue_weights.bin"
 VAL_SAMPLE_SIZE = 15360
 VAL_BATCH_SIZE = 256
 VAL_START_ROW = 10000 
+
+NUM_THREADS = 8
 
 # Map FEN character to an integer type 0-11
 PIECE_MAP = {
@@ -86,95 +85,137 @@ def parse_fen_to_features(fen_string):
         
     return white_features, black_features
 
-# --- 2. PIPELINE GENERATOR FOR TENSORFLOW ---
-def dataset_generator(get_dataset_fn):
+def process_shard_worker(stream_fn, data_queue, stop_event, dataset_name, shards_list):
     """
-    Streams and processes rows from the Lichess Hugging Face dataset.
-    Extracts FEN tokens, normalizes scores relative to the side to move, 
-    and yields structured mini-batches for TensorFlow.
+    An isolated OS process that reads from the stream, handles python-chess overhead,
+    and pushes fully processed numpy arrays into a shared queue.
     """
-    while True:
-        # Simply load the stream once
-        hf_dataset = get_dataset_fn()
+    import queue
+    import math
+    import chess
+    import numpy as np
 
-        for row in hf_dataset:
-            fen = row.get("fen")
-            raw_score = row.get("cp")
-            mate = row.get("mate")
+    # Call our global function with its picklable arguments inside the spawned process context
+    hf_dataset = stream_fn(dataset_name, shards_list)
+    
+    for row in hf_dataset:
+        if stop_event.is_set():
+            break
             
-            try:  
-                # 1. Filter for Quiescent Data (Tactical Silence)
-                board = chess.Board(fen)
-                
-                # Rule A: Skip if a forced tactical checkmate sequence is imminent
-                if mate is not None and not math.isnan(mate):
-                    continue
+        fen = row.get("fen")
+        raw_score = row.get("cp")
+        mate = row.get("mate")
+        
+        try:  
+            board = chess.Board(fen)
+            if mate is not None and not math.isnan(mate): continue
+            if board.is_check(): continue
 
-                # Rule B: Skip if the side-to-move is currently under an active check
-                if board.is_check():
-                    continue
+            is_tactical = False
+            for move in board.legal_moves:
+                if board.is_capture(move) or move.promotion is not None:
+                    is_tactical = True
+                    break
+            if is_tactical: continue
 
-                # Rule C: Skip if there are immediate tactical, forcing, or promoting legal options
-                # This ensures the network learns static values, not temporary tactical spikes
-                is_tactical = False
-                for move in board.legal_moves:
-                    # Check for regular captures and en passant captures
-                    if board.is_capture(move):
-                        is_tactical = True
-                        break
+            fen_tokens = fen.split()
+            is_black_turn = (fen_tokens[1] == 'b') # Note: Fixed hidden typo index bracket!
+            
+            if raw_score is not None and not math.isnan(float(raw_score)):
+                score_target = float(raw_score) 
+            else:
+                continue 
+
+            if is_black_turn:
+                score_target = -score_target
+
+            score_target = max(-1000.0, min(1000.0, score_target))
+            pawn_units = score_target / 100.0
+            win_probability = 1.0 / (1.0 + math.exp(-0.6 * pawn_units))
+            
+            w_feats, b_feats = parse_fen_to_features(fen)
+            w_feats_flat = np.array(w_feats, dtype=np.float32).flatten()
+            b_feats_flat = np.array(b_feats, dtype=np.float32).flatten()
+            
+            payload = (
+                {
+                    "white_features": w_feats_flat, 
+                    "black_features": b_feats_flat,
+                    "side_to_move": np.array([is_black_turn], dtype=bool)
+                },
+                np.array([win_probability], dtype=np.float32).flatten()
+            )
+            
+            while not stop_event.is_set():
+                try:
+                    data_queue.put(payload, timeout=0.1)
+                    break
+                except queue.Full:
+                    continue
                     
-                    # Check for pawn promotions (e.g., promoting to a Queen)
-                    if move.promotion is not None:
-                        is_tactical = True
-                        break
+        except (ValueError, TypeError, IndexError):
+            continue
 
-                if is_tactical:
-                    continue
+# Load Training / Val Data Sets
+def load_train_stream_global(dataset_name, train_shards):
+    """Global un-nested loader for pickling across worker processes."""
+    from datasets import load_dataset  # Keep imports inside or at top level
+    return load_dataset(
+        dataset_name,
+        data_files={"train": train_shards},
+        split="train",
+        streaming=True
+    ).shuffle(seed=42, buffer_size=20000)
 
-                # 2. Extract Active Turn
-                fen_tokens = fen.split()
-                is_black_turn = (fen_tokens[1] == 'b')
-                score_target = 0.0
-                
-                # 3. Drop Positions with Known Mate 
-                if raw_score is not None and not math.isnan(float(raw_score)):
-                    score_target = float(raw_score) 
-                else:
-                    continue 
+def load_val_stream_global(dataset_name, val_shards):
+    """Global un-nested loader for pickling across worker processes."""
+    from datasets import load_dataset
+    return load_dataset(
+        dataset_name,
+        data_files={"train": val_shards}, # Matching HuggingFace's key mapping structure
+        split="train",
+        streaming=True
+    ).shuffle(seed=999, buffer_size=10000)
 
-                # 4. Invert for Side to move
-                if is_black_turn:
-                    score_target = -score_target
+# --- New Safe Generator Thread Hook ---
+def parallel_dataset_generator(stream_fn, dataset_name, shards_list, num_workers=4, queue_size=1000):
+    """
+    Spawns background processes using clean global functions to handle python-chess,
+    yielding clean data structures safely to TensorFlow.
+    """
+    import multiprocessing as mp
+    import queue
 
-                # 5. Clip Score
-                if score_target > 1000.0:  
-                    score_target = 1000.0
-                elif score_target < -1000.0: 
-                    score_target = -1000.0
-
-                # 6. Convert to Pawns and Apply Sigmoid Transformation
-                # This naturally handles high scores asymptotically without a hard 1000 CP cap.
-                # Alpha=0.6 maps a +1.0 pawn advantage to ~65% win probability.
-                pawn_units = score_target / 100.0
-                alpha = 0.6
-                win_probability = 1.0 / (1.0 + math.exp(-alpha * pawn_units))
-                w_feats, b_feats = parse_fen_to_features(fen)
-                
-                w_feats_flat = np.array(w_feats, dtype=np.float32).flatten()
-                b_feats_flat = np.array(b_feats, dtype=np.float32).flatten()
-                
-                yield (
-                    {
-                        "white_features": w_feats_flat, 
-                        "black_features": b_feats_flat,
-                        "side_to_move": np.array([is_black_turn], dtype=bool)
-                    },
-                    np.array([win_probability], dtype=np.float32).flatten()
-                )
-                
-            except (ValueError, TypeError, IndexError):
+    data_queue = mp.Queue(maxsize=queue_size)
+    stop_event = mp.Event()
+    workers = []
+    
+    # Launch truly parallel CPU workers passing global function refs and pickleable lists
+    for _ in range(num_workers):
+        p = mp.Process(
+            target=process_shard_worker, 
+            args=(stream_fn, data_queue, stop_event, dataset_name, shards_list)
+        )
+        p.daemon = True
+        p.start()
+        workers.append(p)
+        
+    try:
+        while True:
+            try:
+                yield data_queue.get(timeout=0.1)
+            except queue.Empty:
+                if all(not p.is_alive() for p in workers) and data_queue.empty():
+                    break
                 continue
-
+    finally:
+        stop_event.set()
+        while not data_queue.empty():
+            try: data_queue.get_nowait()
+            except queue.Empty: break
+        for p in workers:
+            p.join(timeout=1.0)
+            if p.is_alive(): p.terminate()
 
 def get_lichess_shards():
     """
@@ -236,43 +277,24 @@ def train_nnue_on_fens():
         outputs=output
     )
     
-    def chess_probability_mae(y_true, y_pred):
-        # Pass the raw network logits through a sigmoid to get a 0-1 probability
-        pred_probs = tf.nn.sigmoid(y_pred)
-        # Now compare apples to apples (0-1 prediction vs 0-1 target)
-        return tf.reduce_mean(tf.abs(y_true - pred_probs))
-
     model.compile(
         optimizer=keras.optimizers.Adam(learning_rate=0.001),
         loss=tf.keras.losses.BinaryCrossentropy(from_logits=True), 
-        metrics=[chess_probability_mae]
+        metrics=[tf.keras.metrics.MeanAbsoluteError(name="prob_mae", dtype=tf.float32)]
     )
 
     # Retrieve the file listings before launching our data loops
     TRAIN_SHARDS, VAL_SHARDS = get_lichess_shards()
 
-    def load_train_stream():
-        # Only streams from our dedicated training data shard files
-        return load_dataset(
-            DATASET_NAME,
-            data_files={"train": TRAIN_SHARDS},
-            split="train",
-            streaming=True
-        ).shuffle(seed=42, buffer_size=20000)
-
-    def load_val_stream():
-        # Only streams from our dedicated validation data shard files
-        # Bypasses percentage strings and sequential skipping freezes instantly!
-        return load_dataset(
-            DATASET_NAME,
-            data_files={"train": VAL_SHARDS}, # Must specify 'train' key mapping to match HF structure
-            split="train",
-            streaming=True
-        ).shuffle(seed=999, buffer_size=10000)
-
     # --- Train Dataset ---
     train_dataset = tf.data.Dataset.from_generator(
-        lambda: dataset_generator(load_train_stream),
+        lambda: parallel_dataset_generator(
+            stream_fn=load_train_stream_global,
+            dataset_name=DATASET_NAME,
+            shards_list=TRAIN_SHARDS,
+            num_workers=4,
+            queue_size=1000
+        ),
         output_signature=(
             {
                 "white_features": tf.TensorSpec(shape=(INPUT_FEATURES,), dtype=tf.float32),
@@ -285,7 +307,13 @@ def train_nnue_on_fens():
 
     # --- Validation Dataset ---
     val_dataset = tf.data.Dataset.from_generator(
-        lambda: dataset_generator(load_val_stream),
+        lambda: parallel_dataset_generator(
+            stream_fn=load_val_stream_global,
+            dataset_name=DATASET_NAME,
+            shards_list=VAL_SHARDS,
+            num_workers=2,
+            queue_size=500
+        ),
         output_signature=(
             {
                 "white_features": tf.TensorSpec(shape=(INPUT_FEATURES,), dtype=tf.float32),
@@ -296,11 +324,8 @@ def train_nnue_on_fens():
         )
     )
 
-    val_dataset = val_dataset.batch(VAL_BATCH_SIZE)
-    val_dataset = val_dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
-
-    train_dataset = train_dataset.batch(BATCH_SIZE)
-    train_dataset = train_dataset.prefetch(tf.data.AUTOTUNE)
+    train_dataset = train_dataset.batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
+    val_dataset = val_dataset.batch(VAL_BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
 
     print("\n--- Model compilation complete. Commencing Training Step ---")
     checkpoint_path = "best_chess_nnue.keras"
@@ -324,7 +349,7 @@ def train_nnue_on_fens():
     model.fit(
         train_dataset, 
         steps_per_epoch=15000, 
-        epochs=1, 
+        epochs=25, 
         validation_data=val_dataset,
         validation_steps=VAL_SAMPLE_SIZE // VAL_BATCH_SIZE,
         callbacks=[checkpoint_cb, lr_scheduler_cb])
