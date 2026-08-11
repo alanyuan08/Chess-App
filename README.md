@@ -55,7 +55,7 @@
 
 - **Dataset Source:** [Lichess Chess Position Evaluations](https://huggingface.co/datasets/Lichess/chess-position-evaluations) The dataset is filtered for quiet positions (Not in Check, No Captures)
 
-# 4. Playing Level
+## 4. Playing Level
 
 The Chess AI has been tested against ELO 3200+ Chess.com bots. There is a concensus that Chess.com bots are likely overrated by 200 ELO points. 
 
@@ -65,7 +65,7 @@ The Chess AI has been tested against ELO 3200+ Chess.com bots. There is a concen
 
 - **Future Roadmap:** This engine has not been officially ratified by Computer Chess Rating Lists
 
-# 5. Running the App
+## 5. Running the App
 
 Playing as [black|white]
 - /run.sh [black|white]
