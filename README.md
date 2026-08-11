@@ -2,9 +2,9 @@
 
 <img src="img/saved_game/saved_game.png" width="50%">
 
-A hybrid desktop chess application pairing a responsive PySide6 user interface with a high-performance, multithreaded Rust engine core using self-trained NNuE for board evaluation. 
+## Introduction
 
-The engine has been unofficially benchmarked and validated against 3000+ Elo bots on Chess.com.
+Alan Chess AI is an independent Chess Application that utilizes Python PySide6 for Desktop User Interfac, Rust for Adversarial Search and a self-trained NNuE for board evaluation. 
 
 ## 1. Python Presentation & Validation Layer
     
@@ -14,7 +14,7 @@ The engine has been unofficially benchmarked and validated against 3000+ Elo bot
 
 - **Opening Handbook:** Integrates a built-in opening book containing standard opening lines
 
-## 2. Rust Engine Core
+## 2. Rust Compute Engine
 
 - **Bitboard Move Generation:** Maximizes throughput by computing all pseudo-legal move paths across millions of positions per second
 
@@ -51,12 +51,12 @@ The engine has been unofficially benchmarked and validated against 3000+ Elo bot
 
 - **Dataset Source:** [Lichess Chess Position Evaluations](https://huggingface.co/datasets/Lichess/chess-position-evaluations) The dataset is filtered for quiet positions (Not in Check, No Captures)
 
-# Running the App
+# 4. Running the App
 
 Playing as [black|white]
 - /run.sh [black|white]
 
-# Playing Level
+# 5. Playing Level
 
 The Chess AI has been tested against ELO 3000+ chess.com bots. There is controversy that the chess.com bot score is likely inflated 100-150 ELO+.
 
@@ -64,7 +64,7 @@ The Chess AI has been tested against ELO 3000+ chess.com bots. There is controve
 - [DRAW - ELO 3200 Bot](https://www.chess.com/analysis/game/computer/1562860054/analysis)
 - [DRAW - ELO 3200 Bot](https://www.chess.com/analysis/game/computer/1574164820/analysis)
 
-## Contact
+## 6. Contact
 
 Alan Yuan
 
