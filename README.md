@@ -2,27 +2,31 @@
 
 <img src="img/saved_game/saved_game.png" width="50%">
 
-A hybrid desktop chess application pairing a responsive PySide6 user interface with a high-performance, multithreaded Rust engine core capable of evaluating millions of positions per second.
+- **Presentation Layer:** Python PySide6 for drag and drop interface
+  
+- **Compute Engine:** Rust Maturin for Adversarial Search - Negamax with Quiescence Search with advanced pruning techniques, Killer Move Heuristics, Late Move Reduction, Principal Variation Search, and Null-Move Pruning.
 
-The engine has been unofficially benchmarked and validated against 3000 Elo bots on Chess.com.
-
+  The engine processes 10 million nodes per second on Apple M4 Pro (8 Performance Threads) and averages 12+ depth on 20 second search. 
+  
+- **Evaluation:** Self-trained NNUE (Dual-Perspective HalfKA) using Lichess FEN -> Score Positions
+  
 ## 1. Python Presentation & Validation Layer
-    
+
 - **PySide6 UI:** Renders a fluid 2D chessboard and manages real-time player drag-and-drop interactions
 
 - **Move Validation:** Enforces legal moves and coordinates state synchronization with the engine core
 
 - **Opening Handbook:** Integrates a built-in opening book containing standard opening lines
 
-## 2. Rust Engine Core
+## 2. Rust Compute Engine
 
 - **Bitboard Move Generation:** Maximizes throughput by computing all pseudo-legal move paths across millions of positions per second
 
-- **Adversarial Search:** Implements Minimax search enhanced by Alpha-Beta pruning and a Quiescence search to eliminate horizon-effect instability.
+- **Adversarial Search:** Implements Minimax (Negemax) search enhanced by Alpha-Beta pruning and a Quiescence search to eliminate horizon-effect instability.
 
-- **Advanced Pruning:** Uses Killer Move Heuristics and Late Move Reduction to improve the alpha / beta cutoff. The algorithm does not utilize Null-Move Pruning as it is currently using the Timecat NNUE for board evaluation and it is unable to process psuedo-moves
+- **Advanced Pruning:** Uses Killer Move Heuristics, Late Move Reduction and Null-Move Pruning to improve the alpha / beta cutoff. 
 
-- **Deep Evaluation:** Combines Iterative Deepening with Principal Variation Search (PVS) to regularly achieve search depths of 14+ plies. (Average Move is approximately 20 seconds to 1 minutes)
+- **Deep Evaluation:** Combines Iterative Deepening with Principal Variation Search (PVS) to regularly achieve search depths of 14+ plies. (Average Move is approximately 20+ seconds)
 
 - **Transposition Tables:** Caches previously evaluated board states to accelerate search paths and share data across threads. The tables uses the Condon-Thompson Replacement method to increase efficiency of L1 / L2 / L3 caches. 
 
@@ -43,26 +47,30 @@ The engine has been unofficially benchmarked and validated against 3000 Elo bots
     - *Activation:* Clipped/Bounded Linear ReLU ($\text{ReLU1}$) bounded strictly between `0.0` and `1.0`.
   - **Hidden Layer 3:** Matrix transformation mapping $(64, 32)$ quantized to signed 8-bit weights (`i8`) and 32-bit biases (`i32`).
     - *Activation:* Clipped/Bounded Linear ReLU ($\text{ReLU1}$) bounded strictly between `0.0` and `1.0`.
-  - **Output Layer:** Combines $(32, 1)$ outputs down to a single evaluation scalar using 8-bit weights (`i8`) and 32-bit biases (`i32`). Applied sigmoid function based on centipawn values: 1.0 / (1.0 + math.exp(-0.6 * centipawn)).
+  - **Output Layer:** Combines $(32, 1)$ outputs down to a single evaluation scalar using 8-bit weights (`i8`) and 32-bit biases (`i32`).
+    - *Activation:* ($\text{activation=None}$). Outputs raw linear logits.
+  - **Loss & Optimization Level:** Model compiles using ($\text{BinaryCrossentropy(from-logits=True)}$) This automatically applies an internal, numerically stable Sigmoid transformation to the raw output logits during the loss calculation step to match your 0-to-1 training targets.
 
 - **NNUE Training Data:** The evaluation network is trained exclusively on normalized Stockfish evaluations mapped from standard Forsyth-Edwards Notation (FEN) profiles spanning varied positional lines and forced checkmate sequences.
 
-- **Dataset Source:** [Lichess Chess Position Evaluations](https://huggingface.co/datasets/Lichess/chess-position-evaluations) The dataset is filtered for quiet positions to train the NNUE
+- **Dataset Source:** [Lichess Chess Position Evaluations](https://huggingface.co/datasets/Lichess/chess-position-evaluations) The dataset is filtered for quiet positions (Not in Check, No Captures)
 
-# Running the App
+## 4. Playing Level
 
-Playing as [black|white]
-- /run.sh [black|white]
-
-# Playing Level
-
-The Chess AI has been tested against ELO 3000+ chess.com bots. There is controversy that the chess.com bot score is likely inflated 100-150 ELO+.
+The Chess AI has been tested against ELO 3200+ Chess.com bots. There is a concensus that Chess.com bots are likely overrated by 200 ELO points. 
 
 - [WIN - ELO 3200 Bot](https://www.chess.com/analysis/game/computer/1617707258/analysis)
 - [DRAW - ELO 3200 Bot](https://www.chess.com/analysis/game/computer/1562860054/analysis)
 - [DRAW - ELO 3200 Bot](https://www.chess.com/analysis/game/computer/1574164820/analysis)
 
-## Contact
+- **Future Roadmap:** This engine has not been officially ratified by Computer Chess Rating Lists
+
+## 5. Running the App
+
+Playing as [black|white]
+- /run.sh [black|white]
+
+## 6. Contact
 
 Alan Yuan
 
