@@ -12,12 +12,12 @@ SCALE_MAX = 1.0
 DATASET_NAME = "Lichess/chess-position-evaluations"
 BIN_SAVE_PATH = "nnue_weights.bin"
 
-BATCH_SIZE = 16384
-VAL_BATCH_SIZE = 16384
-VAL_SAMPLE_SIZE = 500000 
+# Training / Validation Per Epoch
+BATCH_SIZE = 16384 # 16384 * 244
+VAL_BATCH_SIZE = BATCH_SIZE # 16384 * 30
+SHUFFLE_BUFFER = BATCH_SIZE * 4
 
 NUM_THREADS = 8
-SHUFFLE_BUFFER = 50000
 
 # Map FEN character to an integer type 0-11
 PIECE_MAP = {
@@ -25,7 +25,8 @@ PIECE_MAP = {
     'p': 6, 'b': 7, 'n': 8, 'r': 9, 'q': 10, 'k': 11
 }
 
-
+# 1. Isolated Shard Worker Method used to Process FEN Data into [w_feats] / [b_feats] / Score
+# It also filters out non-quiet positions
 def process_shard_worker(stream_fn, data_queue, stop_event, dataset_name, shards_list):
     """
     An isolated OS process that reads from the stream, handles python-chess overhead,
@@ -247,24 +248,30 @@ def process_shard_worker(stream_fn, data_queue, stop_event, dataset_name, shards
 
 # Load Training / Val Data Sets
 def load_train_stream_global(dataset_name, train_shards):
-    """Global un-nested loader for pickling across worker processes."""
-    from datasets import load_dataset  # Keep imports inside or at top level
-    return load_dataset(
-        dataset_name,
-        data_files={"train": train_shards},
-        split="train",
-        streaming=True
-    ).shuffle(seed=42, buffer_size=4000)
+    return load_lichess_stream(dataset_name, train_shards, True)
 
 def load_val_stream_global(dataset_name, val_shards):
-    """Global un-nested loader for pickling across worker processes."""
+    return load_lichess_stream(dataset_name, val_shards, False)
+
+def load_lichess_stream(dataset_name, shards_list, is_training):
+    """
+    A single, unified loader function used for both Training and Validation data streams.
+    """
     from datasets import load_dataset
-    return load_dataset(
+    # 1. Connect to the specific shards passed into the function
+    dataset = load_dataset(
         dataset_name,
-        data_files={"train": val_shards}, # Matching HuggingFace's key mapping structure
+        data_files={"train": shards_list},
         split="train",
         streaming=True
-    ).shuffle(seed=999, buffer_size=4000)
+    )
+    
+    # 2. Only shuffle if it's the training stream!
+    # Shuffling validation data is a waste of CPU power and RAM.
+    if is_training:
+        dataset = dataset.shuffle(seed=42, buffer_size=BATCH_SIZE * 4)
+        
+    return dataset
 
 # --- New Safe Generator Thread Hook ---
 def parallel_dataset_generator(stream_fn, dataset_name, shards_list, num_workers=4, queue_size=20):
@@ -385,7 +392,7 @@ def train_nnue_on_fens():
         loss=tf.keras.losses.BinaryCrossentropy(from_logits=True), 
     )
 
-    # Retrieve the file listings before launching our data loops
+    # 90 / 10 Split for Training / Validation Shards
     TRAIN_SHARDS, VAL_SHARDS = get_lichess_shards()
 
     # --- Train Dataset ---
@@ -395,7 +402,7 @@ def train_nnue_on_fens():
             dataset_name=DATASET_NAME,
             shards_list=TRAIN_SHARDS,
             num_workers=NUM_THREADS,
-            queue_size=10
+            queue_size=4,
         ),
         output_signature=(
             {
@@ -414,7 +421,7 @@ def train_nnue_on_fens():
             dataset_name=DATASET_NAME,
             shards_list=VAL_SHARDS,
             num_workers=2,
-            queue_size=10
+            queue_size=2,
         ),
         output_signature=(
             {
@@ -426,6 +433,7 @@ def train_nnue_on_fens():
         )
     )
 
+    # Shuffles Filtered Data Sets
     train_dataset = train_dataset.shuffle(buffer_size=SHUFFLE_BUFFER, reshuffle_each_iteration=True)
     train_dataset = train_dataset.batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
     val_dataset = val_dataset.batch(VAL_BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
@@ -448,13 +456,12 @@ def train_nnue_on_fens():
         verbose=1
     )
 
-    # Pass the callback into your fit runner
     model.fit(
         train_dataset, 
-        steps_per_epoch=244,  # Smooth, massive matrix steps
+        steps_per_epoch=244,
         epochs=45, 
         validation_data=val_dataset,
-        validation_steps=30,  # Half a million positions checked in just 30 steps!
+        validation_steps=30,
         callbacks=[checkpoint_cb, lr_scheduler_cb]
     )
     return model
