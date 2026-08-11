@@ -1,13 +1,17 @@
-# Alan Chess AI
+# Alan AI Chess
 
 <img src="img/saved_game/saved_game.png" width="50%">
 
-## Introduction
+- **Presentation Layer:** Python PySide6 for drag and drop interface
+  
+- **Compute Engine:** Rust Maturin for Adversarial Search - Negamax with Quiescence Search with advanced pruning techniques, Killer Move Heuristics, Late Move Reduction, Principal Variation Search, and Null-Move Pruning.
 
-Alan Chess AI is an independent Chess Application that utilizes Python PySide6 for Desktop User Interfac, Rust for Adversarial Search and a self-trained NNuE for board evaluation. 
-
+  The engine processes 10 million nodes per second on Apple M4 Pro (8 Performance Threads) and averages 12+ depth on 20 second search. 
+  
+- **Evaluation:** Self-trained NNUE (Dual-Perspective HalfKA) using Lichess FEN -> Score Positions
+  
 ## 1. Python Presentation & Validation Layer
-    
+
 - **PySide6 UI:** Renders a fluid 2D chessboard and manages real-time player drag-and-drop interactions
 
 - **Move Validation:** Enforces legal moves and coordinates state synchronization with the engine core
@@ -45,24 +49,26 @@ Alan Chess AI is an independent Chess Application that utilizes Python PySide6 f
     - *Activation:* Clipped/Bounded Linear ReLU ($\text{ReLU1}$) bounded strictly between `0.0` and `1.0`.
   - **Output Layer:** Combines $(32, 1)$ outputs down to a single evaluation scalar using 8-bit weights (`i8`) and 32-bit biases (`i32`).
     - *Activation:* ($\text{activation=None}$). Outputs raw linear logits.
-  - **Loss & Optimization Level:** Model compiles using ($\text{BinaryCrossentropy(from_logits=True)}$) This automatically applies an internal, numerically stable Sigmoid transformation to the raw output logits during the loss calculation step to match your 0-to-1 training targets.
+  - **Loss & Optimization Level:** Model compiles using ($\text{BinaryCrossentropy(from-logits=True)}$) This automatically applies an internal, numerically stable Sigmoid transformation to the raw output logits during the loss calculation step to match your 0-to-1 training targets.
 
 - **NNUE Training Data:** The evaluation network is trained exclusively on normalized Stockfish evaluations mapped from standard Forsyth-Edwards Notation (FEN) profiles spanning varied positional lines and forced checkmate sequences.
 
 - **Dataset Source:** [Lichess Chess Position Evaluations](https://huggingface.co/datasets/Lichess/chess-position-evaluations) The dataset is filtered for quiet positions (Not in Check, No Captures)
 
-# 4. Running the App
+# 4. Playing Level
 
-Playing as [black|white]
-- /run.sh [black|white]
-
-# 5. Playing Level
-
-The Chess AI has been tested against ELO 3000+ chess.com bots. There is controversy that the chess.com bot score is likely inflated 100-150 ELO+.
+The Chess AI has been tested against ELO 3200+ Chess.com bots. There is a concensus that Chess.com bots are likely overrated by 200 ELO points. 
 
 - [WIN - ELO 3200 Bot](https://www.chess.com/analysis/game/computer/1617707258/analysis)
 - [DRAW - ELO 3200 Bot](https://www.chess.com/analysis/game/computer/1562860054/analysis)
 - [DRAW - ELO 3200 Bot](https://www.chess.com/analysis/game/computer/1574164820/analysis)
+
+- **Future Roadmap:** This engine has not been officially ratified by Computer Chess Rating Lists
+
+# 5. Running the App
+
+Playing as [black|white]
+- /run.sh [black|white]
 
 ## 6. Contact
 
