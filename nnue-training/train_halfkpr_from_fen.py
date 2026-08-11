@@ -16,7 +16,7 @@ BIN_SAVE_PATH = "nnue_weights.bin"
 VAL_SAMPLE_SIZE = 15360
 VAL_BATCH_SIZE = 256
 
-NUM_THREADS = 6
+NUM_THREADS = 8
 
 # Map FEN character to an integer type 0-11
 PIECE_MAP = {
@@ -24,70 +24,12 @@ PIECE_MAP = {
     'p': 6, 'b': 7, 'n': 8, 'r': 9, 'q': 10, 'k': 11
 }
 
-# --- 1. FEN TO NNUE ARCHITECTURE PARSER ---
-def parse_fen_to_features(fen_string):
-    """
-    Parses a standard FEN string into sparse categorical indices 
-    representing active features for White and Black perspective.
-    """
-    parts = fen_string.split()
-    board_part = parts[0]
-    
-    # Expand numeric spaces in FEN to empty string dots for alignment
-    rows = board_part.split('/')
-    clean_board = ""
-    for row in rows:
-        for char in row:
-            if char.isdigit():
-                clean_board += '.' * int(char)
-            else:
-                clean_board += char
-                
-    # Track piece properties and locate Kings
-    pieces = []  # List of tuples: (piece_type_id, square_idx)
-    white_king_sq = 0
-    black_king_sq = 0
-    
-    for sq in range(64):
-        char = clean_board[sq]
-        if char == '.':
-            continue
-        piece_type = PIECE_MAP[char]
-        pieces.append((piece_type, sq))
-        if char == 'K':
-            white_king_sq = sq
-        elif char == 'k':
-            black_king_sq = sq
-
-    # Build active features arrays for White and Black
-    white_features = np.zeros(INPUT_FEATURES, dtype=np.float32)
-    black_features = np.zeros(INPUT_FEATURES, dtype=np.float32)
-    
-    for p_type, p_sq in pieces:
-        # --- WHITE PERSPECTIVE ---
-        # Fixed Dimension Strides: (KingSq * 768) + (PieceType * 64) + PieceSq
-        # 12 piece types * 64 squares = 768 slots per king square position block
-        w_idx = (white_king_sq * 768) + (p_type * 64) + p_sq
-        white_features[w_idx] = 1.0
-        
-        # --- BLACK PERSPECTIVE (Flipped & Rotated) ---
-        # Flip color associations cleanly: White (0..5) <-> Black (6..11)
-        b_type = (p_type + 6) % 12
-        
-        # 2. Apply a full 180-degree board rotation using bitwise XOR 63
-        # This simultaneously mirrors the ranks vertically AND the files horizontally (A1 <-> H8)
-        b_sq = p_sq ^ 63
-        b_king_sq_rotated = black_king_sq ^ 63
-        
-        b_idx = (b_king_sq_rotated * 768) + (b_type * 64) + b_sq
-        black_features[b_idx] = 1.0
-        
-    return white_features, black_features
 
 def process_shard_worker(stream_fn, data_queue, stop_event, dataset_name, shards_list):
     """
     An isolated OS process that reads from the stream, handles python-chess overhead,
-    and pushes fully processed numpy arrays into a shared queue.
+    verifies position quietness using an embedded Q-search, and pushes processed
+    numpy arrays into a shared queue.
     """
     import queue
     import math
@@ -95,75 +37,211 @@ def process_shard_worker(stream_fn, data_queue, stop_event, dataset_name, shards
     import numpy as np
     import gc
 
-    # Call our global function with its picklable arguments inside the spawned process context
+    # Centipawn values matching standard NNUE training scaling targets
+    PIECE_VALUES = {
+        chess.PAWN: 100, 
+        chess.KNIGHT: 320, 
+        chess.BISHOP: 330, 
+        chess.ROOK: 500, 
+        chess.QUEEN: 900, 
+        chess.KING: 20000
+    }
+
+    # --- FEN TO NNUE ARCHITECTURE PARSER ---
+    def parse_fen_to_features(fen_string):
+        """
+        Parses a standard FEN string into sparse categorical indices 
+        representing active features for White and Black perspective.
+        """
+        parts = fen_string.split()
+        board_part = parts[0]
+        
+        # Expand numeric spaces in FEN to empty string dots for alignment
+        rows = board_part.split('/')
+        clean_board = ""
+        for row in rows:
+            for char in row:
+                if char.isdigit():
+                    clean_board += '.' * int(char)
+                else:
+                    clean_board += char
+                    
+        # Track piece properties and locate Kings
+        pieces = []  # List of tuples: (piece_type_id, square_idx)
+        white_king_sq = 0
+        black_king_sq = 0
+        
+        for sq in range(64):
+            char = clean_board[sq]
+            if char == '.':
+                continue
+            piece_type = PIECE_MAP[char]
+            pieces.append((piece_type, sq))
+            if char == 'K':
+                white_king_sq = sq
+            elif char == 'k':
+                black_king_sq = sq
+
+        # Build active features arrays for White and Black
+        white_features = np.zeros(INPUT_FEATURES, dtype=np.float32)
+        black_features = np.zeros(INPUT_FEATURES, dtype=np.float32)
+        
+        for p_type, p_sq in pieces:
+            # --- WHITE PERSPECTIVE ---
+            # Fixed Dimension Strides: (KingSq * 768) + (PieceType * 64) + PieceSq
+            # 12 piece types * 64 squares = 768 slots per king square position block
+            w_idx = (white_king_sq * 768) + (p_type * 64) + p_sq
+            white_features[w_idx] = 1.0
+            
+            # --- BLACK PERSPECTIVE (Flipped & Rotated) ---
+            # Flip color associations cleanly: White (0..5) <-> Black (6..11)
+            b_type = (p_type + 6) % 12
+            
+            # 2. Apply a full 180-degree board rotation using bitwise XOR 63
+            # This simultaneously mirrors the ranks vertically AND the files horizontally (A1 <-> H8)
+            b_sq = p_sq ^ 63
+            b_king_sq_rotated = black_king_sq ^ 63
+            
+            b_idx = (b_king_sq_rotated * 768) + (b_type * 64) + b_sq
+            black_features[b_idx] = 1.0
+            
+        return white_features, black_features
+
+    def static_evaluate(b):
+        """Computes a quick static material evaluation from the current player's perspective."""
+        score = 0
+        # Fast piece map iteration is faster than scanning all 64 squares sequentially
+        for square, piece in b.piece_map().items():
+            val = PIECE_VALUES[piece.piece_type]
+            if piece.color == chess.WHITE:
+                score += val
+            else:
+                score -= val
+        return score if b.turn == chess.WHITE else -score
+
+    def q_search(b, alpha, beta, depth=0, max_depth=12):
+        """
+        Quiescence Search that resolves checks by searching all moves, 
+        but uses a strict depth limit to prevent infinite recursion.
+        """
+        # Force a cutoff if the tactics go too deep
+        if depth >= max_depth:
+            return static_evaluate(b)
+
+        in_check = b.is_check()
+        static_eval = static_evaluate(b)
+        
+        # Standing pat is only allowed if we are NOT in check
+        if not in_check:
+            if static_eval >= beta:
+                return beta
+            if static_eval > alpha:
+                alpha = static_eval
+
+        # Rule: If in check, generate ALL moves. If safe, generate only tactical moves.
+        for move in b.generate_pseudo_legal_moves(b.turn):
+            is_tactical = b.is_capture(move) or move.promotion
+            
+            # If we are in check, we must look at ALL moves to find an evasion.
+            # If we are not in check, we only look at tactical moves.
+            if in_check or is_tactical:
+                
+                if not b.is_legal(move):
+                    continue
+                    
+                b.push(move)
+                # Pass depth + 1 to keep track of the search depth
+                score = -q_search(b, -beta, -alpha, depth + 1, max_depth)
+                b.pop()
+
+                if score >= beta:
+                    return beta
+                if score > alpha:
+                    alpha = score
+                    
+        return alpha
+    
     hf_dataset = stream_fn(dataset_name, shards_list)
     loop_counter = 0
 
     for row in hf_dataset:
         if stop_event.is_set():
             break
-            
-        fen = row.get("fen")
-        raw_score = row.get("cp")
-        mate = row.get("mate")
-        
-        try:  
+
+        fen = row.get('fen')
+        raw_score = row.get('cp')
+        mate = row.get('mate')
+
+        if fen is None:
+            continue
+
+        try:
+            if mate is not None and not math.isnan(mate):
+                continue
+            if raw_score is None or math.isnan(float(raw_score)):
+                continue
+
+            first_space = fen.find(' ')
+            if first_space == -1:
+                continue
+            is_black_turn = (fen[first_space + 1] == 'b')
+
             board = chess.Board(fen)
-            if mate is not None and not math.isnan(mate): continue
-            if board.is_check(): continue
-
-            is_tactical = False
-            for move in board.legal_moves:
-                if board.is_capture(move) or move.promotion is not None:
-                    is_tactical = True
-                    break
-            if is_tactical: continue
-
-            fen_tokens = fen.split()
-            is_black_turn = (fen_tokens[1] == 'b') # Note: Fixed hidden typo index bracket!
             
-            if raw_score is not None and not math.isnan(float(raw_score)):
-                score_target = float(raw_score) 
-            else:
-                continue 
+            # Rule 1: Skip if the side to move is currently under check
+            if board.is_check():
+                continue
 
+            # Rule 2: Run a Q-search to calculate tactical resolution
+            static_score = static_evaluate(board)
+            q_score = q_search(board, -float('inf'), float('inf'))
+            
+            # If the score swings by more than 15 centipawns during tactical resolution,
+            # it means there are pending captures/promotions. Skip the position.
+            if abs(static_score - q_score) > 15:
+                continue
+
+            # 3. Score Normalization & Sigmoid Target Mapping
+            score_target = float(raw_score)
             if is_black_turn:
                 score_target = -score_target
-
+                
             score_target = max(-1000.0, min(1000.0, score_target))
             pawn_units = score_target / 100.0
             win_probability = 1.0 / (1.0 + math.exp(-0.6 * pawn_units))
-            
+
+            # 4. Feature Extraction & Flattening
             w_feats, b_feats = parse_fen_to_features(fen)
             w_feats_flat = np.array(w_feats, dtype=np.float32).flatten()
             b_feats_flat = np.array(b_feats, dtype=np.float32).flatten()
-            
+
             payload = (
                 {
-                    "white_features": w_feats_flat, 
-                    "black_features": b_feats_flat,
-                    "side_to_move": np.array([is_black_turn], dtype=bool)
+                    'white_features': w_feats_flat,
+                    'black_features': b_feats_flat,
+                    'side_to_move': np.array([is_black_turn], dtype=bool)
                 },
                 np.array([win_probability], dtype=np.float32).flatten()
             )
-            
-            # This will now block cleanly when the maxsize=50 queue fills up,
-            # pausing data generation entirely until the GPU processes the current batch.
+
+            # 5. Push to Bounded Multi-Processing Queue
             while not stop_event.is_set():
                 try:
                     data_queue.put(payload, timeout=0.1)
                     break
                 except queue.Full:
                     continue
-                    
-            # Aggressive Memory Cleanup Every 2,500 Board Evaluations
-            loop_counter += 1
-            if loop_counter % 2500 == 0:
-                del board # Explicitly delete the heavy chess object references
-                gc.collect() # Force the OS to release the dead RAM memory space
-                    
+
         except (ValueError, TypeError, IndexError):
             continue
+            
+        finally:
+            # Prevent memory exhaustion across spawned worker cycles
+            loop_counter += 1
+            if loop_counter % 2500 == 0:
+                if 'board' in locals():
+                    del board
+                gc.collect()
 
 # Load Training / Val Data Sets
 def load_train_stream_global(dataset_name, train_shards):
