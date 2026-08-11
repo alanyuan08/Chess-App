@@ -15,9 +15,8 @@ BIN_SAVE_PATH = "nnue_weights.bin"
 
 VAL_SAMPLE_SIZE = 15360
 VAL_BATCH_SIZE = 256
-VAL_START_ROW = 10000 
 
-NUM_THREADS = 8
+NUM_THREADS = 6
 
 # Map FEN character to an integer type 0-11
 PIECE_MAP = {
@@ -94,10 +93,12 @@ def process_shard_worker(stream_fn, data_queue, stop_event, dataset_name, shards
     import math
     import chess
     import numpy as np
+    import gc
 
     # Call our global function with its picklable arguments inside the spawned process context
     hf_dataset = stream_fn(dataset_name, shards_list)
-    
+    loop_counter = 0
+
     for row in hf_dataset:
         if stop_event.is_set():
             break
@@ -146,12 +147,20 @@ def process_shard_worker(stream_fn, data_queue, stop_event, dataset_name, shards
                 np.array([win_probability], dtype=np.float32).flatten()
             )
             
+            # This will now block cleanly when the maxsize=50 queue fills up,
+            # pausing data generation entirely until the GPU processes the current batch.
             while not stop_event.is_set():
                 try:
                     data_queue.put(payload, timeout=0.1)
                     break
                 except queue.Full:
                     continue
+                    
+            # Aggressive Memory Cleanup Every 2,500 Board Evaluations
+            loop_counter += 1
+            if loop_counter % 2500 == 0:
+                del board # Explicitly delete the heavy chess object references
+                gc.collect() # Force the OS to release the dead RAM memory space
                     
         except (ValueError, TypeError, IndexError):
             continue
@@ -165,7 +174,7 @@ def load_train_stream_global(dataset_name, train_shards):
         data_files={"train": train_shards},
         split="train",
         streaming=True
-    ).shuffle(seed=42, buffer_size=20000)
+    ).shuffle(seed=42, buffer_size=4000)
 
 def load_val_stream_global(dataset_name, val_shards):
     """Global un-nested loader for pickling across worker processes."""
@@ -175,10 +184,10 @@ def load_val_stream_global(dataset_name, val_shards):
         data_files={"train": val_shards}, # Matching HuggingFace's key mapping structure
         split="train",
         streaming=True
-    ).shuffle(seed=999, buffer_size=10000)
+    ).shuffle(seed=999, buffer_size=4000)
 
 # --- New Safe Generator Thread Hook ---
-def parallel_dataset_generator(stream_fn, dataset_name, shards_list, num_workers=4, queue_size=1000):
+def parallel_dataset_generator(stream_fn, dataset_name, shards_list, num_workers=4, queue_size=20):
     """
     Spawns background processes using clean global functions to handle python-chess,
     yielding clean data structures safely to TensorFlow.
@@ -190,11 +199,20 @@ def parallel_dataset_generator(stream_fn, dataset_name, shards_list, num_workers
     stop_event = mp.Event()
     workers = []
     
+    chunk_size = max(1, len(shards_list) // num_workers)
+
     # Launch truly parallel CPU workers passing global function refs and pickleable lists
-    for _ in range(num_workers):
+    for i in range(num_workers):
+        # Slice the global shard array so each worker gets its own segment
+        worker_shards = shards_list[i * chunk_size : (i + 1) * chunk_size]
+        
+        # Guard clause: if there are fewer shards than workers, pass the full list to remaining workers
+        if not worker_shards:
+            worker_shards = shards_list
+            
         p = mp.Process(
             target=process_shard_worker, 
-            args=(stream_fn, data_queue, stop_event, dataset_name, shards_list)
+            args=(stream_fn, data_queue, stop_event, dataset_name, worker_shards)
         )
         p.daemon = True
         p.start()
@@ -276,11 +294,9 @@ def train_nnue_on_fens():
         inputs=[white_input, black_input, stm_input],
         outputs=output
     )
-    
     model.compile(
         optimizer=keras.optimizers.Adam(learning_rate=0.001),
         loss=tf.keras.losses.BinaryCrossentropy(from_logits=True), 
-        metrics=[tf.keras.metrics.MeanAbsoluteError(name="prob_mae", dtype=tf.float32)]
     )
 
     # Retrieve the file listings before launching our data loops
@@ -292,8 +308,8 @@ def train_nnue_on_fens():
             stream_fn=load_train_stream_global,
             dataset_name=DATASET_NAME,
             shards_list=TRAIN_SHARDS,
-            num_workers=4,
-            queue_size=1000
+            num_workers=NUM_THREADS,
+            queue_size=10
         ),
         output_signature=(
             {
@@ -312,7 +328,7 @@ def train_nnue_on_fens():
             dataset_name=DATASET_NAME,
             shards_list=VAL_SHARDS,
             num_workers=2,
-            queue_size=500
+            queue_size=10
         ),
         output_signature=(
             {
@@ -324,8 +340,8 @@ def train_nnue_on_fens():
         )
     )
 
-    train_dataset = train_dataset.batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
-    val_dataset = val_dataset.batch(VAL_BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
+    train_dataset = train_dataset.batch(BATCH_SIZE).prefetch(2)
+    val_dataset = val_dataset.batch(VAL_BATCH_SIZE).prefetch(2)
 
     print("\n--- Model compilation complete. Commencing Training Step ---")
     checkpoint_path = "best_chess_nnue.keras"
@@ -340,7 +356,7 @@ def train_nnue_on_fens():
     lr_scheduler_cb = tf.keras.callbacks.ReduceLROnPlateau(
         monitor='val_loss',
         factor=0.5,
-        patience=2,
+        patience=4,
         min_lr=1e-5,
         verbose=1
     )
@@ -349,7 +365,7 @@ def train_nnue_on_fens():
     model.fit(
         train_dataset, 
         steps_per_epoch=15000, 
-        epochs=25, 
+        epochs=45, 
         validation_data=val_dataset,
         validation_steps=VAL_SAMPLE_SIZE // VAL_BATCH_SIZE,
         callbacks=[checkpoint_cb, lr_scheduler_cb])
