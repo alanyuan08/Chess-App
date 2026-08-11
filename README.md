@@ -4,9 +4,9 @@
 
 - **Presentation Layer:** Python PySide6 for drag and drop interface
   
-- **Compute Engine:** Rust Maturin for Adversarial Search - Negamax with Quiescence Search with advanced pruning techniques, Killer Move Heuristics, Late Move Reduction, Principal Variation Search, and Null-Move Pruning.
+- **Compute Engine:** Rust Maturin for Adversarial Search - Negamax with Quiescence Search with advanced pruning techniques such as Killer Move Heuristics, Late Move Reduction, Principal Variation Search, and Null-Move Pruning.
 
-  The engine processes 10 million nodes per second on Apple M4 Pro (8 Performance Threads) and averages 12+ depth on 20 second search. 
+  The engine processes 10+ million nodes per second on Apple M4 Pro (8 Performance Threads) and averages 14+ depth on 20 second search. 
 
 - **Move Generation:** BitBoard for board representation and BitBoard Magic Number to calculate moves for sliding pieces. 
 
@@ -26,7 +26,7 @@
 
 ## 2. Rust Compute Engine
 
-- **Bitboard Move Generation:**  Uses 64-bit integers with fast AND and XOR logic to compute board occupancy. It also uses BitBoard Magic Number to instant compute sliding pieces moves and attacks.
+- **Bitboard Move Generation:**  Uses 64-bit integers with fast AND / XOR logic to compute board occupancy. It also uses BitBoard Magic Number to instant compute sliding pieces moves and attacks.
 
 - **Adversarial Search:** Implements Minimax (Negemax) adversarial search and uses Quiescence Search to extend the search for non-quiet positions to mitigate the horizon effect.
 
@@ -36,7 +36,7 @@
 
 - **Transposition Tables:** Caches previously evaluated board states to accelerate search paths in a lockless transposition Table. The tables uses the Condon-Thompson Replacement method to increase efficiency of L1 / L2 / L3 caches by prioritizng positions that are frequently traversed positions and evaluations with strong depth. 
 
-- **Zobrist Hash:** Uses Zobrist Hashing - it maintains a bitwise representation of the game and is incrementally updated using XOR operations mirroring game moves to produce a unique 64-bit bit integer for all board positions; This is used for detecting three-move repetition and in the Transposition Table
+- **Zobrist Hash:** Uses a unique 64-bit Zobrist Hashing for every board position and is incrementally updated using XOR operations; This is used for detecting three-move repetition and in the Transposition Table
 
 - **Parallel Processing:** The search uses Lazy SMP (Symmetric Multiprocessing) which uses multiple search algorithms to independently process the same search evaluation agorithm and share position evaluations and cut-offs using a shared Lockless Transposition table.
 
