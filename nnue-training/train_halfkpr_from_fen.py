@@ -9,14 +9,15 @@ INPUT_FEATURES = 64 * 64 * 12  # 49,152
 HIDDEN_SIZE = 256
 SCALE_MAX = 1.0
 
-BATCH_SIZE = 256
 DATASET_NAME = "Lichess/chess-position-evaluations"
 BIN_SAVE_PATH = "nnue_weights.bin"
 
-VAL_SAMPLE_SIZE = 15360
-VAL_BATCH_SIZE = 256
+BATCH_SIZE = 16384
+VAL_BATCH_SIZE = 16384
+VAL_SAMPLE_SIZE = 500000 
 
 NUM_THREADS = 8
+SHUFFLE_BUFFER = 50000
 
 # Map FEN character to an integer type 0-11
 PIECE_MAP = {
@@ -193,6 +194,7 @@ def process_shard_worker(stream_fn, data_queue, stop_event, dataset_name, shards
                 continue
 
             # Rule 2: Run a Q-search to calculate tactical resolution
+            # Both functions output absolute, White-centric scores.
             static_score = static_evaluate(board)
             q_score = q_search(board, -float('inf'), float('inf'))
             
@@ -316,20 +318,26 @@ def parallel_dataset_generator(stream_fn, dataset_name, shards_list, num_workers
 def get_lichess_shards():
     """
     Dynamically fetches the underlying parquet filenames from the Hugging Face hub repository.
-    Allows us to cleanly isolate validation files from training files without downloading them.
+    Strides across the files to ensure train and validation splits both contain a balanced
+    mix of historical and modern engine evaluations.
     """
     api = HfApi()
-    # Fetch all data files inside the dataset repository
     files = api.list_repo_files(repo_id="Lichess/chess-position-evaluations", repo_type="dataset")
     
     # Filter for the core parquet data shards
     parquet_files = sorted([f for f in files if f.endswith(".parquet")])
     
-    # Reserve the final 2 files exclusively for validation testing (~10 million rows)
-    # The remaining files are allocated strictly for training
-    train_files = parquet_files[:-2]
-    val_files = parquet_files[-2:]
+    train_files = []
+    val_files = []
     
+    # Stride by 10: allocate 1 out of every 10 files to validation (~10% split)
+    # distributed perfectly across the entire dataset timeline
+    for i, file_path in enumerate(parquet_files):
+        if i % 10 == 0:
+            val_files.append(file_path)
+        else:
+            train_files.append(file_path)
+            
     return train_files, val_files
 
 # --- 4. MODEL DESIGN & TRAINING RUNNER ---
@@ -418,8 +426,9 @@ def train_nnue_on_fens():
         )
     )
 
-    train_dataset = train_dataset.batch(BATCH_SIZE).prefetch(2)
-    val_dataset = val_dataset.batch(VAL_BATCH_SIZE).prefetch(2)
+    train_dataset = train_dataset.shuffle(buffer_size=SHUFFLE_BUFFER, reshuffle_each_iteration=True)
+    train_dataset = train_dataset.batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
+    val_dataset = val_dataset.batch(VAL_BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
 
     print("\n--- Model compilation complete. Commencing Training Step ---")
     checkpoint_path = "best_chess_nnue.keras"
@@ -442,12 +451,12 @@ def train_nnue_on_fens():
     # Pass the callback into your fit runner
     model.fit(
         train_dataset, 
-        steps_per_epoch=15000, 
+        steps_per_epoch=244,  # Smooth, massive matrix steps
         epochs=45, 
         validation_data=val_dataset,
-        validation_steps=VAL_SAMPLE_SIZE // VAL_BATCH_SIZE,
-        callbacks=[checkpoint_cb, lr_scheduler_cb])
-    
+        validation_steps=30,  # Half a million positions checked in just 30 steps!
+        callbacks=[checkpoint_cb, lr_scheduler_cb]
+    )
     return model
 
 def export_dense_nnue_for_rust(model, file_path="model.nnue"):
