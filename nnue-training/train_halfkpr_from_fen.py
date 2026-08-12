@@ -1,6 +1,8 @@
 import numpy as np
 import tensorflow as tf
 import keras
+import multiprocessing as mp
+import queue
 from tensorflow.keras import layers, Model
 from huggingface_hub import HfApi
 
@@ -13,8 +15,8 @@ DATASET_NAME = "Lichess/chess-position-evaluations"
 BIN_SAVE_PATH = "nnue_weights.bin"
 
 # Training / Validation Per Epoch
-BATCH_SIZE = 16384 # 16384 * 244
-VAL_BATCH_SIZE = BATCH_SIZE # 16384 * 30
+BATCH_SIZE = 4096 # 4096 * 244
+VAL_BATCH_SIZE = BATCH_SIZE # 4096 * 30
 SHUFFLE_BUFFER = BATCH_SIZE * 4
 
 NUM_THREADS = 8
@@ -25,8 +27,7 @@ PIECE_MAP = {
     'p': 6, 'b': 7, 'n': 8, 'r': 9, 'q': 10, 'k': 11
 }
 
-# 1. Isolated Shard Worker Method used to Process FEN Data into [w_feats] / [b_feats] / Score
-# It also filters out non-quiet positions
+# --- Isolated Shard Worker Method used for preprocessing ---
 def process_shard_worker(stream_fn, data_queue, stop_event, dataset_name, shards_list):
     """
     An isolated OS process that reads from the stream, handles python-chess overhead,
@@ -239,14 +240,14 @@ def process_shard_worker(stream_fn, data_queue, stop_event, dataset_name, shards
             continue
             
         finally:
-            # Prevent memory exhaustion across spawned worker cycles
             loop_counter += 1
-            if loop_counter % 2500 == 0:
+            if loop_counter % 500 == 0:  # Crank this down from 2500 to 500
                 if 'board' in locals():
+                    board.clear()  # Wipes the internal python-chess bitboards
                     del board
                 gc.collect()
 
-# Load Training / Val Data Sets
+# --- Load Training / Validation Datasets --- 
 def load_train_stream_global(dataset_name, train_shards):
     return load_lichess_stream(dataset_name, train_shards, True)
 
@@ -273,55 +274,6 @@ def load_lichess_stream(dataset_name, shards_list, is_training):
         
     return dataset
 
-# --- New Safe Generator Thread Hook ---
-def parallel_dataset_generator(stream_fn, dataset_name, shards_list, num_workers=4, queue_size=20):
-    """
-    Spawns background processes using clean global functions to handle python-chess,
-    yielding clean data structures safely to TensorFlow.
-    """
-    import multiprocessing as mp
-    import queue
-
-    data_queue = mp.Queue(maxsize=queue_size)
-    stop_event = mp.Event()
-    workers = []
-    
-    chunk_size = max(1, len(shards_list) // num_workers)
-
-    # Launch truly parallel CPU workers passing global function refs and pickleable lists
-    for i in range(num_workers):
-        # Slice the global shard array so each worker gets its own segment
-        worker_shards = shards_list[i * chunk_size : (i + 1) * chunk_size]
-        
-        # Guard clause: if there are fewer shards than workers, pass the full list to remaining workers
-        if not worker_shards:
-            worker_shards = shards_list
-            
-        p = mp.Process(
-            target=process_shard_worker, 
-            args=(stream_fn, data_queue, stop_event, dataset_name, worker_shards)
-        )
-        p.daemon = True
-        p.start()
-        workers.append(p)
-        
-    try:
-        while True:
-            try:
-                yield data_queue.get(timeout=0.1)
-            except queue.Empty:
-                if all(not p.is_alive() for p in workers) and data_queue.empty():
-                    break
-                continue
-    finally:
-        stop_event.set()
-        while not data_queue.empty():
-            try: data_queue.get_nowait()
-            except queue.Empty: break
-        for p in workers:
-            p.join(timeout=1.0)
-            if p.is_alive(): p.terminate()
-
 def get_lichess_shards():
     """
     Dynamically fetches the underlying parquet filenames from the Hugging Face hub repository.
@@ -347,7 +299,64 @@ def get_lichess_shards():
             
     return train_files, val_files
 
-# --- 4. MODEL DESIGN & TRAINING RUNNER ---
+# --- Safe Generator Thread Hook ---
+class PermanentDatasetManager:
+    def __init__(self, stream_fn, dataset_name, shards_list, num_workers=4, queue_size=20):
+        # 1. Create a single, permanent queue and stop flag for the entire script run
+        self.data_queue = mp.Queue(maxsize=queue_size)
+        self.stop_event = mp.Event()
+        self.workers = []
+        
+        chunk_size = max(1, len(shards_list) // num_workers)
+        
+        # 2. Spawn the background workers ONCE at initialization
+        for i in range(num_workers):
+            worker_shards = shards_list[i * chunk_size : (i + 1) * chunk_size]
+            if not worker_shards:
+                worker_shards = shards_list
+                
+            p = mp.Process(
+                target=process_shard_worker, 
+                args=(stream_fn, self.data_queue, self.stop_event, dataset_name, worker_shards)
+            )
+            p.daemon = True
+            p.start()
+            self.workers.append(p)
+            
+    def generator_fn(self):
+        """This is the clean function you pass directly to TensorFlow."""
+        while True:
+            try:
+                # Yield data continuously from our permanent, non-leaking queue
+                yield self.data_queue.get(timeout=0.1)
+            except queue.Empty:
+                # If all workers unexpectedly died, stop the loop
+                if all(not p.is_alive() for p in self.workers) and self.data_queue.empty():
+                    break
+                continue
+                
+    def shutdown(self):
+        """Call this at the very end of your script to clean up the OS processes."""
+        self.stop_event.set()
+        while not self.data_queue.empty():
+            try: self.data_queue.get_nowait()
+            except queue.Empty: break
+        for p in self.workers:
+            p.join(timeout=1.0)
+            if p.is_alive(): p.terminate()
+
+# --- Memory Clean up ---
+class AggressiveMemoryCleanup(keras.callbacks.Callback):
+    def on_epoch_end(self, epoch, logs=None):
+        # 1. Clear the Keras C++ graph session entirely
+        tf.keras.backend.clear_session()
+        
+        # 2. Force Python to run an immediate, deep garbage collection sweep
+        gc.collect()
+        
+        print(f"\n[System Guard] Epoch {epoch+1} ended. C++ Graph and Python RAM cleared cleanly.")
+
+# --- Model deesign & Training Runner ---
 def train_nnue_on_fens():
     # 1. Inputs
     white_input = layers.Input(shape=(INPUT_FEATURES,), name="white_features")
@@ -388,22 +397,24 @@ def train_nnue_on_fens():
         outputs=output
     )
     model.compile(
-        optimizer=keras.optimizers.Adam(learning_rate=0.001),
+        optimizer=keras.optimizers.Adam(learning_rate=0.002),
         loss=tf.keras.losses.BinaryCrossentropy(from_logits=True), 
     )
 
     # 90 / 10 Split for Training / Validation Shards
     TRAIN_SHARDS, VAL_SHARDS = get_lichess_shards()
 
+    # Create the permanent managers ONCE. They spawn background processes that live forever.
+    train_manager = PermanentDatasetManager(
+        load_train_stream_global, DATASET_NAME, TRAIN_SHARDS, num_workers=4, queue_size=20
+    )
+    val_manager = PermanentDatasetManager(
+        load_val_stream_global, DATASET_NAME, VAL_SHARDS, num_workers=1, queue_size=10
+    )
+
     # --- Train Dataset ---
     train_dataset = tf.data.Dataset.from_generator(
-        lambda: parallel_dataset_generator(
-            stream_fn=load_train_stream_global,
-            dataset_name=DATASET_NAME,
-            shards_list=TRAIN_SHARDS,
-            num_workers=NUM_THREADS,
-            queue_size=4,
-        ),
+        train_manager.generator_fn,
         output_signature=(
             {
                 "white_features": tf.TensorSpec(shape=(INPUT_FEATURES,), dtype=tf.float32),
@@ -416,13 +427,7 @@ def train_nnue_on_fens():
 
     # --- Validation Dataset ---
     val_dataset = tf.data.Dataset.from_generator(
-        lambda: parallel_dataset_generator(
-            stream_fn=load_val_stream_global,
-            dataset_name=DATASET_NAME,
-            shards_list=VAL_SHARDS,
-            num_workers=2,
-            queue_size=2,
-        ),
+        val_manager.generator_fn,
         output_signature=(
             {
                 "white_features": tf.TensorSpec(shape=(INPUT_FEATURES,), dtype=tf.float32),
@@ -435,8 +440,10 @@ def train_nnue_on_fens():
 
     # Shuffles Filtered Data Sets
     train_dataset = train_dataset.shuffle(buffer_size=SHUFFLE_BUFFER, reshuffle_each_iteration=True)
-    train_dataset = train_dataset.batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
-    val_dataset = val_dataset.batch(VAL_BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
+
+    # Train / Val Dataset Batch Size 
+    train_dataset = train_dataset.batch(BATCH_SIZE).prefetch(1)
+    val_dataset = val_dataset.batch(VAL_BATCH_SIZE).prefetch(1)
 
     print("\n--- Model compilation complete. Commencing Training Step ---")
     checkpoint_path = "best_chess_nnue.keras"
@@ -448,6 +455,7 @@ def train_nnue_on_fens():
         verbose=1
     )
 
+    # Adjust Learning Rate
     lr_scheduler_cb = tf.keras.callbacks.ReduceLROnPlateau(
         monitor='val_loss',
         factor=0.5,
@@ -456,16 +464,26 @@ def train_nnue_on_fens():
         verbose=1
     )
 
+    # Instantiate the new cleanup guard
+    cleanup_cb = AggressiveMemoryCleanup()
+
     model.fit(
         train_dataset, 
-        steps_per_epoch=244,
-        epochs=45, 
+        steps_per_epoch=976,
+        epochs=40, 
         validation_data=val_dataset,
-        validation_steps=30,
-        callbacks=[checkpoint_cb, lr_scheduler_cb]
+        validation_steps=120,
+        callbacks=[checkpoint_cb, lr_scheduler_cb, cleanup_cb]
     )
+
+     # At the very bottom of your script after model.fit() finishes all 25 epochs:
+    print("\nTraining complete. Terminating background workers cleanly...")
+    train_manager.shutdown()
+    val_manager.shutdown()
+
     return model
 
+# --- Export NNuE Weights for Rust ---
 def export_dense_nnue_for_rust(model, file_path="model.nnue"):
     with open(file_path, "wb") as f:
         print("--- Commencing Weight Quantization & Serialization for Rust ---")
@@ -513,7 +531,6 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
     print(f"\n[SUCCESS] Safe NNUE file successfully compiled and written to: {file_path}")
 
 if __name__ == "__main__":
-    # Load the streaming dataset directly from Hugging Face
     trained_model = train_nnue_on_fens()
 
     export_dense_nnue_for_rust(trained_model, BIN_SAVE_PATH)
