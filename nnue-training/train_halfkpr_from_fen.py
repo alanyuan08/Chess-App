@@ -3,6 +3,7 @@ import tensorflow as tf
 import keras
 import multiprocessing as mp
 import queue
+import gc
 from tensorflow.keras import layers, Model
 from huggingface_hub import HfApi
 
@@ -389,16 +390,19 @@ def train_nnue_on_fens():
     x = layers.Dense(32, activation=None, name="hidden_layer_3")(x)
     x = keras.ops.clip(x, 0.0, SCALE_MAX)
 
-    # 8. Output Layer 
+    # 8. Output Layer with ReLU1 activation
     output = layers.Dense(1, activation=None, name="chess_eval")(x)
 
     model = Model(
         inputs=[white_input, black_input, stm_input],
         outputs=output
     )
+
+    # Apply Sigmoid prior to Loss Function
     model.compile(
-        optimizer=keras.optimizers.Adam(learning_rate=0.002),
-        loss=tf.keras.losses.BinaryCrossentropy(from_logits=True), 
+        optimizer=keras.optimizers.Adam(learning_rate=0.001),
+        loss=tf.keras.losses.BinaryCrossentropy(from_logits=True),
+        metrics=['mae']
     )
 
     # 90 / 10 Split for Training / Validation Shards
@@ -464,16 +468,23 @@ def train_nnue_on_fens():
         verbose=1
     )
 
+    early_stopping_cb = tf.keras.callbacks.EarlyStopping(
+        monitor='val_loss',
+        patience=8,  
+        restore_best_weights=True
+    )
+
+
     # Instantiate the new cleanup guard
     cleanup_cb = AggressiveMemoryCleanup()
 
     model.fit(
         train_dataset, 
         steps_per_epoch=976,
-        epochs=40, 
+        epochs=50, 
         validation_data=val_dataset,
         validation_steps=120,
-        callbacks=[checkpoint_cb, lr_scheduler_cb, cleanup_cb]
+        callbacks=[checkpoint_cb, lr_scheduler_cb, early_stopping_cb, cleanup_cb]
     )
 
      # At the very bottom of your script after model.fit() finishes all 25 epochs:

@@ -27,11 +27,15 @@ impl BoardAccumulators {
     #[inline(always)]
     fn raw_logit_to_centipawns_i32(self, final_normalized: i32) -> i32 {
         let alpha: f32 = 0.6;
+        let quantization_scale: f32 = 128.0; // Matches your Python * 128.0 script!
         
-        // 1. Calculate the raw float score in centipawns
-        let score_f32 = (final_normalized as f32 / alpha) * 100.0;
+        // 1. Convert quantized integer back to raw float logit space
+        let raw_logit = final_normalized as f32 / quantization_scale;
         
-        // 2. Round to the nearest mathematical integer and cast to i32
+        // 2. Calculate the raw float score in centipawns
+        let score_f32 = (raw_logit / alpha) * 100.0;
+        
+        // 3. Round to the nearest mathematical integer and cast to i32
         score_f32.round() as i32
     }
         
