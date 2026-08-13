@@ -4,7 +4,7 @@ use crate::move_command::*;
 // Retain White / Black Accumulator values across Positions
 #[derive(Debug, Clone, Copy)]
 pub struct Accumulator {
-    pub vals: [i16; 256],
+    pub vals: [i32; 256],
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -17,8 +17,8 @@ pub struct BoardAccumulators {
 impl Default for BoardAccumulators {
     fn default() -> Self {
         Self {
-            white: Accumulator { vals: [0i16; 256] },
-            black: Accumulator { vals: [0i16; 256] },
+            white: Accumulator { vals: [0i32; 256] },
+            black: Accumulator { vals: [0i32; 256] },
         }
     }
 }
@@ -43,66 +43,74 @@ impl BoardAccumulators {
             Side::BLACK => (&self.black, &self.white),
         };
 
+        // --- STEP 0: ACCUMLATOR (Input -> Accumlator) ---
+        // The accumlator is maintained by the init / move functions
+
         // --- STEP 1: CONCATENATION & ACTIVATION (L1 -> L2) ---
-        // Weights multiplied by 128 in Python. 
-        // We shift down right here by >> 7 (divide by 128) to reset input baseline scale to 1.0.
-        // Clamped at 1 to match Python's SCALE_MAX = 1.0.
-        for (i, &val) in active_acc.vals.iter().enumerate().take(512) {
-            let scaled_val = (val as i32) >> 7;
-            buffer.l2_inputs[i] = scaled_val.clamp(0, 1) as i8;
+        for (i, &val) in active_acc.vals.iter().enumerate().take(256) {
+            buffer.l2_inputs[i] = val.clamp(0, 128) as i16;
         }
 
-        for (i, &val) in opp_acc.vals.iter().enumerate().take(512) {
-            let scaled_val = (val as i32) >> 7;
-            buffer.l2_inputs[i + 256] = scaled_val.clamp(0, 1) as i8;
+        for (i, &val) in opp_acc.vals.iter().enumerate().take(256) {
+            buffer.l2_inputs[i + 256] = val.clamp(0, 128) as i16;
         }
 
         // --- STEP 2: HIDDEN LAYER 2 (512 -> 64) ---
-        // Weights multiplied by 32 in Python. 
-        // Input Scale (1) * Weight Scale (32) = Sum Scale (32).
+        // Input Scale (128) * Weight Scale (32) = Sum Scale (4096).
+        // Shift Down by >> 7 to Scale (32)
+        // Clamp at 32 to match Python's ReLU1 (1.0).
         let l2_layer = nn.l2_weights.iter().zip(nn.l2_biases.iter());
         for (neuron, (row, &bias)) in l2_layer.enumerate().take(64) {
             let mut sum: i32 = bias;
 
-            for (i, &weight) in row.iter().enumerate().take(512) {
-                sum += (buffer.l2_inputs[i] as i32) * (weight as i32);
+            // Process chunks of 16 elements to enable aggressive SIMD auto-vectorization
+            let inputs = &buffer.l2_inputs[..512];
+            for (chunk_weights, chunk_inputs) in row.chunks(16).zip(inputs.chunks(16)) {
+                for (j, (&w, &inp)) in chunk_weights.iter().zip(chunk_inputs.iter()).enumerate() {
+                    sum += (inp as i32) * (w as i32);
+                }
             }
 
-            // Shift down by >> 5 (divide by 32) to reset output baseline scale back to 1.0.
-            let activated = sum >> 5;
-            buffer.l3_inputs[neuron] = activated.clamp(0, 1) as i8;
+            let activated = sum >> 7;
+            buffer.l3_inputs[neuron] = activated.clamp(0, 32) as i16;
         }
 
         // --- STEP 3: HIDDEN LAYER 3 (64 -> 32) ---
-        // Weights multiplied by 32 in Python.
-        // Input Scale (1) * Weight Scale (32) = Sum Scale (32).
+        // Input Scale (32) * Weight Scale (32) = Sum Scale (1024).
+        // Shift Down by 5 to Scale (32)
+        // Clamp at 32 to match Python's ReLU1 (1.0).
         let l3_layer = nn.l3_weights.iter().zip(nn.l3_biases.iter());
         for (neuron, (row, &bias)) in l3_layer.enumerate().take(32) {
             let mut sum: i32 = bias;
 
-            for (i, &weight) in row.iter().enumerate().take(64) {
-                sum += (buffer.l3_inputs[i] as i32) * (weight as i32);
+            let inputs = &buffer.l3_inputs[..64];
+            for (chunk_weights, chunk_inputs) in row.chunks(16).zip(inputs.chunks(16)) {
+                for (j, (&w, &inp)) in chunk_weights.iter().zip(chunk_inputs.iter()).enumerate() {
+                    sum += (inp as i32) * (w as i32);
+                }
             }
 
-            // Shift down by >> 5 (divide by 32) to reset output baseline scale back to 1.0.
             let activated = sum >> 5;
-            buffer.l4_inputs[neuron] = activated.clamp(0, 1) as i8;
+            buffer.l4_inputs[neuron] = activated.clamp(0, 32) as i16;
         }
 
+
         // --- STEP 4: OUTPUT LAYER (32 -> 1) ---
-        // Weights multiplied by 128 in Python.
-        // Input Scale (1) * Weight Scale (128) = Sum Scale (128).
+        // Input Scale (32) * Weight Scale (128) = Sum Scale (4096).
+        // Shift Down by 5 to Scale (128)
         let mut final_sum: i32 = nn.output_bias[0];
         let row = &nn.output_weights[0];
 
-        for (i, &weight) in row.iter().enumerate().take(32) {
-            final_sum += (buffer.l4_inputs[i] as i32) * (weight as i32);
+        let inputs = &buffer.l4_inputs[..32];
+        for (chunk_weights, chunk_inputs) in row.chunks(16).zip(inputs.chunks(16)) {
+            for (j, (&w, &inp)) in chunk_weights.iter().zip(chunk_inputs.iter()).enumerate() {
+                final_sum += (inp as i32) * (w as i32);
+            }
         }
+        let internal_pawns_scaled = final_sum >> 5;
 
-        // Shift by >> 7 for adjust for weights and convert pawn to centipawn
-        let centipawns_fast = (final_sum * 100) >> 7;
-
-        centipawns_fast
+        // Shift by >> 7 remove remaining scale
+        (internal_pawns_scaled * 100) / 128
     }
 
     /// Re-reads the entire board layout from scratch to perform a full baseline refresh
@@ -113,28 +121,26 @@ impl BoardAccumulators {
         w_king_sq: usize, 
         b_king_sq: usize
     ) {
-        // Reset both accumulators to the initial layer 1 baseline biases
+        // 1. Reset both accumulators to the initial layer 1 baseline biases
         self.white.vals.copy_from_slice(&nn.l1_biases);
         self.black.vals.copy_from_slice(&nn.l1_biases);
 
-        // Loop through every square on the board and add active pieces
+        // 2. Loop through every square on the board and add active pieces
         for (sq, &piece) in mailbox.iter().enumerate().take(64) {
             if piece != BoardPiece::NONE {
+                // Get the unique HalfKA indices for both king perspectives
                 let w_idx = get_feature_index(w_king_sq, piece, sq, false);
                 let b_idx = get_feature_index(b_king_sq, piece, sq, true);
                 
+                // Grab direct references to the row weights in the neural network structure
                 let w_row = &nn.l1_weights[w_idx];
                 let b_row = &nn.l1_weights[b_idx];
 
-                // Zip all 4 targets together to update both accumulators simultaneously
-                let targets = self.white.vals.iter_mut()
-                    .zip(self.black.vals.iter_mut())
-                    .zip(w_row.iter())
-                    .zip(b_row.iter());
-
-                for (((w_val, b_val), &w_weight), &b_weight) in targets.take(256) {
-                    *w_val += w_weight;
-                    *b_val += b_weight;
+                // 3. Unroll the nested zip into a clean, contiguous loop.
+                // The compiler can easily auto-vectorize this standard loop layout.
+                for i in 0..256 {
+                    self.white.vals[i] += w_row[i] as i32; // Cast i16 weight to i32 sum box
+                    self.black.vals[i] += b_row[i] as i32; // Cast i16 weight to i32 sum box
                 }
             }
         }
@@ -153,8 +159,6 @@ impl BoardAccumulators {
         let move_piece: BoardPiece = mailbox[mv.start_sq];
 
         // --- 1. Identify Target Added Piece (Handles Promotions) ---
-        // Default assume the moving piece arrives at the destination unchanged.    
-        // For promotion flags, replace the piece with its upgraded target.
         let mut added_piece = move_piece;
         match mv.move_type {
             MoveFlag::PROMOTIONQUEEN => {
@@ -175,9 +179,9 @@ impl BoardAccumulators {
         // --- 2. Identify Captured Piece & Coordinate (Handles En Passant) ---
         let (captured_sq, captured_piece) = if mv.move_type == MoveFlag::ENPASSANT {
             let sq = if move_piece == BoardPiece::WPAWN {
-                mv.end_sq - 8 // White captures Black pawn hanging behind it
+                mv.end_sq - 8 
             } else {
-                mv.end_sq + 8 // Black captures White pawn hanging behind it
+                mv.end_sq + 8 
             };
             (sq, mailbox[sq])
         } else {
@@ -185,15 +189,12 @@ impl BoardAccumulators {
         };
 
         // --- 3. Compute Sparse Feature Indices ---
-        // Remove old piece location
         let w_remove = get_feature_index(w_king_sq, move_piece, mv.start_sq, false);
         let b_remove = get_feature_index(b_king_sq, move_piece, mv.start_sq, true);
 
-        // Add new piece location
         let w_add = get_feature_index(w_king_sq, added_piece, mv.end_sq, false);
         let b_add = get_feature_index(b_king_sq, added_piece, mv.end_sq, true);
 
-       // Extract raw references to the row arrays for maximum compiler aliasing optimizations
         let w_rem_row = &nn.l1_weights[w_remove];
         let b_rem_row = &nn.l1_weights[b_remove];
         let w_add_row = &nn.l1_weights[w_add];
@@ -207,32 +208,17 @@ impl BoardAccumulators {
             let w_cap_row = &nn.l1_weights[w_cap];
             let b_cap_row = &nn.l1_weights[b_cap];
 
-            // Stream all 6 parallel slices simultaneously
-            let targets = self.white.vals.iter_mut()
-                .zip(self.black.vals.iter_mut())
-                .zip(w_add_row.iter())
-                .zip(w_rem_row.iter())
-                .zip(w_cap_row.iter())
-                .zip(b_add_row.iter())
-                .zip(b_rem_row.iter())
-                .zip(b_cap_row.iter());
-
-            for (((((((w_val, b_val), &w_add), &w_rem), &w_cap), &b_add), &b_rem), &b_cap) in targets.take(256) {
-                *w_val += w_add - w_rem - w_cap;
-                *b_val += b_add - b_rem - b_cap;
+            // Clean, direct loops easily targeted by SIMD auto-vectorization.
+            // i16 values are cast to i32 to maintain perfect accumulator precision.
+            for i in 0..256 {
+                self.white.vals[i] += (w_add_row[i] as i32) - (w_rem_row[i] as i32) - (w_cap_row[i] as i32);
+                self.black.vals[i] += (b_add_row[i] as i32) - (b_rem_row[i] as i32) - (b_cap_row[i] as i32);
             }
         } else {
-            // Stream all 4 parallel slices for quiet moves
-            let targets = self.white.vals.iter_mut()
-                .zip(self.black.vals.iter_mut())
-                .zip(w_add_row.iter())
-                .zip(w_rem_row.iter())
-                .zip(b_add_row.iter())
-                .zip(b_rem_row.iter());
-
-            for (((((w_val, b_val), &w_add), &w_rem), &b_add), &b_rem) in targets.take(256) {
-                *w_val += w_add - w_rem;
-                *b_val += b_add - b_rem;
+            // Quiet moves (No piece captured)
+            for i in 0..256 {
+                self.white.vals[i] += (w_add_row[i] as i32) - (w_rem_row[i] as i32);
+                self.black.vals[i] += (b_add_row[i] as i32) - (b_rem_row[i] as i32);
             }
         }
     }
@@ -281,15 +267,14 @@ impl BoardAccumulators {
         let w_remove_dest = get_feature_index(w_king_sq, added_piece, mv.end_sq, false);
         let b_remove_dest = get_feature_index(b_king_sq, added_piece, mv.end_sq, true);
 
-        // Extract raw references to the row arrays for maximum compiler aliasing optimizations
         let w_add_row = &nn.l1_weights[w_add_origin];
         let b_add_row = &nn.l1_weights[b_add_origin];
         let w_rem_row = &nn.l1_weights[w_remove_dest];
         let b_rem_row = &nn.l1_weights[b_remove_dest];
 
         // --- 4. High-Density Auto-Vectorized Parallel Loop Block ---
-        // Safely extract the optional inner enum capture property
         let cap_piece = mv.captured_piece.unwrap_or(BoardPiece::NONE);
+        
         if cap_piece != BoardPiece::NONE {
             let w_cap = get_feature_index(w_king_sq, cap_piece, captured_sq, false);
             let b_cap = get_feature_index(b_king_sq, cap_piece, captured_sq, true);
@@ -297,32 +282,16 @@ impl BoardAccumulators {
             let w_cap_row = &nn.l1_weights[w_cap];
             let b_cap_row = &nn.l1_weights[b_cap];
 
-            // Stream all 6 parallel slices simultaneously for capture undo
-            let targets = self.white.vals.iter_mut()
-                .zip(self.black.vals.iter_mut())
-                .zip(w_add_row.iter())
-                .zip(w_rem_row.iter())
-                .zip(w_cap_row.iter())
-                .zip(b_add_row.iter())
-                .zip(b_rem_row.iter())
-                .zip(b_cap_row.iter());
-
-            for (((((((w_val, b_val), &w_add), &w_rem), &w_cap), &b_add), &b_rem), &b_cap) in targets.take(256) {
-                *w_val += w_add + w_cap - w_rem;
-                *b_val += b_add + b_cap - b_rem;
+            // Flawless capture undo loop targeting compiler auto-vectorization registers
+            for i in 0..256 {
+                self.white.vals[i] += (w_add_row[i] as i32) + (w_cap_row[i] as i32) - (w_rem_row[i] as i32);
+                self.black.vals[i] += (b_add_row[i] as i32) + (b_cap_row[i] as i32) - (b_rem_row[i] as i32);
             }
         } else {
-            // Stream all 4 parallel slices for quiet undo
-            let targets = self.white.vals.iter_mut()
-                .zip(self.black.vals.iter_mut())
-                .zip(w_add_row.iter())
-                .zip(w_rem_row.iter())
-                .zip(b_add_row.iter())
-                .zip(b_rem_row.iter());
-
-            for (((((w_val, b_val), &w_add), &w_rem), &b_add), &b_rem) in targets.take(256) {
-                *w_val += w_add - w_rem;
-                *b_val += b_add - b_rem;
+            // Flat quiet move undo loop
+            for i in 0..256 {
+                self.white.vals[i] += (w_add_row[i] as i32) - (w_rem_row[i] as i32);
+                self.black.vals[i] += (b_add_row[i] as i32) - (b_rem_row[i] as i32);
             }
         }
     }

@@ -165,6 +165,23 @@ def process_shard_worker(stream_fn, data_queue, stop_event, dataset_name, shards
                     
         return alpha
     
+    def is_invalid_training_row(depth_str, fen_string: str) -> bool:
+        depth = int(depth_str)
+        fen_pieces_count = get_endgame_piece_count(fen_string)
+        # If it's a simplified endgame, require much higher depth to trust the score
+        if fen_pieces_count <= 12:
+            return depth < 32
+        else:
+            # Normal middlegame
+            return depth < 20
+        
+    def get_endgame_piece_count(fen_string: str) -> int:
+        board_part = fen_string.split()[0]
+        target_pieces = set("pnbrqPNBRQ")
+        total_pieces = sum(1 for char in board_part if char in target_pieces)
+        
+        return total_pieces
+    
     hf_dataset = stream_fn(dataset_name, shards_list)
     loop_counter = 0
 
@@ -175,12 +192,15 @@ def process_shard_worker(stream_fn, data_queue, stop_event, dataset_name, shards
         fen = row.get('fen')
         raw_score = row.get('cp')
         mate = row.get('mate')
+        depth = row['depth']
 
         if fen is None:
             continue
 
         try:
             if mate is not None and not math.isnan(mate):
+                continue
+            if depth is not None and is_invalid_training_row(depth, fen):
                 continue
             if raw_score is None or math.isnan(float(raw_score)):
                 continue
@@ -211,11 +231,12 @@ def process_shard_worker(stream_fn, data_queue, stop_event, dataset_name, shards
             if is_black_turn:
                 score_target = -score_target
                 
-            pawn_units = score_target / 100.0
             # Smooth out Pawn Scores for extreme winning/ losing positons
-            smooth_pawns = 10.0 * tf.math.tanh(pawn_units / 10.0)
-            win_probability = 1.0 / (1.0 + tf.math.exp(-0.41  * smooth_pawns))
-
+            # pawn_units = score_target / 100.0
+            # smooth_pawns = 10.0 * tf.math.tanh(pawn_units / 10.0)
+            # win_probability = 1.0 / (1.0 + tf.math.exp(-0.41  * smooth_pawns))
+            pawn_units = score_target / 100.0
+            
             # 4. Feature Extraction & Flattening
             w_feats, b_feats = parse_fen_to_features(fen)
             w_feats_flat = np.array(w_feats, dtype=np.float32).flatten()
@@ -227,7 +248,7 @@ def process_shard_worker(stream_fn, data_queue, stop_event, dataset_name, shards
                     'black_features': b_feats_flat,
                     'side_to_move': np.array([is_black_turn], dtype=bool)
                 },
-                np.array([win_probability], dtype=np.float32).flatten()
+                np.array([pawn_units], dtype=np.float32).flatten()
             )
 
             # 5. Push to Bounded Multi-Processing Queue
@@ -390,26 +411,43 @@ def train_nnue_on_fens():
     # 7. Hidden Layer 3 with ReLU1 activation
     x = layers.Dense(32, activation=None, name="hidden_layer_3")(x)
     x = keras.ops.clip(x, 0.0, SCALE_MAX)
-
-    # Expect Output to Mirror Pawn Units
-    def dense_tanh_smooth(x):
-        return 10.0 * tf.math.tanh(x / 10.0)
     
-    # Apply Sigmoid prior to Loss Function
-    def sigmified_mse(y_true, y_pred):
-        sigmoid_pred = 1.0 / (1.0 + tf.math.exp(-0.41 * y_pred))
-        return tf.math.square(sigmoid_pred - y_true)
-    
-    # 8. Output Layer with ReLU1 activation
-    output = layers.Dense(1, activation=dense_tanh_smooth, name="chess_eval")(x)
+    # 8. Output Layer (Linear, Pawn-Scale Output)
+    output = layers.Dense(1, activation=None, name="chess_eval")(x)
 
     model = Model(
         inputs=[white_input, black_input, stm_input],
         outputs=output
     )
+
+    def lichess_nnue_bce_loss(y_true, y_pred):
+        """
+        BCE loss matched to the Lichess win probability curve.
+        
+        y_true: Target score from your dataset (Pawn units, e.g., +1.50 or -0.75)
+        y_pred: Network output (Model evaluation in Pawn units, e.g., +1.42)
+        """
+        # 1. LICHESS CONSTANT SCALING
+        # Lichess uses k = 0.00368208 for centipawns. 
+        LICHESS_K = 0.368208
+
+        # 2. CONVERT TRUE SCORES TO PROBABILITIES
+        target_probability = 1.0 / (1.0 + tf.math.exp(-LICHESS_K * y_true))
+        target_probability = tf.clip_by_value(target_probability, 1e-7, 1.0 - 1e-7)
+
+        # 3. COMPUTE THE LOGITS FOR THE PREDICTION
+        predicted_logits = LICHESS_K * y_pred
+
+        # 4. COMPUTE STRATIFIED BINARY CROSS-ENTROPY
+        return tf.keras.losses.binary_crossentropy(
+            target_probability, 
+            predicted_logits, 
+            from_logits=True
+        )
+    
     model.compile(
         optimizer=keras.optimizers.Adam(learning_rate=0.001),
-        loss=sigmified_mse
+        loss=lichess_nnue_bce_loss
     )
 
     # 90 / 10 Split for Training / Validation Shards
@@ -507,44 +545,47 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
         print("--- Commencing Weight Quantization & Serialization for Rust ---")
         
         # 1. Accumulator Layer (49152 -> 256)
-        # (i16) -> Scale up by 128 (2^7)
+        # Input: Binary (0/1) | Weights: i16 | Bias/Output Accumulator: i32
         acc_layer = model.get_layer("accumulator_layer")
         w1, b1 = acc_layer.get_weights()
         w1_quant = np.ascontiguousarray(np.round(w1 * 128.0)).astype(np.int16)
-        b1_quant = np.round(b1 * 128.0).astype(np.int16)
+        b1_quant = np.round(b1 * 128.0).astype(np.int32) 
         f.write(w1_quant.tobytes())
         f.write(b1_quant.tobytes())
-        print(f"-> Accumulator Layer serialized. Shape: {w1.shape} (i16)")
+        print(f"-> Accumulator Layer serialized. Shape: {w1.shape} (Weights: i16 / Bias: i32)")
 
         # 2. Hidden Layer 2 (512 -> 64)
-        # (i8 weights / i32 bias) -> Scale up by 32 (2^5)
+        # Input: i16 (Clipped from Accumulator) | Weights: i8 | Bias/Output: i32
+        # Shift Right by 7 (>> 7) before clipping to next input scale.
         layer2 = model.get_layer("hidden_layer_2") 
         w2, b2 = layer2.get_weights()
         w2_quant = np.ascontiguousarray(np.clip(np.round(w2.T * 32.0), -128, 127).astype(np.int8))
         b2_quant = np.round(b2 * 32.0).astype(np.int32) 
         f.write(w2_quant.tobytes())
         f.write(b2_quant.tobytes())
-        print(f"-> Hidden Layer 2 serialized. Shape: {w2.shape} (i8 / i32)")
+        print(f"-> Hidden Layer 2 serialized. Shape: {w2.shape} (Weights: i8 / Bias: i32) [Rust -> Shift >> 7]")
 
         # 3. Hidden Layer 3 (64 -> 32)
-        # (i8 weights / i32 bias) -> Scale up by 32 (2^5)
+        # Input: i16 | Weights: i8 | Bias/Output: i32 
+        # Shift Right by 5 (>> 5) before clipping to next input scale.
         layer3 = model.get_layer("hidden_layer_3")
         w3, b3 = layer3.get_weights()
         w3_quant = np.ascontiguousarray(np.clip(np.round(w3.T * 32.0), -128, 127).astype(np.int8))
         b3_quant = np.round(b3 * 32.0).astype(np.int32)
         f.write(w3_quant.tobytes())
         f.write(b3_quant.tobytes())
-        print(f"-> Hidden Layer 3 serialized. Shape: {w3.shape} (i8 / i32)")
+        print(f"-> Hidden Layer 3 serialized. Shape: {w3.shape} (Weights: i8 / Bias: i32) [Rust -> Shift >> 5]")
 
         # 4. Output Layer (32 -> 1)
-        # (i16) -> Scale up by 128 (2^7)
+        # Input: i16 | Weights: i8 | Bias/Output: i32 
+        # Shift Right by 5 (>> 5) to get final scaled score.
         output_layer = model.get_layer("chess_eval")
         w4, b4 = output_layer.get_weights()
         w4_quant = np.ascontiguousarray(np.clip(np.round(w4.T * 128.0), -128, 127).astype(np.int8))
         b4_quant = np.round(b4 * 128.0).astype(np.int32)
         f.write(w4_quant.tobytes())
         f.write(b4_quant.tobytes())
-        print(f"-> Output Layer serialized. Shape: {w4.shape} (i8 / i32)")
+        print(f"-> Output Layer serialized. Shape: {w4.shape} (Weights: i8 / Bias: i32) [Rust -> Shift >> 5]")
 
     print(f"\n[SUCCESS] Safe NNUE file successfully compiled and written to: {file_path}")
 

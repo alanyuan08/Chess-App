@@ -47,9 +47,7 @@
 - **NNuE Architecture:** The engine features a customized **Dual-Perspective HalfKA** perspective neural network utilizing a hybrid quantization layout. The architectural data pathways progress as follows:
 
   - **Input Preprocessing:** 
-    - Convert to CentiPawn: ($\text{Centipawn / 100.0}$) -> PawnAdvantage
-    - Smooth & Bound (Soft-Capping): ($\text{10.0 * tf.math.tanh(Pawn / 10.0)}$) -> Cap
-    - Compute Win Probability: ($\text{1.0 / (1.0 + tf.math.exp(-0.41 * Cap))}$) -> score
+    - Convert to CentiPawn: ($\text{Centipawn / 100.0}$) -> pawn_units
 
   $$\text{Inputs (49,152)} \rightarrow \text{Accumulator (256)} \rightarrow \text{Multiplexed Perspective (512)} \rightarrow \text{Hidden 2 (64)} \rightarrow \text{Hidden 3 (32)} \rightarrow \text{Output (1)}$$
 
@@ -61,8 +59,8 @@
   - **Hidden Layer 3:** Matrix transformation mapping $(64, 32)$ quantized to signed 8-bit weights (`i8`) and 32-bit biases (`i32`).
     - *Activation:* Clipped/Bounded Linear ReLU ($\text{ReLU1}$) bounded strictly between `0.0` and `1.0`.
   - **Output Layer:** Combines $(32, 1)$ outputs down to a single evaluation scalar using 8-bit weights (`i8`) and 32-bit biases (`i32`).
-    - *Activation:* Custom Smooth & Bound Function ($\text{activation=10.0 * tf.math.tanh(PawnAdvantage / 10.0)}$) strictly between `-10.0` and `10.0`.
-  - **Loss Function:** Applies a Sigmoid Loss Function - ($\text{sigmoid=1.0 / (1.0 + tf.math.exp(-0.41 * Output))}$) to the model output. Uses a Mean Squared Error
+    - *Activation:* None
+  - **Loss Function:** Applies a Binary CrossEntropy Loss Function (logits = 0.368208 * y_pred) to the Win/ Loss Probability (0.0 to 1.0)
 
 ## 4. NNuE Training
 
