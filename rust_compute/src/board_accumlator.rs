@@ -66,7 +66,7 @@ impl BoardAccumulators {
             // Process chunks of 16 elements to enable aggressive SIMD auto-vectorization
             let inputs = &buffer.l2_inputs[..512];
             for (chunk_weights, chunk_inputs) in row.chunks(16).zip(inputs.chunks(16)) {
-                for (j, (&w, &inp)) in chunk_weights.iter().zip(chunk_inputs.iter()).enumerate() {
+                for (&w, &inp) in chunk_weights.iter().zip(chunk_inputs.iter()) {
                     sum += (inp as i32) * (w as i32);
                 }
             }
@@ -85,7 +85,7 @@ impl BoardAccumulators {
 
             let inputs = &buffer.l3_inputs[..64];
             for (chunk_weights, chunk_inputs) in row.chunks(16).zip(inputs.chunks(16)) {
-                for (j, (&w, &inp)) in chunk_weights.iter().zip(chunk_inputs.iter()).enumerate() {
+                for (&w, &inp) in chunk_weights.iter().zip(chunk_inputs.iter()) {
                     sum += (inp as i32) * (w as i32);
                 }
             }
@@ -103,7 +103,7 @@ impl BoardAccumulators {
 
         let inputs = &buffer.l4_inputs[..32];
         for (chunk_weights, chunk_inputs) in row.chunks(16).zip(inputs.chunks(16)) {
-            for (j, (&w, &inp)) in chunk_weights.iter().zip(chunk_inputs.iter()).enumerate() {
+            for (&w, &inp) in chunk_weights.iter().zip(chunk_inputs.iter()) {
                 final_sum += (inp as i32) * (w as i32);
             }
         }
