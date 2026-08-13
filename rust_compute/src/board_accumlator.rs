@@ -24,21 +24,6 @@ impl Default for BoardAccumulators {
 }
 
 impl BoardAccumulators {
-    #[inline(always)]
-    fn raw_logit_to_centipawns_i32(self, final_normalized: i32) -> i32 {
-        let alpha: f32 = 0.6;
-        let quantization_scale: f32 = 128.0; // Matches your Python * 128.0 script!
-        
-        // 1. Convert quantized integer back to raw float logit space
-        let raw_logit = final_normalized as f32 / quantization_scale;
-        
-        // 2. Calculate the raw float score in centipawns
-        let score_f32 = (raw_logit / alpha) * 100.0;
-        
-        // 3. Round to the nearest mathematical integer and cast to i32
-        score_f32.round() as i32
-    }
-        
     /// Computes the forward evaluation pass using the current accumulator states.
     /// Returns the final centipawn assessment.
     pub fn evaluate(
@@ -114,11 +99,10 @@ impl BoardAccumulators {
             final_sum += (buffer.l4_inputs[i] as i32) * (weight as i32);
         }
 
-        // Shift down by >> 7 (divide by 128) to resolve the final output layer scale back to 1.0.
-        let final_normalized = final_sum >> 7;
+        // Shift by >> 7 for adjust for weights and convert pawn to centipawn
+        let centipawns_fast = (final_sum * 100) >> 7;
 
-        // Convert the normalized integer score directly into engine centipawns.
-        self.raw_logit_to_centipawns_i32(final_normalized)
+        centipawns_fast
     }
 
     /// Re-reads the entire board layout from scratch to perform a full baseline refresh

@@ -211,9 +211,10 @@ def process_shard_worker(stream_fn, data_queue, stop_event, dataset_name, shards
             if is_black_turn:
                 score_target = -score_target
                 
-            score_target = max(-1000.0, min(1000.0, score_target))
             pawn_units = score_target / 100.0
-            win_probability = 1.0 / (1.0 + math.exp(-0.6 * pawn_units))
+            # Smooth out Pawn Scores for extreme winning/ losing positons
+            smooth_pawns = 10.0 * tf.math.tanh(pawn_units / 10.0)
+            win_probability = 1.0 / (1.0 + tf.math.exp(-0.41  * smooth_pawns))
 
             # 4. Feature Extraction & Flattening
             w_feats, b_feats = parse_fen_to_features(fen)
@@ -390,19 +391,25 @@ def train_nnue_on_fens():
     x = layers.Dense(32, activation=None, name="hidden_layer_3")(x)
     x = keras.ops.clip(x, 0.0, SCALE_MAX)
 
+    # Expect Output to Mirror Pawn Units
+    def dense_tanh_smooth(x):
+        return 10.0 * tf.math.tanh(x / 10.0)
+    
+    # Apply Sigmoid prior to Loss Function
+    def sigmified_mse(y_true, y_pred):
+        sigmoid_pred = 1.0 / (1.0 + tf.math.exp(-0.41 * y_pred))
+        return tf.math.square(sigmoid_pred - y_true)
+    
     # 8. Output Layer with ReLU1 activation
-    output = layers.Dense(1, activation=None, name="chess_eval")(x)
+    output = layers.Dense(1, activation=dense_tanh_smooth, name="chess_eval")(x)
 
     model = Model(
         inputs=[white_input, black_input, stm_input],
         outputs=output
     )
-
-    # Apply Sigmoid prior to Loss Function
     model.compile(
         optimizer=keras.optimizers.Adam(learning_rate=0.001),
-        loss=tf.keras.losses.BinaryCrossentropy(from_logits=True),
-        metrics=['mae']
+        loss=sigmified_mse
     )
 
     # 90 / 10 Split for Training / Validation Shards

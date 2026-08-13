@@ -37,7 +37,12 @@
 ## 3. Neural Network Evaluation
 
 - **NNUE Architecture:** The engine features a customized **Dual-Perspective HalfKA** perspective neural network utilizing a hybrid quantization layout. The architectural data pathways progress as follows:
-  
+
+  - **Input Preprocessing:** 
+  1. Convert to CentiPawn: ($\text{Centipawn / 100.0}$) -> Pawn
+  2. Smooth & Bound (Soft-Capping): ($\text{10.0 * tf.math.tanh(Pawn / 10.0)}$) -> Cap
+  3. Compute Win Probability: ($\text{1.0 / (1.0 + tf.math.exp(-0.41 * Cap))}$) -> score
+
   $$\text{Inputs (49,152)} \rightarrow \text{Accumulator (256)} \rightarrow \text{Multiplexed Perspective (512)} \rightarrow \text{Hidden 2 (64)} \rightarrow \text{Hidden 3 (32)} \rightarrow \text{Output (1)}$$
 
   - **Input Layer:** $12 \times 64 \times 64 = 49,152$ sparse features mapping active piece-square configurations relative to your own active King's position.
@@ -48,8 +53,7 @@
   - **Hidden Layer 3:** Matrix transformation mapping $(64, 32)$ quantized to signed 8-bit weights (`i8`) and 32-bit biases (`i32`).
     - *Activation:* Clipped/Bounded Linear ReLU ($\text{ReLU1}$) bounded strictly between `0.0` and `1.0`.
   - **Output Layer:** Combines $(32, 1)$ outputs down to a single evaluation scalar using 8-bit weights (`i8`) and 32-bit biases (`i32`).
-    - *Activation:* ($\text{activation=None}$). Outputs as a win percentage
-  - **Loss & Optimization Level:** Model compiles using ($\text{BinaryCrossentropy(from-logits=True)}$) This automatically applies an internal, numerically stable Sigmoid transformation to the raw output logits during the loss calculation step to match your 0-to-1 training targets.
+    - *Activation:* ($\text{activation=Tanh_Smooth}$). Output a value bounded strictly between `-10.0` and `10.0`. 
 
 - **NNUE Training Data:** The evaluation network is trained exclusively on normalized Stockfish evaluations mapped from standard Forsyth-Edwards Notation (FEN) profiles spanning varied positional lines and forced checkmate sequences.
 
