@@ -16,8 +16,8 @@ DATASET_NAME = "Lichess/chess-position-evaluations"
 BIN_SAVE_PATH = "nnue_weights.bin"
 
 # Training / Validation Per Epoch
-BATCH_SIZE = 4096 # 4096 * 244
-VAL_BATCH_SIZE = BATCH_SIZE # 4096 * 30
+BATCH_SIZE = 8192  # 4096 * 244
+VAL_BATCH_SIZE = BATCH_SIZE
 SHUFFLE_BUFFER = BATCH_SIZE * 4
 
 NUM_THREADS = 8
@@ -382,12 +382,12 @@ class AggressiveMemoryCleanup(keras.callbacks.Callback):
 # --- Model deesign & Training Runner ---
 def train_nnue_on_fens():
     # 1. Inputs
-    white_input = layers.Input(shape=(INPUT_FEATURES,), name="white_features")
-    black_input = layers.Input(shape=(INPUT_FEATURES,), name="black_features")
+    white_input = layers.Input(shape=(INPUT_FEATURES,), sparse=True, name="white_features")
+    black_input = layers.Input(shape=(INPUT_FEATURES,), sparse=True, name="black_features")
     stm_input = layers.Input(shape=(1,), dtype="bool", name="side_to_move")
 
     # 2. Shared Accumulator Layer (HalfK Virtual Weights)
-    accumulator = layers.Dense(256, activation=None, name="accumulator_layer") 
+    accumulator = layers.Dense(256, activation=None, kernel_initializer='random_normal', name="accumulator_layer") 
     w_acc = accumulator(white_input)
     b_acc = accumulator(black_input)
 
@@ -420,34 +420,30 @@ def train_nnue_on_fens():
         outputs=output
     )
 
-    def lichess_nnue_bce_loss(y_true, y_pred):
+    def lichess_nnue_probability_mse_loss(y_true, y_pred):
         """
-        BCE loss matched to the Lichess win probability curve.
+        MSE loss computed on Lichess win probabilities.
         
-        y_true: Target score from your dataset (Pawn units, e.g., +1.50 or -0.75)
+        y_true: Target score from your dataset (Pawn units, e.g., +1.50)
         y_pred: Network output (Model evaluation in Pawn units, e.g., +1.42)
         """
         # 1. LICHESS CONSTANT SCALING
-        # Lichess uses k = 0.00368208 for centipawns. 
         LICHESS_K = 0.368208
 
-        # 2. CONVERT TRUE SCORES TO PROBABILITIES
+        # 2. CONVERT TRUE SCORES TO TARGET PROBABILITIES (0.0 to 1.0)
         target_probability = 1.0 / (1.0 + tf.math.exp(-LICHESS_K * y_true))
-        target_probability = tf.clip_by_value(target_probability, 1e-7, 1.0 - 1e-7)
 
-        # 3. COMPUTE THE LOGITS FOR THE PREDICTION
-        predicted_logits = LICHESS_K * y_pred
+        # 3. CONVERT NETWORK PREDICTIONS TO PREDICTED PROBABILITIES (0.0 to 1.0)
+        # This keeps the sigmoid behavior active during the training pass
+        predicted_probability = 1.0 / (1.0 + tf.math.exp(-LICHESS_K * y_pred))
 
-        # 4. COMPUTE STRATIFIED BINARY CROSS-ENTROPY
-        return tf.keras.losses.binary_crossentropy(
-            target_probability, 
-            predicted_logits, 
-            from_logits=True
-        )
+        # 4. COMPUTE MEAN SQUARED ERROR ON THE PROBABILITIES
+        # Linear, steady gradients that won't stall on equal/drawish positions
+        return tf.reduce_mean(tf.square(target_probability - predicted_probability))
     
     model.compile(
         optimizer=keras.optimizers.Adam(learning_rate=0.001),
-        loss=lichess_nnue_bce_loss
+        loss=lichess_nnue_probability_mse_loss
     )
 
     # 90 / 10 Split for Training / Validation Shards
@@ -505,20 +501,13 @@ def train_nnue_on_fens():
     )
 
     # Adjust Learning Rate
-    lr_scheduler_cb = tf.keras.callbacks.ReduceLROnPlateau(
-        monitor='val_loss',
-        factor=0.5,
-        patience=4,
-        min_lr=1e-5,
-        verbose=1
-    )
+    def lr_schedule(epoch):
+        initial_lr = 0.001
+        decay_factor = 0.5
+        epochs_per_drop = 5
+        return initial_lr * (decay_factor ** (epoch // epochs_per_drop))
 
-    early_stopping_cb = tf.keras.callbacks.EarlyStopping(
-        monitor='val_loss',
-        patience=8,  
-        restore_best_weights=True
-    )
-
+    lr_scheduler_cb = tf.keras.callbacks.LearningRateScheduler(lr_schedule, verbose=1)
 
     # Instantiate the new cleanup guard
     cleanup_cb = AggressiveMemoryCleanup()
@@ -526,10 +515,10 @@ def train_nnue_on_fens():
     model.fit(
         train_dataset, 
         steps_per_epoch=976,
-        epochs=50, 
+        epochs=25, 
         validation_data=val_dataset,
-        validation_steps=120,
-        callbacks=[checkpoint_cb, lr_scheduler_cb, early_stopping_cb, cleanup_cb]
+        validation_steps=40,
+        callbacks=[checkpoint_cb, lr_scheduler_cb, cleanup_cb]
     )
 
      # At the very bottom of your script after model.fit() finishes all 25 epochs:
