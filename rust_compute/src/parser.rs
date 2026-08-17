@@ -85,7 +85,7 @@ pub fn parse_forward_move_with_board(uci: &str, board: &ChessBoard) -> ForwardMo
         if (start_rank as i32 - end_rank as i32).abs() == 2 {
             move_type = MoveFlag::PAWNOPENMOVE;
         }
-}
+    }
 
     ForwardMove {
         start_sq,
