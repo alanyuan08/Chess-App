@@ -2,6 +2,7 @@ use crate::nnue_network::*;
 use crate::move_command::*;
 
 // Retain White / Black Accumulator values across Positions
+#[repr(C, align(64))]
 #[derive(Debug, Clone, Copy)]
 pub struct Accumulator {
     pub vals: [i32; 256],
@@ -32,9 +33,6 @@ impl BoardAccumulators {
         nn: &NnueNetwork, 
         buffer: &mut NnueInferenceBuffer
     ) -> i32 {
-        // Clear Buffer 
-        buffer.clear();
-
         // --- PERSPECTIVE ROUTING ---
         // Side to move (US) always fills the first 256 inputs.
         // Opponent (THEM) always fills the second 256 inputs.
@@ -128,10 +126,9 @@ impl BoardAccumulators {
         // 2. Loop through every square on the board and add active pieces
         for (sq, &piece) in mailbox.iter().enumerate().take(64) {
             if piece != BoardPiece::NONE {
-                let sq_convert = sq ^ 56;
                 // Get the unique HalfKA indices for both king perspectives
-                let w_idx = get_feature_index(w_king_sq, piece, sq_convert, false);
-                let b_idx = get_feature_index(b_king_sq, piece, sq_convert, true);
+                let w_idx = get_feature_index(w_king_sq, piece, sq, false);
+                let b_idx = get_feature_index(b_king_sq, piece, sq, true);
                 
                 // Grab direct references to the row weights in the neural network structure
                 let w_row = &nn.l1_weights[w_idx];
