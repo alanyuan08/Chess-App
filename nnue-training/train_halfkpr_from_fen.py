@@ -6,6 +6,7 @@ import queue
 import gc
 from tensorflow.keras import layers, Model
 from huggingface_hub import HfApi
+import math
 
 # --- CONSTANTS ---
 INPUT_FEATURES = 64 * 64 * 12  # 49,152
@@ -166,6 +167,12 @@ def process_shard_worker(stream_fn, data_queue, stop_event, dataset_name, shards
         return alpha
     
     def is_invalid_training_row(depth_str, fen_string: str) -> bool:
+        # 1. Castling Rights Check: If any active castling flag exists, discard the row
+        castling_field = fen_string.split()[2]
+        if castling_field != "-":
+            return True 
+        
+        # 2. Depth & Phase Check
         depth = int(depth_str)
         fen_pieces_count = get_endgame_piece_count(fen_string)
         # If it's a simplified endgame, require much higher depth to trust the score
@@ -502,10 +509,25 @@ def train_nnue_on_fens():
 
     # Adjust Learning Rate
     def lr_schedule(epoch):
+        """
+        Smooth Cosine Decay learning rate schedule for NNUE training.
+        """
         initial_lr = 0.001
-        decay_factor = 0.5
-        epochs_per_drop = 5
-        return initial_lr * (decay_factor ** (epoch // epochs_per_drop))
+        min_lr = 0.00001      # The lowest learning rate you want to reach
+        total_epochs = 20     # Update this to match your total number of planned epochs
+        
+        # Boundary check to prevent progress from going past 1.0
+        if epoch >= total_epochs:
+            return min_lr
+            
+        # Calculate how far along we are in training (0.0 to 1.0)
+        progress = epoch / total_epochs
+        
+        # Calculate the smooth cosine multiplier
+        cosine_decay = 0.5 * (1.0 + math.cos(math.pi * progress))
+        
+        # Return the decayed rate, bounded by your minimum learning rate floor
+        return min_lr + (initial_lr - min_lr) * cosine_decay
 
     lr_scheduler_cb = tf.keras.callbacks.LearningRateScheduler(lr_schedule, verbose=1)
 

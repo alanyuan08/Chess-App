@@ -211,7 +211,7 @@ impl<'a> SearchWorker<'a> {
             || forward_move.move_type == MoveFlag::KINGSIDECASTLE 
             || forward_move.move_type == MoveFlag::QUEENSIDECASTLE;
 
-        if !is_king_or_castle {
+        if  {
             let w_king_sq = self.chess_board.kings[0].trailing_zeros() as usize;
             let b_king_sq = self.chess_board.kings[1].trailing_zeros() as usize;
             self.chess_board.accumulators.make_move(
