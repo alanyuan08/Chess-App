@@ -5,9 +5,10 @@ use crate::move_command::*;
 #[repr(C, align(64))]
 #[derive(Debug, Clone, Copy)]
 pub struct Accumulator {
-    pub vals: [i32; 256],
+    pub vals: [i16; 256],
 }
 
+#[repr(C, align(64))]
 #[derive(Debug, Clone, Copy)]
 pub struct BoardAccumulators {
     pub white: Accumulator,
@@ -18,8 +19,8 @@ pub struct BoardAccumulators {
 impl Default for BoardAccumulators {
     fn default() -> Self {
         Self {
-            white: Accumulator { vals: [0i32; 256] },
-            black: Accumulator { vals: [0i32; 256] },
+            white: Accumulator { vals: [0i16; 256] },
+            black: Accumulator { vals: [0i16; 256] },
         }
     }
 }
@@ -46,11 +47,11 @@ impl BoardAccumulators {
 
         // --- STEP 1: CONCATENATION & ACTIVATION (L1 -> L2) ---
         for (i, &val) in active_acc.vals.iter().enumerate().take(256) {
-            buffer.l2_inputs[i] = val.clamp(0, 128) as i16;
+            buffer.l2_inputs[i] = val.clamp(0, 128);
         }
 
         for (i, &val) in opp_acc.vals.iter().enumerate().take(256) {
-            buffer.l2_inputs[i + 256] = val.clamp(0, 128) as i16;
+            buffer.l2_inputs[i + 256] = val.clamp(0, 128);
         }
 
         // --- STEP 2: HIDDEN LAYER 2 (512 -> 64) ---
@@ -63,7 +64,7 @@ impl BoardAccumulators {
 
             // Process chunks of 16 elements to enable aggressive SIMD auto-vectorization
             let inputs = &buffer.l2_inputs[..512];
-            for (chunk_weights, chunk_inputs) in row.chunks(16).zip(inputs.chunks(16)) {
+            for (chunk_weights, chunk_inputs) in row.chunks_exact(16).zip(inputs.chunks_exact(16)) {
                 for (&w, &inp) in chunk_weights.iter().zip(chunk_inputs.iter()) {
                     sum += (inp as i32) * (w as i32);
                 }
@@ -82,7 +83,7 @@ impl BoardAccumulators {
             let mut sum: i32 = bias;
 
             let inputs = &buffer.l3_inputs[..64];
-            for (chunk_weights, chunk_inputs) in row.chunks(16).zip(inputs.chunks(16)) {
+            for (chunk_weights, chunk_inputs) in row.chunks_exact(16).zip(inputs.chunks_exact(16)) {
                 for (&w, &inp) in chunk_weights.iter().zip(chunk_inputs.iter()) {
                     sum += (inp as i32) * (w as i32);
                 }
@@ -100,7 +101,7 @@ impl BoardAccumulators {
         let row = &nn.output_weights[0];
 
         let inputs = &buffer.l4_inputs[..32];
-        for (chunk_weights, chunk_inputs) in row.chunks(16).zip(inputs.chunks(16)) {
+        for (chunk_weights, chunk_inputs) in row.chunks_exact(16).zip(inputs.chunks(16)) {
             for (&w, &inp) in chunk_weights.iter().zip(chunk_inputs.iter()) {
                 final_sum += (inp as i32) * (w as i32);
             }
@@ -126,8 +127,8 @@ impl BoardAccumulators {
         let biases = &nn.l1_biases[..256];
 
         for i in 0..256 {
-            target_white[i] = biases[i] as i32;
-            target_black[i] = biases[i] as i32;
+            target_white[i] = biases[i] as i16;
+            target_black[i] = biases[i] as i16;
         }
 
         // 2. Loop through every square on the board and add active pieces
@@ -144,8 +145,8 @@ impl BoardAccumulators {
                 // 3. Unroll the nested zip into a clean, contiguous loop.
                 // The exact bounds match allows the compiler to confidently auto-vectorize this loop.
                 for i in 0..256 {
-                    target_white[i] += w_row[i] as i32; 
-                    target_black[i] += b_row[i] as i32; 
+                    target_white[i] += w_row[i];
+                    target_black[i] += b_row[i]; 
                 }
             }
         }
@@ -217,13 +218,13 @@ impl BoardAccumulators {
             // Clean, direct loops easily targeted by SIMD auto-vectorization.
             // i16 values are cast to i32 to maintain perfect accumulator precision.
             for i in 0..256 {
-                self.white.vals[i] += (w_add_row[i] as i32) - (w_rem_row[i] as i32) - (w_cap_row[i] as i32);
-                self.black.vals[i] += (b_add_row[i] as i32) - (b_rem_row[i] as i32) - (b_cap_row[i] as i32);
+                self.white.vals[i] += w_add_row[i] - w_rem_row[i] - w_cap_row[i];
+                self.black.vals[i] += b_add_row[i] - b_rem_row[i] - b_cap_row[i];
             }
         } else {
             for i in 0..256 {
-                self.white.vals[i] += (w_add_row[i] as i32) - (w_rem_row[i] as i32);
-                self.black.vals[i] += (b_add_row[i] as i32) - (b_rem_row[i] as i32);
+                self.white.vals[i] += w_add_row[i] - w_rem_row[i];
+                self.black.vals[i] += b_add_row[i] - b_rem_row[i];
             }
         }
     }
@@ -289,14 +290,14 @@ impl BoardAccumulators {
 
             // Flawless capture undo loop targeting compiler auto-vectorization registers
             for i in 0..256 {
-                self.white.vals[i] += (w_add_row[i] as i32) + (w_cap_row[i] as i32) - (w_rem_row[i] as i32);
-                self.black.vals[i] += (b_add_row[i] as i32) + (b_cap_row[i] as i32) - (b_rem_row[i] as i32);
+                self.white.vals[i] += w_add_row[i] + w_cap_row[i] - w_rem_row[i];
+                self.black.vals[i] += b_add_row[i] + b_cap_row[i] - b_rem_row[i];
             }
         } else {
             // Flat quiet move undo loop
             for i in 0..256 {
-                self.white.vals[i] += (w_add_row[i] as i32) - (w_rem_row[i] as i32);
-                self.black.vals[i] += (b_add_row[i] as i32) - (b_rem_row[i] as i32);
+                self.white.vals[i] += w_add_row[i] - w_rem_row[i];
+                self.black.vals[i] += b_add_row[i] - b_rem_row[i];
             }
         }
     }

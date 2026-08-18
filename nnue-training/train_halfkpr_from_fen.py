@@ -171,15 +171,22 @@ def process_shard_worker(stream_fn, data_queue, stop_event, dataset_name, shards
         return alpha
     
     def is_invalid_training_row(depth_str, fen_string: str) -> bool:
+        # Split the FEN string into its component fields
+        fen_parts = fen_string.split()
+        
         # 1. Castling Rights Check: If any active castling flag exists, discard the row
-        castling_field = fen_string.split()[2]
+        castling_field = fen_parts[2]
         if castling_field != "-":
             return True 
         
-        # 2. Depth & Phase Check
+        # 2. En Passant Check: If an en passant target square exists, discard the row
+        en_passant_field = fen_parts[3]
+        if en_passant_field != "-":
+            return True
+
+        # 3. Depth & Phase Check
         depth = int(depth_str)
         fen_pieces_count = get_endgame_piece_count(fen_string)
-        # If it's a simplified endgame, require much higher depth to trust the score
         if fen_pieces_count <= 12:
             return depth < 32
         else:

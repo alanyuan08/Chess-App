@@ -181,9 +181,9 @@ pub fn get_feature_index(king_sq: usize, piece: BoardPiece,
         // From Black's perspective, flip the board vertically and invert piece colors
         // In Python layout: White pieces are 0..5, Black pieces are 6..11
         let inverted_type = (piece_type + 6) % 12;
-        (flip_square(king_sq_flip), flip_square(piece_sq_flip), inverted_type)
+        (flip_square(king_sq), flip_square(piece_sq), inverted_type)
     } else {
-        (king_sq_flip, piece_sq_flip, piece_type)
+        (king_sq, piece_sq, piece_type)
     };
 
     // Index Formula: (KingSquare * 768) + (PieceType * 64) + PieceSquare
