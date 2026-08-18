@@ -18,7 +18,7 @@ BIN_SAVE_PATH = "nnue_weights.bin"
 
 # Training / Validation Per Epoch
 BATCH_SIZE = 8192  # 4096 * 244
-VAL_BATCH_SIZE = BATCH_SIZE
+VAL_BATCH_SIZE = BATCH_SIZE * 2
 SHUFFLE_BUFFER = BATCH_SIZE * 4
 
 NUM_THREADS = 8
@@ -63,6 +63,10 @@ def process_shard_worker(stream_fn, data_queue, stop_event, dataset_name, shards
         
         # Expand numeric spaces in FEN to empty string dots for alignment
         rows = board_part.split('/')
+
+        # Rank 1 (A1) is 0
+        rows.reverse()
+
         clean_board = ""
         for row in rows:
             for char in row:
@@ -427,22 +431,22 @@ def train_nnue_on_fens():
         outputs=output
     )
 
-    def lichess_nnue_probability_mse_loss(y_true, y_pred):
+    def stockfish_nnue_probability_mse_loss(y_true, y_pred):
         """
-        MSE loss computed on Lichess win probabilities.
+        MSE loss computed on stockfish win probabilities.
         
         y_true: Target score from your dataset (Pawn units, e.g., +1.50)
         y_pred: Network output (Model evaluation in Pawn units, e.g., +1.42)
         """
-        # 1. LICHESS CONSTANT SCALING
-        LICHESS_K = 0.368208
+        # 1. STOCK_FISH CONSTANT SCALING
+        STOCK_FISH = 0.575653
 
         # 2. CONVERT TRUE SCORES TO TARGET PROBABILITIES (0.0 to 1.0)
-        target_probability = 1.0 / (1.0 + tf.math.exp(-LICHESS_K * y_true))
+        target_probability = 1.0 / (1.0 + tf.math.exp(-STOCK_FISH * y_true))
 
         # 3. CONVERT NETWORK PREDICTIONS TO PREDICTED PROBABILITIES (0.0 to 1.0)
         # This keeps the sigmoid behavior active during the training pass
-        predicted_probability = 1.0 / (1.0 + tf.math.exp(-LICHESS_K * y_pred))
+        predicted_probability = 1.0 / (1.0 + tf.math.exp(-STOCK_FISH * y_pred))
 
         # 4. COMPUTE MEAN SQUARED ERROR ON THE PROBABILITIES
         # Linear, steady gradients that won't stall on equal/drawish positions
@@ -450,7 +454,7 @@ def train_nnue_on_fens():
     
     model.compile(
         optimizer=keras.optimizers.Adam(learning_rate=0.001),
-        loss=lichess_nnue_probability_mse_loss
+        loss=stockfish_nnue_probability_mse_loss
     )
 
     # 90 / 10 Split for Training / Validation Shards

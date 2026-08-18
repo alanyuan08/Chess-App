@@ -30,7 +30,7 @@ impl BoardAccumulators {
     pub fn evaluate(
         &self, 
         active_player: Side,
-        nn: &NnueNetwork, 
+        nn: &'static NnueNetwork, 
         buffer: &mut NnueInferenceBuffer
     ) -> i32 {
         // --- PERSPECTIVE ROUTING ---
@@ -114,14 +114,21 @@ impl BoardAccumulators {
     /// Re-reads the entire board layout from scratch to perform a full baseline refresh
     pub fn refresh_from_scratch(
         &mut self, 
-        nn: &NnueNetwork, 
+        nn: &'static NnueNetwork, 
         mailbox: &[BoardPiece; 64], 
         w_king_sq: usize, 
         b_king_sq: usize
     ) {
-        // 1. Reset both accumulators to the initial layer 1 baseline biases
-        self.white.vals.copy_from_slice(&nn.l1_biases);
-        self.black.vals.copy_from_slice(&nn.l1_biases);
+        // 1. Reset both accumulators to the initial layer 1 baseline biases (Casting i16 to i32)
+        // Slicing to [..256] removes the compiler's bounds-checking overhead
+        let target_white = &mut self.white.vals[..256];
+        let target_black = &mut self.black.vals[..256];
+        let biases = &nn.l1_biases[..256];
+
+        for i in 0..256 {
+            target_white[i] = biases[i] as i32;
+            target_black[i] = biases[i] as i32;
+        }
 
         // 2. Loop through every square on the board and add active pieces
         for (sq, &piece) in mailbox.iter().enumerate().take(64) {
@@ -130,15 +137,15 @@ impl BoardAccumulators {
                 let w_idx = get_feature_index(w_king_sq, piece, sq, false);
                 let b_idx = get_feature_index(b_king_sq, piece, sq, true);
                 
-                // Grab direct references to the row weights in the neural network structure
-                let w_row = &nn.l1_weights[w_idx];
-                let b_row = &nn.l1_weights[b_idx];
+                // Grab direct references to the row weights and explicitly slice them to 256
+                let w_row = &nn.l1_weights[w_idx][..256];
+                let b_row = &nn.l1_weights[b_idx][..256];
 
                 // 3. Unroll the nested zip into a clean, contiguous loop.
-                // The compiler can easily auto-vectorize this standard loop layout.
+                // The exact bounds match allows the compiler to confidently auto-vectorize this loop.
                 for i in 0..256 {
-                    self.white.vals[i] += w_row[i] as i32; // Cast i16 weight to i32 sum box
-                    self.black.vals[i] += b_row[i] as i32; // Cast i16 weight to i32 sum box
+                    target_white[i] += w_row[i] as i32; 
+                    target_black[i] += b_row[i] as i32; 
                 }
             }
         }
@@ -148,7 +155,7 @@ impl BoardAccumulators {
     #[inline(always)]
     pub fn make_move(
         &mut self, 
-        nn: &NnueNetwork, 
+        nn: &'static NnueNetwork, 
         mv: ForwardMove,
         mailbox: &[BoardPiece; 64], 
         w_king_sq: usize, 
@@ -193,18 +200,19 @@ impl BoardAccumulators {
         let w_add = get_feature_index(w_king_sq, added_piece, mv.end_sq, false);
         let b_add = get_feature_index(b_king_sq, added_piece, mv.end_sq, true);
 
-        let w_rem_row = &nn.l1_weights[w_remove];
-        let b_rem_row = &nn.l1_weights[b_remove];
-        let w_add_row = &nn.l1_weights[w_add];
-        let b_add_row = &nn.l1_weights[b_add];
+        // Get basic rows
+        let w_rem_row = &nn.l1_weights[w_remove][..256];
+        let b_rem_row = &nn.l1_weights[b_remove][..256];
+        let w_add_row = &nn.l1_weights[w_add][..256];
+        let b_add_row = &nn.l1_weights[b_add][..256];
 
         // --- 4. High-Density Auto-Vectorized Parallel Loop Block ---
         if captured_piece != BoardPiece::NONE {
             let w_cap = get_feature_index(w_king_sq, captured_piece, captured_sq, false);
             let b_cap = get_feature_index(b_king_sq, captured_piece, captured_sq, true);
             
-            let w_cap_row = &nn.l1_weights[w_cap];
-            let b_cap_row = &nn.l1_weights[b_cap];
+            let w_cap_row = &nn.l1_weights[w_cap][..256];
+            let b_cap_row = &nn.l1_weights[b_cap][..256];
 
             // Clean, direct loops easily targeted by SIMD auto-vectorization.
             // i16 values are cast to i32 to maintain perfect accumulator precision.
@@ -213,7 +221,6 @@ impl BoardAccumulators {
                 self.black.vals[i] += (b_add_row[i] as i32) - (b_rem_row[i] as i32) - (b_cap_row[i] as i32);
             }
         } else {
-            // Quiet moves (No piece captured)
             for i in 0..256 {
                 self.white.vals[i] += (w_add_row[i] as i32) - (w_rem_row[i] as i32);
                 self.black.vals[i] += (b_add_row[i] as i32) - (b_rem_row[i] as i32);
@@ -224,30 +231,30 @@ impl BoardAccumulators {
     #[inline(always)]
     pub fn unmake_move(
         &mut self, 
-        nn: &NnueNetwork, 
+        nn: &'static NnueNetwork, 
         mv: UndoMove,
         mailbox: &[BoardPiece; 64], 
         w_king_sq: usize, 
         b_king_sq: usize
     ) {
         // Since bitboards haven't rolled back yet, the piece at the end square is the added piece
-        let added_piece: BoardPiece = mailbox[mv.end_sq];
+        let remove_piece: BoardPiece = mailbox[mv.end_sq];
 
         // --- 1. Identify Original Moving Piece (Reverse Promotion Logic) ---
-        let move_piece = match mv.move_type {
+        let add_piece = match mv.move_type {
             MoveFlag::PROMOTIONQUEEN | MoveFlag::PROMOTIONROOK | MoveFlag::PROMOTIONBISHOP | MoveFlag::PROMOTIONKNIGHT => {
-                if added_piece == BoardPiece::WQUEEN || added_piece == BoardPiece::WROOK || added_piece == BoardPiece::WBISHOP || added_piece == BoardPiece::WKNIGHT {
+                if remove_piece == BoardPiece::WQUEEN || remove_piece == BoardPiece::WROOK || remove_piece == BoardPiece::WBISHOP || remove_piece == BoardPiece::WKNIGHT {
                     BoardPiece::WPAWN
                 } else {
                     BoardPiece::BPAWN
                 }
             }
-            _ => added_piece,
+            _ => remove_piece,
         };
 
         // --- 2. Identify Captured Piece Coordinate (Handles En Passant) ---
         let captured_sq = if mv.move_type == MoveFlag::ENPASSANT {
-            if move_piece == BoardPiece::WPAWN {
+            if add_piece == BoardPiece::WPAWN {
                 mv.end_sq - 8 
             } else {
                 mv.end_sq + 8 
@@ -259,16 +266,16 @@ impl BoardAccumulators {
         // --- 3. Compute Sparse Feature Indices ---
         // To undo: we ADD back the original piece to its starting square, 
         // ADD back the captured piece to its capture square, and REMOVE the piece that reached the destination.
-        let w_add_origin = get_feature_index(w_king_sq, move_piece, mv.start_sq, false);
-        let b_add_origin = get_feature_index(b_king_sq, move_piece, mv.start_sq, true);
+        let w_add_origin = get_feature_index(w_king_sq, add_piece, mv.start_sq, false);
+        let b_add_origin = get_feature_index(b_king_sq, add_piece, mv.start_sq, true);
 
-        let w_remove_dest = get_feature_index(w_king_sq, added_piece, mv.end_sq, false);
-        let b_remove_dest = get_feature_index(b_king_sq, added_piece, mv.end_sq, true);
+        let w_remove_dest = get_feature_index(w_king_sq, remove_piece, mv.end_sq, false);
+        let b_remove_dest = get_feature_index(b_king_sq, remove_piece, mv.end_sq, true);
 
-        let w_add_row = &nn.l1_weights[w_add_origin];
-        let b_add_row = &nn.l1_weights[b_add_origin];
-        let w_rem_row = &nn.l1_weights[w_remove_dest];
-        let b_rem_row = &nn.l1_weights[b_remove_dest];
+        let w_add_row = &nn.l1_weights[w_add_origin][..256];
+        let b_add_row = &nn.l1_weights[b_add_origin][..256];
+        let w_rem_row = &nn.l1_weights[w_remove_dest][..256];
+        let b_rem_row = &nn.l1_weights[b_remove_dest][..256];
 
         // --- 4. High-Density Auto-Vectorized Parallel Loop Block ---
         let cap_piece = mv.captured_piece.unwrap_or(BoardPiece::NONE);
@@ -276,9 +283,9 @@ impl BoardAccumulators {
         if cap_piece != BoardPiece::NONE {
             let w_cap = get_feature_index(w_king_sq, cap_piece, captured_sq, false);
             let b_cap = get_feature_index(b_king_sq, cap_piece, captured_sq, true);
-            
-            let w_cap_row = &nn.l1_weights[w_cap];
-            let b_cap_row = &nn.l1_weights[b_cap];
+
+            let w_cap_row = &nn.l1_weights[w_cap][..256];
+            let b_cap_row = &nn.l1_weights[b_cap][..256];
 
             // Flawless capture undo loop targeting compiler auto-vectorization registers
             for i in 0..256 {
