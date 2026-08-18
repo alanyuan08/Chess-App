@@ -177,10 +177,6 @@ pub fn get_feature_index(king_sq: usize, piece: BoardPiece,
     piece_sq: usize, is_black_active: bool) -> usize {
     let piece_type = piece.to_nnue_type();
 
-    // Fen Notation used is training assumes incorrect order
-    let king_sq_flip = king_sq ^ 56;
-    let piece_sq_flip = piece_sq ^ 56;
-
     let (k_sq, p_sq, p_type) = if is_black_active {
         // From Black's perspective, flip the board vertically and invert piece colors
         // In Python layout: White pieces are 0..5, Black pieces are 6..11
