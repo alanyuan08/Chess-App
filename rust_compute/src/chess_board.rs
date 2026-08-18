@@ -34,8 +34,10 @@ pub struct ChessBoard {
     zobrist_hash: u64,
 
     // --- INTEGRATED NNUE ACCUMULATOR BASE ---
-    // Tracks the current Layer 1 features for White and Black concurrently
-    pub accumulators: BoardAccumulators,
+    accumulators: Box<[BoardAccumulators; 256]>, 
+    ply: usize,
+
+    nnue_network: &'static NnueNetwork,
 }
 
 pub const WHITE_KINGSIDE: u8 = 0b0001; // 1
@@ -43,16 +45,12 @@ pub const WHITE_QUEENSIDE: u8 = 0b0010; // 2
 pub const BLACK_KINGSIDE: u8 = 0b0100; // 4
 pub const BLACK_QUEENSIDE: u8 = 0b1000; // 8
 
-impl Default for ChessBoard {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl ChessBoard {
     // A constructor-like associated function
     // [0] - White / [1] - Black
-    pub fn new() -> Self {
+    pub fn new(
+        nnue_network: &'static NnueNetwork
+    ) -> Self {
         Self {
             pawns: [0, 0],
             knights: [0, 0],
@@ -70,11 +68,15 @@ impl ChessBoard {
 
             mailbox: [BoardPiece::NONE; 64],
             zobrist_hash: 0,
-            accumulators: BoardAccumulators::default(),
+
+            accumulators: Box::new([BoardAccumulators::default(); 256]),
+            ply: 0,
+
+            nnue_network,
         }
     }
 
-    pub fn init_board(&mut self, nn: &'static NnueNetwork) {
+    pub fn init_board(&mut self) {
         for color in 0..2 {
             // Ranks: White = 0 & 1, Black = 6 & 7
             let piece_rank_offset = if color == 0 { 0 } else { 56 };
@@ -115,11 +117,8 @@ impl ChessBoard {
             self.zobrist_hash = self.compute_init_zobrist();
         }
 
-        let w_king_sq = self.kings[0].trailing_zeros() as usize;
-        let b_king_sq = self.kings[1].trailing_zeros() as usize;
-        self.accumulators.refresh_from_scratch(
-            nn, &self.mailbox, w_king_sq, b_king_sq
-        );    
+        // Init Accumulator
+        self.create_accumlator_from_scratch();    
     }
 
     // Compute Init Zobritist
@@ -191,16 +190,6 @@ impl ChessBoard {
     // Return Mailbox Piece
     pub fn mailbox_piece(&self, target: usize) -> BoardPiece {   
         self.mailbox[target]
-    }
-
-    // Return NNUE Eval
-    pub fn eval(&mut self, 
-        nn: &'static NnueNetwork, 
-        buffer: &mut NnueInferenceBuffer
-    ) -> i32 {   
-        self.accumulators.evaluate(
-            self.active_player, nn, buffer
-        )
     }
 
     // Used to Calculate Castling / King Safety
@@ -742,4 +731,242 @@ impl ChessBoard {
         // XOR in current state for Castle, En Passant and Side to Move
         self.zobrist_xor();
     }
+
+    // Create from Scratch
+    pub fn create_accumlator_from_scratch(&mut self) {
+        // Retrieve King Squares
+        let w_king_sq = self.kings[Side::WHITE as usize].trailing_zeros() as usize;
+        let b_king_sq = self.kings[Side::BLACK as usize].trailing_zeros() as usize;
+
+        // 1. Reset both accumulators to the initial layer 1 baseline biases (Casting i16 to i32)
+        // Slicing to [..256] removes the compiler's bounds-checking overhead
+        let target_white = &mut self.accumulators[self.ply].white.vals[..256];
+        let target_black = &mut self.accumulators[self.ply].black.vals[..256];
+        let biases = &self.nnue_network.l1_biases[..256];
+
+        for i in 0..256 {
+            target_white[i] = biases[i] as i16;
+            target_black[i] = biases[i] as i16;
+        }
+
+        // 2. Loop through every square on the board and add active pieces
+        for (sq, &piece) in self.mailbox.iter().enumerate().take(64) {
+            if piece != BoardPiece::NONE {
+                // Get the unique HalfKA indices for both king perspectives
+                let w_idx = get_feature_index(w_king_sq, piece, sq, false);
+                let b_idx = get_feature_index(b_king_sq, piece, sq, true);
+                
+                // Grab direct references to the row weights and explicitly slice them to 256
+                let w_row = &self.nnue_network.l1_weights[w_idx][..256];
+                let b_row = &self.nnue_network.l1_weights[b_idx][..256];
+
+                // 3. Unroll the nested zip into a clean, contiguous loop.
+                // The exact bounds match allows the compiler to confidently auto-vectorize this loop.
+                for i in 0..256 {
+                    target_white[i] = target_white[i].wrapping_add(w_row[i]);
+                    target_black[i] = target_black[i].wrapping_add(b_row[i]); 
+                }
+            }
+        }
+    }
+
+    pub fn evaluate(&mut self, buffer: &mut NnueInferenceBuffer) -> i32 {
+        // --- PERSPECTIVE ROUTING ---
+        // Side to move (US) always fills the first 256 inputs.
+        // Opponent (THEM) always fills the second 256 inputs.
+        let (active_acc, opp_acc) = match self.active_player {
+            Side::WHITE => (
+                &self.accumulators[self.ply].white, &self.accumulators[self.ply].black
+            ),
+            Side::BLACK => (
+                &self.accumulators[self.ply].black, &self.accumulators[self.ply].white
+            ),
+        };
+
+        // --- STEP 0: ACCUMLATOR (Input -> Accumlator) ---
+        // The accumlator is maintained by the init / move functions
+
+        // --- STEP 1: CONCATENATION & ACTIVATION (L1 -> L2) ---
+        for (i, &val) in active_acc.vals.iter().enumerate().take(256) {
+            buffer.l2_inputs[i] = val.clamp(0, 128);
+        }
+
+        for (i, &val) in opp_acc.vals.iter().enumerate().take(256) {
+            buffer.l2_inputs[i + 256] = val.clamp(0, 128);
+        }
+
+        // --- STEP 2: HIDDEN LAYER 2 (512 -> 64) ---
+        // Input Scale (128) * Weight Scale (32) = Sum Scale (4096).
+        // Shift Down by >> 7 to Scale (32)
+        // Clamp at 32 to match Python's ReLU1 (1.0).
+        let l2_layer = self.nnue_network.l2_weights.iter().zip(self.nnue_network.l2_biases.iter());
+        for (neuron, (row, &bias)) in l2_layer.enumerate().take(64) {
+            let mut sum: i32 = bias;
+
+            // Process chunks of 16 elements to enable aggressive SIMD auto-vectorization
+            let inputs = &buffer.l2_inputs[..512];
+            for (chunk_weights, chunk_inputs) in row.chunks_exact(16).zip(inputs.chunks_exact(16)) {
+                for (&w, &inp) in chunk_weights.iter().zip(chunk_inputs.iter()) {
+                    sum += (inp as i32) * (w as i32);
+                }
+            }
+
+            let activated = sum >> 7;
+            buffer.l3_inputs[neuron] = activated.clamp(0, 32) as i16;
+        }
+
+        // --- STEP 3: HIDDEN LAYER 3 (64 -> 32) ---
+        // Input Scale (32) * Weight Scale (32) = Sum Scale (1024).
+        // Shift Down by 5 to Scale (32)
+        // Clamp at 32 to match Python's ReLU1 (1.0).
+        let l3_layer = self.nnue_network.l3_weights.iter().zip(self.nnue_network.l3_biases.iter());
+        for (neuron, (row, &bias)) in l3_layer.enumerate().take(32) {
+            let mut sum: i32 = bias;
+
+            let inputs = &buffer.l3_inputs[..64];
+            for (chunk_weights, chunk_inputs) in row.chunks_exact(16).zip(inputs.chunks_exact(16)) {
+                for (&w, &inp) in chunk_weights.iter().zip(chunk_inputs.iter()) {
+                    sum += (inp as i32) * (w as i32);
+                }
+            }
+
+            let activated = sum >> 5;
+            buffer.l4_inputs[neuron] = activated.clamp(0, 32) as i16;
+        }
+
+
+        // --- STEP 4: OUTPUT LAYER (32 -> 1) ---
+        // Input Scale (32) * Weight Scale (128) = Sum Scale (4096).
+        // Shift Down by 5 to Scale (128)
+        let mut final_sum: i32 = self.nnue_network.output_bias[0];
+        let row = &self.nnue_network.output_weights[0];
+
+        let inputs = &buffer.l4_inputs[..32];
+        for (chunk_weights, chunk_inputs) in row.chunks_exact(16).zip(inputs.chunks(16)) {
+            for (&w, &inp) in chunk_weights.iter().zip(chunk_inputs.iter()) {
+                final_sum += (inp as i32) * (w as i32);
+            }
+        }
+        let internal_pawns_scaled = final_sum >> 5;
+
+        // Shift by >> 7 remove remaining scale
+        (internal_pawns_scaled * 100) / 128
+    }
+
+    /// Progresses the network forward incrementally during move making
+    #[inline(always)]
+    pub fn make_move(
+        &mut self, 
+        mv: ForwardMove,
+    ) {
+        self.increment_ply();
+
+        // Retrieve King Squares
+        let w_king_sq = self.kings[Side::WHITE as usize].trailing_zeros() as usize;
+        let b_king_sq = self.kings[Side::BLACK as usize].trailing_zeros() as usize;
+
+        let move_piece: BoardPiece = self.mailbox[mv.start_sq];
+
+        // --- 1. Identify Target Added Piece (Handles Promotions) ---
+        let mut added_piece = move_piece;
+        match mv.move_type {
+            MoveFlag::PROMOTIONQUEEN => {
+                added_piece = if move_piece == BoardPiece::WPAWN { BoardPiece::WQUEEN } else { BoardPiece::BQUEEN };
+            }
+            MoveFlag::PROMOTIONROOK => {
+                added_piece = if move_piece == BoardPiece::WPAWN { BoardPiece::WROOK } else { BoardPiece::BROOK };
+            }
+            MoveFlag::PROMOTIONBISHOP => {
+                added_piece = if move_piece == BoardPiece::WPAWN { BoardPiece::WBISHOP } else { BoardPiece::BBISHOP };
+            }
+            MoveFlag::PROMOTIONKNIGHT => {
+                added_piece = if move_piece == BoardPiece::WPAWN { BoardPiece::WKNIGHT } else { BoardPiece::BKNIGHT };
+            }
+            _ => {}
+        }
+
+        // --- 2. Identify Captured Piece & Coordinate (Handles En Passant) ---
+        let (captured_sq, captured_piece) = if mv.move_type == MoveFlag::ENPASSANT {
+            let sq = if move_piece == BoardPiece::WPAWN {
+                mv.end_sq - 8 
+            } else {
+                mv.end_sq + 8 
+            };
+            (sq, self.mailbox[sq])
+        } else {
+            (mv.end_sq, self.mailbox[mv.end_sq])
+        };
+
+        // --- 3. Compute Sparse Feature Indices ---
+        let w_remove = get_feature_index(w_king_sq, move_piece, mv.start_sq, false);
+        let b_remove = get_feature_index(b_king_sq, move_piece, mv.start_sq, true);
+
+        let w_add = get_feature_index(w_king_sq, added_piece, mv.end_sq, false);
+        let b_add = get_feature_index(b_king_sq, added_piece, mv.end_sq, true);
+
+        // Get basic rows
+        let w_rem_row = &self.nnue_network.l1_weights[w_remove][..256];
+        let b_rem_row = &self.nnue_network.l1_weights[b_remove][..256];
+        let w_add_row = &self.nnue_network.l1_weights[w_add][..256];
+        let b_add_row = &self.nnue_network.l1_weights[b_add][..256];
+
+        // --- 4. High-Density Auto-Vectorized Parallel Loop Block ---
+        let prev_ply = self.ply - 1;
+        let (left, right) = self.accumulators.split_at_mut(self.ply);
+        
+        let prev_acc = &left[prev_ply];
+        let curr_acc = &mut right[0];
+
+        // Slice both targets to exactly 256 to remove runtime bounds checking
+        let curr_white = &mut curr_acc.white.vals[..256];
+        let curr_black = &mut curr_acc.black.vals[..256];
+        
+        let prev_white = &prev_acc.white.vals[..256];
+        let prev_black = &prev_acc.black.vals[..256];
+
+        if captured_piece != BoardPiece::NONE {
+            let w_cap = get_feature_index(w_king_sq, captured_piece, captured_sq, false);
+            let b_cap = get_feature_index(b_king_sq, captured_piece, captured_sq, true);
+            
+            let w_cap_row = &self.nnue_network.l1_weights[w_cap][..256];
+            let b_cap_row = &self.nnue_network.l1_weights[b_cap][..256];
+
+            for i in 0..256 {
+                curr_white[i] = prev_white[i]
+                    .wrapping_add(w_add_row[i])
+                    .wrapping_sub(w_rem_row[i])
+                    .wrapping_sub(w_cap_row[i]);
+
+                curr_black[i] = prev_black[i]
+                    .wrapping_add(b_add_row[i])
+                    .wrapping_sub(b_rem_row[i])
+                    .wrapping_sub(b_cap_row[i]);
+            }
+        } else {
+            for i in 0..256 {
+                curr_white[i] = prev_white[i]
+                    .wrapping_add(w_add_row[i])
+                    .wrapping_sub(w_rem_row[i]);
+
+                curr_black[i] = prev_black[i]
+                    .wrapping_add(b_add_row[i])
+                    .wrapping_sub(b_rem_row[i]);
+            }
+        }
+    }
+
+    pub fn unmake_move(&mut self) {
+        if self.ply > 0 {
+            self.ply -= 1; 
+        } else {
+            // Optional: Add a logging print here during debugging to see 
+            // exactly who is calling unmake too early!
+            eprintln!("Warning: Attempted to unmake_move at ply 0!");
+        }
+    }
+
+    pub fn increment_ply(&mut self) {
+        self.ply += 1;
+    }
 }
+

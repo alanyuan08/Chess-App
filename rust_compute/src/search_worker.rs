@@ -28,8 +28,7 @@ pub struct SearchWorker<'a>  {
     killer_move_table: [[Option<ForwardMove>; MAX_DEPTH as usize]; 2],
     thread_id: i32,
 
-    nnue_network: &'static NnueNetwork,
-    thread_buffer: NnueInferenceBuffer
+    thread_buffer: NnueInferenceBuffer,
 }
 
 impl<'a> SearchWorker<'a> {
@@ -42,8 +41,10 @@ impl<'a> SearchWorker<'a> {
             history_index: 0,
 
             chess_board: {
-                let mut chess_board = ChessBoard::new();
-                chess_board.init_board(nnue_network);
+                let mut chess_board = ChessBoard::new(
+                    nnue_network
+                );
+                chess_board.init_board();
                 chess_board
             },
 
@@ -57,15 +58,13 @@ impl<'a> SearchWorker<'a> {
 
             killer_move_table: [[None; MAX_DEPTH as usize]; 2],
             thread_id: 0,
-            
+
             thread_buffer: NnueInferenceBuffer::default(),
-            nnue_network
         }
     }
 
     pub fn from_game_state(
         transposition_table: &'a TranspositionTable, 
-        nnue_network: &'static NnueNetwork,
         search_worker: &SearchWorker,
         thread_id: i32
     ) -> Self {
@@ -86,7 +85,6 @@ impl<'a> SearchWorker<'a> {
             thread_id,
 
             thread_buffer: NnueInferenceBuffer::default(),
-            nnue_network
         }
     }
 
@@ -209,14 +207,8 @@ impl<'a> SearchWorker<'a> {
             || forward_move.move_type == MoveFlag::KINGSIDECASTLE 
             || forward_move.move_type == MoveFlag::QUEENSIDECASTLE;
 
-       if is_king_or_castle {
-            let w_king_sq = self.chess_board.kings[0].trailing_zeros() as usize;
-            let b_king_sq = self.chess_board.kings[1].trailing_zeros() as usize;
-            self.chess_board.accumulators.make_move(
-                self.nnue_network, 
-                forward_move, 
-                &self.chess_board.mailbox, w_king_sq, b_king_sq
-            )
+       if !is_king_or_castle {
+            self.chess_board.make_move(forward_move);
         }
 
         let remove_piece = self.chess_board.execute_move(forward_move);
@@ -229,18 +221,10 @@ impl<'a> SearchWorker<'a> {
             prev_en_passant,
         };
 
+        // Forced Recompute due to King
         if is_king_or_castle {
-            // Runs AFTER mutations occur so that the network anchors to the NEW King coordinates
-            let restored_w_king = self.chess_board.kings[0].trailing_zeros() as usize;
-            let restored_b_king = self.chess_board.kings[1].trailing_zeros() as usize;
-
-            // Rebuilds the network flawlessly using the updated position and Rook files
-            self.chess_board.accumulators.refresh_from_scratch(
-                self.nnue_network, 
-                &self.chess_board.mailbox, 
-                restored_w_king, 
-                restored_b_king
-            );
+            self.chess_board.increment_ply();
+            self.chess_board.create_accumlator_from_scratch();
         }
 
         // Push Move History
@@ -257,44 +241,12 @@ impl<'a> SearchWorker<'a> {
 
         self.history_index -= 1;
         if let Some(undo_move) = self.history[self.history_index].take() {
-            // Runs BEFORE mutations occur because it depends on reading the original captured piece
-            let piece_at_dest = self.chess_board.mailbox[undo_move.end_sq];
-            let is_king_or_castle = piece_at_dest == BoardPiece::WKING 
-                || piece_at_dest == BoardPiece::BKING 
-                || undo_move.move_type == MoveFlag::KINGSIDECASTLE 
-                || undo_move.move_type == MoveFlag::QUEENSIDECASTLE;
-
-            if !is_king_or_castle {
-                // Accumulator Unmake Move
-                let w_king_sq = self.chess_board.kings[0].trailing_zeros() as usize;
-                let b_king_sq = self.chess_board.kings[1].trailing_zeros() as usize;
-                self.chess_board.accumulators.unmake_move(
-                    self.nnue_network,
-                    undo_move,
-                    &self.chess_board.mailbox,
-                    w_king_sq,
-                    b_king_sq
-                );
-            }
+            // Timecat Undo
+            self.chess_board.unmake_move();
 
             // ChessBoard Undo Move
             self.chess_board.unexecute_move(undo_move);
             self.pop_position();
-
-            // Runs AFTER mutations occur so that the network anchors to the NEW King coordinates
-            if is_king_or_castle {
-                let restored_w_king = self.chess_board.kings[0].trailing_zeros() as usize;
-                let restored_b_king = self.chess_board.kings[1].trailing_zeros() as usize;
-
-                // Rebuilds the network flawlessly using the updated position and Rook files
-                
-                self.chess_board.accumulators.refresh_from_scratch(
-                    self.nnue_network, 
-                    &self.chess_board.mailbox, 
-                    restored_w_king, 
-                    restored_b_king
-                );
-            }
         }
     }
 
@@ -335,6 +287,9 @@ impl<'a> SearchWorker<'a> {
     fn negamax(&mut self, depth: i32, ply: i32, mut alpha: i32, mut beta: i32, 
         mut pv_move_hint: Option<ForwardMove>, stop_signal: &AtomicBool) -> SearchResult {
         
+        // Nodes Processed
+        self.nodes_processed += 1;
+
         // Original Alpha for Transposition Table
         let original_alpha = alpha;
         
@@ -361,6 +316,7 @@ impl<'a> SearchWorker<'a> {
 
                 // EXACT: The true minimax value was found; return it immediately.
                 if tt_entry.flag == HashFlag::EXACT {
+                    self.nodes_processed += 1;
                     return SearchResult {
                         score: retrieved_score,
                         best_move: pv_move_hint,
@@ -527,11 +483,9 @@ impl<'a> SearchWorker<'a> {
     }
 
     fn board_eval(&mut self) -> i32 {
-        let static_eval = self.chess_board.eval(
-            self.nnue_network,
+        let static_eval = self.chess_board.evaluate(
             &mut self.thread_buffer
         );
-        self.nodes_processed += 1;
         static_eval
     }
 
@@ -539,6 +493,9 @@ impl<'a> SearchWorker<'a> {
     fn quiescence_search(&mut self, mut alpha: i32, mut beta: i32, ply: i32, 
         depth: i32, stop_signal: &AtomicBool) -> i32 {
             
+        // Nodes Processed
+        self.nodes_processed += 1;
+
         // Three Move Repetition Draw
         if self.is_three_move_repetition() {
             return 0;

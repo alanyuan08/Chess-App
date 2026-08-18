@@ -20,7 +20,7 @@ pub const MAX_DEPTH: i32 = 16;
 // termination signal to the other threads.
 
 // The other threads the single every 2048 executions
-pub const SEARCH_TIME_LIMIT: u64 = 25;
+pub const SEARCH_TIME_LIMIT: u64 = 20;
 
 pub const INFINITY: i32 = 32000;
 pub const MATE_VALUE: i32 = 30000;
@@ -98,7 +98,7 @@ impl ChessGame {
 
                 let handle = s.spawn(move || {
                     let mut search_worker = SearchWorker::from_game_state(
-                        tt_ref, network_ref, worker_ref, thread_id
+                        tt_ref, worker_ref, thread_id
                     );
 
                     let (thread_best_move, nodes_processed) = search_worker.root_search(

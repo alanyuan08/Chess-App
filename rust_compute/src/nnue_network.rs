@@ -3,7 +3,7 @@ use std::io::{Read, BufReader};
 
 /// Matches the exact memory layout of your exported Python binary.
 #[repr(C, align(64))]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct NnueNetwork {
     // Layer 1: Accumulator (49152 inputs -> 256 outputs)
     pub l1_weights: [[i16; 256]; 49152],
@@ -74,7 +74,7 @@ impl NnueNetwork {
 /// The runtime container holding the current calculation buffers.
 /// Allocated once per search thread to prevent runtime overhead.
 #[repr(C, align(64))]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct NnueInferenceBuffer {
     pub l2_inputs: [i16; 512],
     pub l3_inputs: [i16; 64],
