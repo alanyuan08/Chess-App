@@ -114,7 +114,7 @@ impl<'a> SearchWorker<'a> {
             }
             
             let result = self.negamax(depth, 0, -INFINITY, INFINITY, 
-                best_move_overall, stop_signal);
+                best_move_overall, stop_signal, true);
             
             if !stop_signal.load(Ordering::Relaxed){
                 best_move_overall = result.best_move;
@@ -199,32 +199,45 @@ impl<'a> SearchWorker<'a> {
         let prev_castle_rights = self.chess_board.castle_rights(); 
         let prev_en_passant = self.chess_board.en_passant();
 
-        // Update NNUE Board
-        // Runs BEFORE mutations occur because it depends on reading the original captured piece
-        let move_piece = self.chess_board.mailbox_piece(forward_move.start_sq);
-        let is_king_or_castle = move_piece == BoardPiece::WKING 
-            || move_piece == BoardPiece::BKING 
-            || forward_move.move_type == MoveFlag::KINGSIDECASTLE 
-            || forward_move.move_type == MoveFlag::QUEENSIDECASTLE;
-
-       if !is_king_or_castle {
-            self.chess_board.make_move(forward_move);
-        }
-
-        let remove_piece = self.chess_board.execute_move(forward_move);
-        let undo_move = UndoMove {
-            start_sq: forward_move.start_sq,
-            end_sq: forward_move.end_sq,
-            move_type: forward_move.move_type,
-            captured_piece: remove_piece,
+        // Null Move
+        let mut undo_move = UndoMove {
+            start_sq: 0,
+            end_sq: 0,
+            move_type: MoveFlag::NULL,
+            captured_piece: None,
             prev_castle_rights,
             prev_en_passant,
         };
 
-        // Forced Recompute due to King
-        if is_king_or_castle {
+        if forward_move.move_type == MoveFlag::NULL {
             self.chess_board.increment_ply();
-            self.chess_board.create_accumlator_from_scratch();
+            self.chess_board.execute_move(forward_move); 
+        } else {
+            let move_piece = self.chess_board.mailbox_piece(forward_move.start_sq);
+            let is_king_or_castle = move_piece == BoardPiece::WKING 
+                || move_piece == BoardPiece::BKING 
+                || forward_move.move_type == MoveFlag::KINGSIDECASTLE 
+                || forward_move.move_type == MoveFlag::QUEENSIDECASTLE;
+
+        if !is_king_or_castle {
+                self.chess_board.make_move(forward_move);
+            }
+
+            let remove_piece = self.chess_board.execute_move(forward_move);
+            undo_move = UndoMove {
+                start_sq: forward_move.start_sq,
+                end_sq: forward_move.end_sq,
+                move_type: forward_move.move_type,
+                captured_piece: remove_piece,
+                prev_castle_rights,
+                prev_en_passant,
+            };
+
+            // Forced Recompute due to King
+            if is_king_or_castle {
+                self.chess_board.increment_ply();
+                self.chess_board.create_accumlator_from_scratch();
+            }
         }
 
         // Push Move History
@@ -283,9 +296,18 @@ impl<'a> SearchWorker<'a> {
         self.killer_move_table[0][depth_idx] = Some(new_killer_move);
     }
 
+    // StockFish NMP Reduction algorithm
+    fn calculate_nmp_reduction(&self, depth: i32, static_eval: i32, beta: i32) -> i32 {
+        let base_reduction = 3 + (depth / 4);
+        let eval_bonus = ((static_eval - beta) / 200).max(0).min(2);
+        
+        base_reduction + eval_bonus
+    }
+
     // Process Negamax
     fn negamax(&mut self, depth: i32, ply: i32, mut alpha: i32, mut beta: i32, 
-        mut pv_move_hint: Option<ForwardMove>, stop_signal: &AtomicBool) -> SearchResult {
+        mut pv_move_hint: Option<ForwardMove>, 
+        stop_signal: &AtomicBool, allow_null: bool) -> SearchResult {
         
         // Nodes Processed
         self.nodes_processed += 1;
@@ -368,6 +390,37 @@ impl<'a> SearchWorker<'a> {
         let mut moves_tried: i32 = 0;
         let king_in_check = self.chess_board.is_in_check(); 
 
+        // Null Move Pruning
+        if allow_null && !king_in_check && depth >= 3 && 
+            self.chess_board.has_major_pieces() && ply > 0 {
+        
+            let static_eval = self.static_eval();
+            if static_eval >= beta {
+                
+                // Calculate Reduction
+                let reduction = self.calculate_nmp_reduction(depth, static_eval, beta);
+                let next_depth = (depth - reduction).max(0); 
+
+                // 3. Make the null move (switch sides, update en-passant/hash keys)
+                let null_move = ForwardMove { 
+                    start_sq: 0, end_sq: 0, 
+                    move_type: MoveFlag::NULL, pv_score: 0
+                };
+                
+                self.process_forward_move(null_move);
+                
+                let null_result = self.negamax(next_depth, ply + 1, -beta, -beta + 1, None, stop_signal, false);
+                let null_score = -null_result.score;
+                
+                self.process_backward_move();
+                
+                // 6. Fail-high cutoff: The position is so good we can prune it completely
+                if null_score >= beta {
+                    return SearchResult { score: beta, best_move: None };
+                }
+            }
+        }
+
         for forward_move in &gen_moves {
             // Check LMR Eligibility
             lmr_eligibility = false;
@@ -404,13 +457,13 @@ impl<'a> SearchWorker<'a> {
 
                 let reduced_depth = (depth - 1 - reduction).max(1);
 
-                negamax_result = self.negamax(reduced_depth, ply + 1,  -alpha - 1, -alpha, None, stop_signal);
+                negamax_result = self.negamax(reduced_depth, ply + 1,  -alpha - 1, -alpha, None, stop_signal, true);
 
                 if -negamax_result.score > alpha {
-                    negamax_result = self.negamax(depth - 1, ply + 1, -beta, -alpha, None, stop_signal);
+                    negamax_result = self.negamax(depth - 1, ply + 1, -beta, -alpha, None, stop_signal, true);
                 }
             } else {
-                negamax_result = self.negamax(depth - 1, ply + 1, -beta, -alpha, None, stop_signal);
+                negamax_result = self.negamax(depth - 1, ply + 1, -beta, -alpha, None, stop_signal, true);
             }
 
             let score = -negamax_result.score;
@@ -487,6 +540,27 @@ impl<'a> SearchWorker<'a> {
             &mut self.thread_buffer
         );
         static_eval
+    }
+
+    // Crude Static Eval 
+    fn static_eval(&self) -> i32 {
+        let static_white = (self.chess_board.rooks[0].count_ones() as i32 * 500)
+            + (self.chess_board.knights[0].count_ones() as i32 * 300) 
+            + (self.chess_board.bishops[0].count_ones() as i32 * 300) 
+            + (self.chess_board.pawns[0].count_ones() as i32 * 100) 
+            + (self.chess_board.queens[0].count_ones() as i32 * 900);
+
+        let static_black = (self.chess_board.rooks[1].count_ones() as i32 * 500)
+            + (self.chess_board.knights[1].count_ones() as i32 * 300) 
+            + (self.chess_board.bishops[1].count_ones() as i32 * 300) 
+            + (self.chess_board.pawns[1].count_ones() as i32 * 100) 
+            + (self.chess_board.queens[1].count_ones() as i32 * 900);
+            
+        // 3. Return score relative to whoever's turn it is right now
+        match self.chess_board.active_player() {
+            Side::WHITE => static_white - static_black,
+            Side::BLACK => static_black - static_white,
+        }
     }
 
     // Quiescence Search 

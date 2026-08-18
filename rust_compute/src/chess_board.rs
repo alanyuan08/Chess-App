@@ -121,6 +121,17 @@ impl ChessBoard {
         self.create_accumlator_from_scratch();    
     }
 
+    // Null Move Pruning Zugzwang
+    pub fn has_major_pieces(&self) -> bool {
+        let side_idx = self.active_player as usize;
+
+        // Check only the active player's pieces
+        (self.knights[side_idx] 
+            | self.bishops[side_idx] 
+            | self.rooks[side_idx] 
+            | self.queens[side_idx]) != 0
+    }
+
     // Compute Init Zobritist
     pub fn compute_init_zobrist(&self) -> u64 { 
         let mut hash = 0u64;
@@ -959,8 +970,6 @@ impl ChessBoard {
         if self.ply > 0 {
             self.ply -= 1; 
         } else {
-            // Optional: Add a logging print here during debugging to see 
-            // exactly who is calling unmake too early!
             eprintln!("Warning: Attempted to unmake_move at ply 0!");
         }
     }

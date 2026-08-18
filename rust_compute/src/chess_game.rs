@@ -13,8 +13,8 @@ use crate::search_worker::*;
 use crate::parser::*;
 use crate::nnue_network::*;
 
-pub const PV_DEPTH: i32 = 14;
-pub const MAX_DEPTH: i32 = 16;
+pub const PV_DEPTH: i32 = 16;
+pub const MAX_DEPTH: i32 = 18;
 
 // When a thread finishes, if it exceeds the time, it will send the 
 // termination signal to the other threads.
@@ -31,7 +31,7 @@ pub const MATE_VALUE: i32 = 30000;
 pub const NUM_THREADS: i32 = 8;
 
 // Condon-Thompson Bucket Transposition Table
-pub const CACHE_SIZE: usize = 64;
+pub const CACHE_SIZE: usize = 256;
 
 // Model path
 pub const MODEL_PATH: &str = "nnue-training/nnue_weights.bin";
