@@ -4,8 +4,8 @@ use std::sync::LazyLock;
 pub static LMR_TABLE: LazyLock<[[i32; 64]; 64]> = LazyLock::new(|| {
     let mut table = [[0; 64]; 64];
     
-    for depth in 0..64 {
-        for moves in 0..64 {
+    for (depth, <item>) in table.iter_mut().enumerate() {
+        for (moves, <item>) in table.iter_mut().enumerate() {
             if depth < 3 || moves < 3 {
                 table[depth][moves] = 0;
                 continue;

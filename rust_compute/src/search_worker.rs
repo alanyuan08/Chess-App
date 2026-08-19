@@ -305,7 +305,7 @@ impl<'a> SearchWorker<'a> {
     // StockFish NMP Reduction algorithm
     fn calculate_nmp_reduction(&self, depth: i32, static_eval: i32, beta: i32) -> i32 {
         let base_reduction = 3 + (depth / 4);
-        let eval_bonus = ((static_eval - beta) / 200).max(0).min(2);
+        let eval_bonus = ((static_eval - beta) / 200).clamp(0, 2);
         
         base_reduction + eval_bonus
     }
@@ -332,6 +332,7 @@ impl<'a> SearchWorker<'a> {
     }
 
     // Process Negamax
+    #[allow(clippy::too_many_arguments)]
     fn negamax(&mut self, depth: i32, ply: i32, mut alpha: i32, mut beta: i32, 
         mut pv_move_hint: Option<ForwardMove>, 
         stop_signal: &AtomicBool, allow_null: bool) -> SearchResult {
@@ -340,10 +341,8 @@ impl<'a> SearchWorker<'a> {
         self.nodes_processed += 1;
 
         // Halt Signal
-        if self.nodes_processed & 0x3FFF == 0 {
-            if stop_signal.load(Ordering::Relaxed) {
-                return SearchResult { score: 0, best_move: None };
-            }
+        if self.nodes_processed & 0x3FFF == 0 && stop_signal.load(Ordering::Relaxed) {
+            return SearchResult { score: 0, best_move: None };
         }
 
         // Original Alpha for Transposition Table
@@ -421,38 +420,36 @@ impl<'a> SearchWorker<'a> {
 
         // Null Move Pruning
         if allow_null && !king_in_check && depth >= 3 && 
-            self.chess_board.has_major_pieces() && ply > 0 {
-        
-            if beta < MATE_THRESHOLD && beta > -MATE_THRESHOLD {
+            self.chess_board.has_major_pieces() && ply > 0 &&
+            beta < MATE_THRESHOLD && beta > -MATE_THRESHOLD {
 
-                let static_eval = self.static_eval();
-                if static_eval >= beta {
-                    
-                    // Calculate Reduction
-                    let reduction = self.calculate_nmp_reduction(depth, static_eval, beta);
-                    let next_depth = (depth - reduction).max(0); 
+            let static_eval = self.static_eval();
+            if static_eval >= beta {
+                
+                // Calculate Reduction
+                let reduction = self.calculate_nmp_reduction(depth, static_eval, beta);
+                let next_depth = (depth - reduction).max(0); 
 
-                    // Make the null move (switch sides, update en-passant/hash keys)
-                    let null_move = ForwardMove { 
-                        start_sq: 0, end_sq: 0, 
-                        move_type: MoveFlag::NULL, pv_score: 0
-                    };
-                    
-                    self.process_forward_move(null_move);
-                    
-                    let null_result = self.negamax(next_depth, ply + 1, -beta, -beta + 1, None, stop_signal, false);
-                    let mut null_score = -null_result.score;
-                    
-                    self.process_backward_move();
+                // Make the null move (switch sides, update en-passant/hash keys)
+                let null_move = ForwardMove { 
+                    start_sq: 0, end_sq: 0, 
+                    move_type: MoveFlag::NULL, pv_score: 0
+                };
+                
+                self.process_forward_move(null_move);
+                
+                let null_result = self.negamax(next_depth, ply + 1, -beta, -beta + 1, None, stop_signal, false);
+                let mut null_score = -null_result.score;
+                
+                self.process_backward_move();
 
-                    if null_score >= MATE_THRESHOLD {
-                        null_score = beta;
-                    }
-                    
-                    // Fail-high cutoff: The position is so good we can prune it completely
-                    if null_score >= beta {
-                        return SearchResult { score: beta, best_move: None };
-                    }
+                if null_score >= MATE_THRESHOLD {
+                    null_score = beta;
+                }
+                
+                // Fail-high cutoff: The position is so good we can prune it completely
+                if null_score >= beta {
+                    return SearchResult { score: beta, best_move: None };
                 }
             }
         }
@@ -572,10 +569,9 @@ impl<'a> SearchWorker<'a> {
     }
 
     fn board_eval(&mut self) -> i32 {
-        let static_eval = self.chess_board.evaluate(
+        self.chess_board.evaluate(
             &mut self.thread_buffer
         );
-        static_eval
     }
 
     // Quiescence Search 
@@ -586,10 +582,8 @@ impl<'a> SearchWorker<'a> {
         self.nodes_processed += 1;
 
         // Halt Signal
-        if self.nodes_processed & 0x3FFF == 0 {
-            if stop_signal.load(Ordering::Relaxed) {
-                return 0
-            }
+        if self.nodes_processed & 0x3FFF == 0 && stop_signal.load(Ordering::Relaxed) {
+            return 0;
         }
 
         // Three Move Repetition Draw
