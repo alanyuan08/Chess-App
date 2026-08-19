@@ -95,17 +95,9 @@ impl<'a> SearchWorker<'a> {
         let start_time = Instant::now();
         let time_limit = Duration::from_secs(SEARCH_TIME_LIMIT);
 
-        // Thread_id = 0 is the main thread, the rest are helper threads
-        let start_depth = if self.thread_id == 0 {
-            1
-        } else {
-            // Subtle offset: Helpers start at depth 2 or 3, but move up 1 depth at a time.
-            2 + (self.thread_id % 2)
-        };
-
         // --- ITERATIVE DEEPENING LOOP ---
         let mut best_move_overall: Option<ForwardMove> = None;
-        let mut depth = start_depth;
+        let mut depth = 1;
 
         while depth <= max_depth {
             if stop_signal.load(Ordering::Relaxed) || start_time.elapsed() >= time_limit {
@@ -272,7 +264,21 @@ impl<'a> SearchWorker<'a> {
         // Clamp moves_tried to 0..=64
         let m = moves_tried.clamp(0, 63) as usize;
 
-        LMR_TABLE[d][m]
+        let base_reduction = LMR_TABLE[d][m];
+
+        if self.thread_id == 0 {
+            base_reduction
+        } else {
+            let thread_offset = if self.thread_id % 2 == 1 { 1 } else { -1 };
+
+            let total_reduction = (base_reduction + thread_offset).max(0);
+
+            if total_reduction >= depth {
+                depth - 1
+            } else {
+                total_reduction
+            }
+        }
     }
 
     // Store Killer Move - No Captures
@@ -304,6 +310,27 @@ impl<'a> SearchWorker<'a> {
         base_reduction + eval_bonus
     }
 
+    // NMP Static Eval to determine cuttoff eligability
+    fn static_eval(&self) -> i32 {
+        let static_white = (self.chess_board.rooks[0].count_ones() as i32 * 500)
+            + (self.chess_board.knights[0].count_ones() as i32 * 300) 
+            + (self.chess_board.bishops[0].count_ones() as i32 * 300) 
+            + (self.chess_board.pawns[0].count_ones() as i32 * 100) 
+            + (self.chess_board.queens[0].count_ones() as i32 * 900);
+
+        let static_black = (self.chess_board.rooks[1].count_ones() as i32 * 500)
+            + (self.chess_board.knights[1].count_ones() as i32 * 300) 
+            + (self.chess_board.bishops[1].count_ones() as i32 * 300) 
+            + (self.chess_board.pawns[1].count_ones() as i32 * 100) 
+            + (self.chess_board.queens[1].count_ones() as i32 * 900);
+            
+        // 3. Return score relative to whoever's turn it is right now
+        match self.chess_board.active_player() {
+            Side::WHITE => static_white - static_black,
+            Side::BLACK => static_black - static_white,
+        }
+    }
+
     // Process Negamax
     fn negamax(&mut self, depth: i32, ply: i32, mut alpha: i32, mut beta: i32, 
         mut pv_move_hint: Option<ForwardMove>, 
@@ -311,6 +338,13 @@ impl<'a> SearchWorker<'a> {
         
         // Nodes Processed
         self.nodes_processed += 1;
+
+        // Halt Signal
+        if self.nodes_processed & 0x3FFF == 0 {
+            if stop_signal.load(Ordering::Relaxed) {
+                return SearchResult { score: 0, best_move: None };
+            }
+        }
 
         // Original Alpha for Transposition Table
         let original_alpha = alpha;
@@ -364,11 +398,6 @@ impl<'a> SearchWorker<'a> {
             }
         }
 
-        // Halt Signal
-        if (self.nodes_processed & 2047) == 0 && stop_signal.load(Ordering::Relaxed) {
-            return SearchResult { score: 0, best_move: None };
-        }
-
         // Leaf Node Condition -> Drop into Quiescence Search
         if depth == 0 {
             return SearchResult {
@@ -394,29 +423,36 @@ impl<'a> SearchWorker<'a> {
         if allow_null && !king_in_check && depth >= 3 && 
             self.chess_board.has_major_pieces() && ply > 0 {
         
-            let static_eval = self.static_eval();
-            if static_eval >= beta {
-                
-                // Calculate Reduction
-                let reduction = self.calculate_nmp_reduction(depth, static_eval, beta);
-                let next_depth = (depth - reduction).max(0); 
+            if beta < MATE_THRESHOLD && beta > -MATE_THRESHOLD {
 
-                // 3. Make the null move (switch sides, update en-passant/hash keys)
-                let null_move = ForwardMove { 
-                    start_sq: 0, end_sq: 0, 
-                    move_type: MoveFlag::NULL, pv_score: 0
-                };
-                
-                self.process_forward_move(null_move);
-                
-                let null_result = self.negamax(next_depth, ply + 1, -beta, -beta + 1, None, stop_signal, false);
-                let null_score = -null_result.score;
-                
-                self.process_backward_move();
-                
-                // 6. Fail-high cutoff: The position is so good we can prune it completely
-                if null_score >= beta {
-                    return SearchResult { score: beta, best_move: None };
+                let static_eval = self.static_eval();
+                if static_eval >= beta {
+                    
+                    // Calculate Reduction
+                    let reduction = self.calculate_nmp_reduction(depth, static_eval, beta);
+                    let next_depth = (depth - reduction).max(0); 
+
+                    // Make the null move (switch sides, update en-passant/hash keys)
+                    let null_move = ForwardMove { 
+                        start_sq: 0, end_sq: 0, 
+                        move_type: MoveFlag::NULL, pv_score: 0
+                    };
+                    
+                    self.process_forward_move(null_move);
+                    
+                    let null_result = self.negamax(next_depth, ply + 1, -beta, -beta + 1, None, stop_signal, false);
+                    let mut null_score = -null_result.score;
+                    
+                    self.process_backward_move();
+
+                    if null_score >= MATE_THRESHOLD {
+                        null_score = beta;
+                    }
+                    
+                    // Fail-high cutoff: The position is so good we can prune it completely
+                    if null_score >= beta {
+                        return SearchResult { score: beta, best_move: None };
+                    }
                 }
             }
         }
@@ -542,33 +578,19 @@ impl<'a> SearchWorker<'a> {
         static_eval
     }
 
-    // Crude Static Eval 
-    fn static_eval(&self) -> i32 {
-        let static_white = (self.chess_board.rooks[0].count_ones() as i32 * 500)
-            + (self.chess_board.knights[0].count_ones() as i32 * 300) 
-            + (self.chess_board.bishops[0].count_ones() as i32 * 300) 
-            + (self.chess_board.pawns[0].count_ones() as i32 * 100) 
-            + (self.chess_board.queens[0].count_ones() as i32 * 900);
-
-        let static_black = (self.chess_board.rooks[1].count_ones() as i32 * 500)
-            + (self.chess_board.knights[1].count_ones() as i32 * 300) 
-            + (self.chess_board.bishops[1].count_ones() as i32 * 300) 
-            + (self.chess_board.pawns[1].count_ones() as i32 * 100) 
-            + (self.chess_board.queens[1].count_ones() as i32 * 900);
-            
-        // 3. Return score relative to whoever's turn it is right now
-        match self.chess_board.active_player() {
-            Side::WHITE => static_white - static_black,
-            Side::BLACK => static_black - static_white,
-        }
-    }
-
     // Quiescence Search 
     fn quiescence_search(&mut self, mut alpha: i32, mut beta: i32, ply: i32, 
         depth: i32, stop_signal: &AtomicBool) -> i32 {
             
         // Nodes Processed
         self.nodes_processed += 1;
+
+        // Halt Signal
+        if self.nodes_processed & 0x3FFF == 0 {
+            if stop_signal.load(Ordering::Relaxed) {
+                return 0
+            }
+        }
 
         // Three Move Repetition Draw
         if self.is_three_move_repetition() {
@@ -628,11 +650,6 @@ impl<'a> SearchWorker<'a> {
             if best_score > alpha {
                 alpha = best_score;
             }
-        }
-
-        // Halt Signal
-        if (self.nodes_processed & 2047) == 0 && stop_signal.load(Ordering::Relaxed) {
-            return 0; 
         }
 
         let mut legal_moves_played = 0;

@@ -14,16 +14,18 @@ use crate::parser::*;
 use crate::nnue_network::*;
 
 pub const PV_DEPTH: i32 = 16;
-pub const MAX_DEPTH: i32 = 18;
+pub const MAX_DEPTH: i32 = 20;
 
 // When a thread finishes, if it exceeds the time, it will send the 
 // termination signal to the other threads.
 
 // The other threads the single every 2048 executions
-pub const SEARCH_TIME_LIMIT: u64 = 20;
+pub const SEARCH_TIME_LIMIT: u64 = 10;
 
 pub const INFINITY: i32 = 32000;
 pub const MATE_VALUE: i32 = 30000;
+
+pub const MATE_THRESHOLD: i32 = MATE_VALUE - (MAX_DEPTH * 2);
 
 // This is tuned for the Mac M4 Pro Chip
 // Thread Count is set to the number of Performance Cores to avoid 
@@ -31,7 +33,7 @@ pub const MATE_VALUE: i32 = 30000;
 pub const NUM_THREADS: i32 = 8;
 
 // Condon-Thompson Bucket Transposition Table
-pub const CACHE_SIZE: usize = 256;
+pub const CACHE_SIZE: usize = 64;
 
 // Model path
 pub const MODEL_PATH: &str = "nnue-training/nnue_weights.bin";
