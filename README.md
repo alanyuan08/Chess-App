@@ -66,7 +66,7 @@
 
   The data is preprocessed for [White Prespective] [Black Prespective] for Dual-Perspective HalfKA NNUE and is filtered to only include Quiet Positions - The king isn't in check and Quiescence Search doesn't drop the Standing Pat. 
 
-- **Training Process:** The model is trained using 45 Epoch, with 976 Steps and 4096 FEN training values in each step. The model will lower its learning rate if 4 consecutive epoches fail to produce a stronger model. The model loss is measured in BinaryCrossentropy to heavily penalize incorrect errors to produce strong gradients for learning. 
+- **Training Process:** The model is trained using 25 Epoch, with 976 Steps and 4096 FEN training values in each step. The model loss is measured in Mean Squared Error.
 
   The model applies a Sigmoid transformation to the score output as a win percentage - 1.0 (win), 0.5 (draw), and 0.0 (loss) to reduce gradients for positions with -/+ 400 Centipawns; The goal is to force the model to focus more on close board positions rather than accomodating for outliers such as -/+ 1500 Centipawns.
 
