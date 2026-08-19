@@ -40,6 +40,11 @@ pub fn parse_forward_move_with_board(uci: &str, board: &ChessBoard) -> ForwardMo
 
     let mut move_type = MoveFlag::MOVE;
 
+    // --- Capture ---
+    if is_some(end_piece) {
+        move_type = MoveFlag::CAPTURE;
+    }
+
     // --- Promotion ---
     if chars.len() == 5 {
         move_type = match chars[4] {
@@ -64,11 +69,6 @@ pub fn parse_forward_move_with_board(uci: &str, board: &ChessBoard) -> ForwardMo
         }
     }
 
-    // --- Capture ---
-    if is_some(end_piece) {
-        move_type = MoveFlag::CAPTURE;
-    }
-
     // --- En Passant ---
     if is_pawn(start_piece) {
         let start_rank = start_sq / 8;
@@ -85,7 +85,7 @@ pub fn parse_forward_move_with_board(uci: &str, board: &ChessBoard) -> ForwardMo
         if (start_rank as i32 - end_rank as i32).abs() == 2 {
             move_type = MoveFlag::PAWNOPENMOVE;
         }
-}
+    }
 
     ForwardMove {
         start_sq,

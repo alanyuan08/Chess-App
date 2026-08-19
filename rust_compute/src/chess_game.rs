@@ -11,18 +11,21 @@ use crate::lmr_table::*;
 use crate::transposition_table::*;
 use crate::search_worker::*;
 use crate::parser::*;
+use crate::nnue_network::*;
 
-pub const PV_DEPTH: i32 = 14;
+pub const PV_DEPTH: i32 = 16;
 pub const MAX_DEPTH: i32 = 20;
 
 // When a thread finishes, if it exceeds the time, it will send the 
 // termination signal to the other threads.
 
 // The other threads the single every 2048 executions
-pub const DEPTH_SEARCH_LIMIT: u64 = 25;
+pub const SEARCH_TIME_LIMIT: u64 = 10;
 
 pub const INFINITY: i32 = 32000;
 pub const MATE_VALUE: i32 = 30000;
+
+pub const MATE_THRESHOLD: i32 = MATE_VALUE - (MAX_DEPTH * 2);
 
 // This is tuned for the Mac M4 Pro Chip
 // Thread Count is set to the number of Performance Cores to avoid 
@@ -32,19 +35,31 @@ pub const NUM_THREADS: i32 = 8;
 // Condon-Thompson Bucket Transposition Table
 pub const CACHE_SIZE: usize = 64;
 
+// Model path
+pub const MODEL_PATH: &str = "nnue-training/nnue_weights.bin";
+
 #[pyclass]
 pub struct ChessGame {
     nodes_processed: Arc<AtomicUsize>,
     transposition_table: Arc<TranspositionTable>,
+    nnue_network: &'static NnueNetwork, 
 }
 
 #[pymethods]
 impl ChessGame {
     #[new]
     fn new() -> Self {
+        // 1. Safely stream the 25MB packed matrix from disk straight onto the heap
+        let network_box = NnueNetwork::load_from_file(MODEL_PATH)
+            .expect("Catastrophic Initializer Failure: Could not load NNUE model file matrices");
+
+        // 2. Leak the Box memory to acquire an immutable reference for all search threads
+        let network_static: &'static NnueNetwork = Box::leak(network_box);
+
         Self {
             nodes_processed: Arc::new(AtomicUsize::new(0)),
-            transposition_table: Arc::new(TranspositionTable::new(CACHE_SIZE))
+            transposition_table: Arc::new(TranspositionTable::new(CACHE_SIZE)),
+            nnue_network: network_static,
         }
     }
 
@@ -60,6 +75,7 @@ impl ChessGame {
         let start_time = Instant::now();
 
         self.nodes_processed.store(0, Ordering::Relaxed);
+        let network_ref = self.nnue_network;
 
         // Shared stop signal across all M4 Pro performance cores
         let stop_search = Arc::new(AtomicBool::new(false));
@@ -68,11 +84,10 @@ impl ChessGame {
         let nodes_counter_ref = &*self.nodes_processed;
         
         // Clone Search Worker
-        let mut clone_search_worker = SearchWorker::new(tt_ref);
+        let mut clone_search_worker = SearchWorker::new(tt_ref, network_ref);
         clone_search_worker.process_moves(prev_moves);
 
         // Reset Count
-
         let worker_source_ptr: &SearchWorker<'_> = &clone_search_worker;
 
         thread::scope(|s| {
@@ -84,8 +99,9 @@ impl ChessGame {
                 let thread_stop_signal = Arc::clone(&stop_search);
 
                 let handle = s.spawn(move || {
-                    let mut search_worker = 
-                        SearchWorker::from_game_state(tt_ref, worker_ref, thread_id);
+                    let mut search_worker = SearchWorker::from_game_state(
+                        tt_ref, worker_ref, thread_id
+                    );
 
                     let (thread_best_move, nodes_processed) = search_worker.root_search(
                         PV_DEPTH, 

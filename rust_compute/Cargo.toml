@@ -4,11 +4,17 @@ version = "0.1.0"
 edition = "2021"
 rand = "0.9"
 
+[profile.release]
+debug = true
+
+[build]
+# Forces the compiler to auto-vectorize loops into AVX2 / Neon SIMD registers
+rustflags = ["-C", "target-cpu=native"]
+
 [dependencies]
 const-random = "0.1"
 rand = "0.10.1"
 arrayvec = "0.7"
-timecat = { version = "1.53.0", features = ["inbuilt_nnue", "extras"] }
 
 [dependencies.pyo3]
 version = "0.27.0"

@@ -155,6 +155,45 @@ pub enum BoardPiece {
     BKING = 12,
 }
 
+impl BoardPiece {
+    /// Maps the BoardPiece enum to a 0..11 integer matching your Python layout.
+    /// Panic-free optimization since we filter out NONE at call sites.
+    #[inline(always)]
+    pub fn to_nnue_type(self) -> usize {
+        debug_assert!(self != BoardPiece::NONE);
+        (self as usize) - 1
+    }
+}
+
+/// Flips a square vertically for Black's perspective (e.g., square 0/a1 becomes 56/a8)
+#[inline(always)]
+pub fn flip_square(sq: usize) -> usize {
+    sq ^ 63
+}
+
+/// Computes the unique index [0..49151] for a piece from a specific player's perspective
+#[inline(always)]
+pub fn get_feature_index(king_sq: usize, piece: BoardPiece, 
+    piece_sq: usize, is_black_active: bool) -> usize {
+    let piece_type = piece.to_nnue_type();
+
+    // Fen Notation used is training assumes incorrect order
+    let king_sq_flip = king_sq ^ 56;
+    let piece_sq_flip = piece_sq ^ 56;
+
+    let (k_sq, p_sq, p_type) = if is_black_active {
+        // From Black's perspective, flip the board vertically and invert piece colors
+        // In Python layout: White pieces are 0..5, Black pieces are 6..11
+        let inverted_type = (piece_type + 6) % 12;
+        (flip_square(king_sq_flip), flip_square(piece_sq_flip), inverted_type)
+    } else {
+        (king_sq_flip, piece_sq_flip, piece_type)
+    };
+
+    // Index Formula: (KingSquare * 768) + (PieceType * 64) + PieceSquare
+    (k_sq * 768) + (p_type * 64) + p_sq
+}
+
 pub fn is_pawn(piece: BoardPiece) -> bool {
     matches!(piece, BoardPiece::WPAWN | BoardPiece::BPAWN)
 }
@@ -170,7 +209,6 @@ pub fn is_some(piece: BoardPiece) -> bool {
 pub fn is_none(piece: BoardPiece) -> bool {
     matches!(piece, BoardPiece::NONE)
 }
-
 
 pub fn piece_value(piece_type: BoardPiece) -> i32 {
     match piece_type {
