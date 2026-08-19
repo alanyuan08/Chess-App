@@ -571,7 +571,7 @@ impl<'a> SearchWorker<'a> {
     fn board_eval(&mut self) -> i32 {
         self.chess_board.evaluate(
             &mut self.thread_buffer
-        );
+        )
     }
 
     // Quiescence Search 

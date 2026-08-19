@@ -64,8 +64,8 @@ def process_shard_worker(stream_fn, data_queue, stop_event, dataset_name, shards
         # Expand numeric spaces in FEN to empty string dots for alignment
         rows = board_part.split('/')
 
-        # Rank 1 (A1) is 0
-        rows.reverse()
+        # Rank 1 (A1) is 0 -> Remove this later
+        # rows.reverse()
 
         clean_board = ""
         for row in rows:
