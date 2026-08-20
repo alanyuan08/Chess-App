@@ -39,7 +39,7 @@ else
 fi
 
 # 4. Run your main script
-# python chessApp.py $1
+python chessApp.py $1
 
 # Rust Flame Graph
-samply record python chessApp.py $1
+# samply record python chessApp.py $1
