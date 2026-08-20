@@ -749,32 +749,41 @@ impl ChessBoard {
         let w_king_sq = self.kings[Side::WHITE as usize].trailing_zeros() as usize;
         let b_king_sq = self.kings[Side::BLACK as usize].trailing_zeros() as usize;
 
-        // 1. Reset both accumulators to the initial layer 1 baseline biases (Casting i16 to i32)
-        // Slicing to [..256] removes the compiler's bounds-checking overhead
         let target_white = &mut self.accumulators[self.ply].white.vals[..256];
         let target_black = &mut self.accumulators[self.ply].black.vals[..256];
         let biases = &self.nnue_network.l1_biases[..256];
 
+        // --- 1. PROCESS WHITE ACCUMULATOR COMPLETELY ---
+        // Initialize White with a clean copy (compiler can optimize this easily)
         for i in 0..256 {
             target_white[i] = biases[i] as i16;
+        }
+        
+        // Accumulate all active pieces for White in a single contiguous memory stream
+        for (sq, &piece) in self.mailbox.iter().enumerate().take(64) {
+            if piece != BoardPiece::NONE {
+                let w_idx = get_feature_index(w_king_sq, piece, sq, false);
+                let w_row = &self.nnue_network.l1_weights[w_idx][..256];
+
+                for i in 0..256 {
+                    target_white[i] = target_white[i].wrapping_add(w_row[i]);
+                }
+            }
+        }
+
+        // --- 2. PROCESS BLACK ACCUMULATOR COMPLETELY ---
+        // Initialize Black cleanly
+        for i in 0..256 {
             target_black[i] = biases[i] as i16;
         }
 
-        // 2. Loop through every square on the board and add active pieces
+        // Accumulate all active pieces for Black in a single contiguous memory stream
         for (sq, &piece) in self.mailbox.iter().enumerate().take(64) {
             if piece != BoardPiece::NONE {
-                // Get the unique HalfKA indices for both king perspectives
-                let w_idx = get_feature_index(w_king_sq, piece, sq, false);
                 let b_idx = get_feature_index(b_king_sq, piece, sq, true);
-                
-                // Grab direct references to the row weights and explicitly slice them to 256
-                let w_row = &self.nnue_network.l1_weights[w_idx][..256];
                 let b_row = &self.nnue_network.l1_weights[b_idx][..256];
 
-                // 3. Unroll the nested zip into a clean, contiguous loop.
-                // The exact bounds match allows the compiler to confidently auto-vectorize this loop.
                 for i in 0..256 {
-                    target_white[i] = target_white[i].wrapping_add(w_row[i]);
                     target_black[i] = target_black[i].wrapping_add(b_row[i]); 
                 }
             }
@@ -799,11 +808,11 @@ impl ChessBoard {
 
         // --- STEP 1: CONCATENATION & ACTIVATION (L1 -> L2) ---
         for (i, &val) in active_acc.vals.iter().enumerate().take(256) {
-            buffer.l2_inputs[i] = val.clamp(0, 128);
+            buffer.l2_inputs[i] = val.clamp(0, 127) as i8;
         }
 
         for (i, &val) in opp_acc.vals.iter().enumerate().take(256) {
-            buffer.l2_inputs[i + 256] = val.clamp(0, 128);
+            buffer.l2_inputs[i + 256] = val.clamp(0, 127) as i8;
         }
 
         // --- STEP 2: HIDDEN LAYER 2 (512 -> 64) ---
@@ -823,7 +832,7 @@ impl ChessBoard {
             }
 
             let activated = sum >> 7;
-            buffer.l3_inputs[neuron] = activated.clamp(0, 32) as i16;
+            buffer.l3_inputs[neuron] = activated.clamp(0, 32) as i8;
         }
 
         // --- STEP 3: HIDDEN LAYER 3 (64 -> 32) ---
@@ -842,7 +851,7 @@ impl ChessBoard {
             }
 
             let activated = sum >> 5;
-            buffer.l4_inputs[neuron] = activated.clamp(0, 32) as i16;
+            buffer.l4_inputs[neuron] = activated.clamp(0, 32) as i8;
         }
 
 
@@ -942,23 +951,31 @@ impl ChessBoard {
             let w_cap_row = &self.nnue_network.l1_weights[w_cap][..256];
             let b_cap_row = &self.nnue_network.l1_weights[b_cap][..256];
 
+            // 1. Process White entirely in a clean, isolated memory pipeline
             for i in 0..256 {
                 curr_white[i] = prev_white[i]
                     .wrapping_add(w_add_row[i])
                     .wrapping_sub(w_rem_row[i])
                     .wrapping_sub(w_cap_row[i]);
+            }
 
+            // 2. Process Black entirely in a clean, isolated memory pipeline
+            for i in 0..256 {
                 curr_black[i] = prev_black[i]
                     .wrapping_add(b_add_row[i])
                     .wrapping_sub(b_rem_row[i])
                     .wrapping_sub(b_cap_row[i]);
             }
         } else {
+            // 1. Process White entirely
             for i in 0..256 {
                 curr_white[i] = prev_white[i]
                     .wrapping_add(w_add_row[i])
                     .wrapping_sub(w_rem_row[i]);
+            }
 
+            // 2. Process Black entirely
+            for i in 0..256 {
                 curr_black[i] = prev_black[i]
                     .wrapping_add(b_add_row[i])
                     .wrapping_sub(b_rem_row[i]);
