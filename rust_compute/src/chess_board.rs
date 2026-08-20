@@ -760,17 +760,17 @@ impl ChessBoard {
         }
         
         // Accumulate all active pieces for White in a single contiguous memory stream
-        for (sq, &piece) in self.mailbox.iter().enumerate().take(64) {
-            if piece != BoardPiece::NONE {
-                let w_idx = get_feature_index(w_king_sq, piece, sq, false);
-                let w_row = &self.nnue_network.l1_weights[w_idx][..256];
+       for sq in 0..64 {
+        let piece = self.mailbox[sq];
+        if piece != BoardPiece::NONE {
+            let w_idx = get_feature_index(w_king_sq, piece, sq, false);
+            let w_row = &self.nnue_network.l1_weights[w_idx][..256];
 
-                for i in 0..256 {
-                    target_white[i] = target_white[i].wrapping_add(w_row[i]);
-                }
+            for i in 0..256 {
+                target_white[i] = target_white[i].wrapping_add(w_row[i]);
             }
         }
-
+}
         // --- 2. PROCESS BLACK ACCUMULATOR COMPLETELY ---
         // Initialize Black cleanly
         for i in 0..256 {
@@ -778,7 +778,8 @@ impl ChessBoard {
         }
 
         // Accumulate all active pieces for Black in a single contiguous memory stream
-        for (sq, &piece) in self.mailbox.iter().enumerate().take(64) {
+        for sq in 0..64 {
+            let piece = self.mailbox[sq];
             if piece != BoardPiece::NONE {
                 let b_idx = get_feature_index(b_king_sq, piece, sq, true);
                 let b_row = &self.nnue_network.l1_weights[b_idx][..256];
@@ -807,28 +808,27 @@ impl ChessBoard {
         // The accumlator is maintained by the init / move functions
 
         // --- STEP 1: CONCATENATION & ACTIVATION (L1 -> L2) ---
-        for (i, &val) in active_acc.vals.iter().enumerate().take(256) {
-            buffer.l2_inputs[i] = val.clamp(0, 127) as i8;
+        for i in 0..256 {
+            buffer.l2_inputs[i] = active_acc.vals[i].clamp(0, 127) as i8;
         }
 
-        for (i, &val) in opp_acc.vals.iter().enumerate().take(256) {
-            buffer.l2_inputs[i + 256] = val.clamp(0, 127) as i8;
+        for i in 0..256 {
+            buffer.l2_inputs[i + 256] = opp_acc.vals[i].clamp(0, 127) as i8;
         }
 
         // --- STEP 2: HIDDEN LAYER 2 (512 -> 64) ---
         // Input Scale (128) * Weight Scale (32) = Sum Scale (4096).
         // Shift Down by >> 7 to Scale (32)
         // Clamp at 32 to match Python's ReLU1 (1.0).
-        let l2_layer = self.nnue_network.l2_weights.iter().zip(self.nnue_network.l2_biases.iter());
-        for (neuron, (row, &bias)) in l2_layer.enumerate().take(64) {
+        for neuron in 0..64 {
+            let bias = self.nnue_network.l2_biases[neuron];
             let mut sum: i32 = bias;
 
-            // Process chunks of 16 elements to enable aggressive SIMD auto-vectorization
+            let row = &self.nnue_network.l2_weights[neuron][..512];
             let inputs = &buffer.l2_inputs[..512];
-            for (chunk_weights, chunk_inputs) in row.chunks_exact(16).zip(inputs.chunks_exact(16)) {
-                for (&w, &inp) in chunk_weights.iter().zip(chunk_inputs.iter()) {
-                    sum += (inp as i32) * (w as i32);
-                }
+
+            for i in 0..512 {
+                sum += (inputs[i] as i32) * (row[i] as i32);
             }
 
             let activated = sum >> 7;
@@ -839,34 +839,32 @@ impl ChessBoard {
         // Input Scale (32) * Weight Scale (32) = Sum Scale (1024).
         // Shift Down by 5 to Scale (32)
         // Clamp at 32 to match Python's ReLU1 (1.0).
-        let l3_layer = self.nnue_network.l3_weights.iter().zip(self.nnue_network.l3_biases.iter());
-        for (neuron, (row, &bias)) in l3_layer.enumerate().take(32) {
+        for neuron in 0..32 {
+            let bias = self.nnue_network.l3_biases[neuron];
             let mut sum: i32 = bias;
 
+            let row = &self.nnue_network.l3_weights[neuron][..64];
             let inputs = &buffer.l3_inputs[..64];
-            for (chunk_weights, chunk_inputs) in row.chunks_exact(16).zip(inputs.chunks_exact(16)) {
-                for (&w, &inp) in chunk_weights.iter().zip(chunk_inputs.iter()) {
-                    sum += (inp as i32) * (w as i32);
-                }
+
+            for i in 0..64 {
+                sum += (inputs[i] as i32) * (row[i] as i32);
             }
 
             let activated = sum >> 5;
             buffer.l4_inputs[neuron] = activated.clamp(0, 32) as i8;
         }
 
-
         // --- STEP 4: OUTPUT LAYER (32 -> 1) ---
         // Input Scale (32) * Weight Scale (128) = Sum Scale (4096).
         // Shift Down by 5 to Scale (128)
         let mut final_sum: i32 = self.nnue_network.output_bias[0];
-        let row = &self.nnue_network.output_weights[0];
 
+        let row = &self.nnue_network.output_weights[0][..32];
         let inputs = &buffer.l4_inputs[..32];
-        for (chunk_weights, chunk_inputs) in row.chunks_exact(16).zip(inputs.chunks(16)) {
-            for (&w, &inp) in chunk_weights.iter().zip(chunk_inputs.iter()) {
-                final_sum += (inp as i32) * (w as i32);
-            }
+        for i in 0..32 {
+            final_sum += (inputs[i] as i32) * (row[i] as i32);
         }
+
         let internal_pawns_scaled = final_sum >> 5;
 
         // Shift by >> 7 remove remaining scale
