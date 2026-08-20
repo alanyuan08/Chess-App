@@ -8,3 +8,4 @@ build/
 nnue-training/*.csv
 nnue-training/*.bin
 nnue-training/*.keras
+profile.json.gz
