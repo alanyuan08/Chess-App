@@ -76,9 +76,9 @@ impl NnueNetwork {
 #[repr(C, align(64))]
 #[derive(Clone, Debug)]
 pub struct NnueInferenceBuffer {
-    pub l2_inputs: [i16; 512],
-    pub l3_inputs: [i16; 64],
-    pub l4_inputs: [i16; 32],
+    pub l2_inputs: [i8; 512],
+    pub l3_inputs: [i8; 64],
+    pub l4_inputs: [i8; 32],
 }
 
 impl NnueInferenceBuffer {    
@@ -95,9 +95,9 @@ impl NnueInferenceBuffer {
 impl Default for NnueInferenceBuffer {
     fn default() -> Self {
         Self {
-            l2_inputs: [0i16; 512],
-            l3_inputs: [0i16; 64],
-            l4_inputs: [0i16; 32],
+            l2_inputs: [0i8; 512],
+            l3_inputs: [0i8; 64],
+            l4_inputs: [0i8; 32],
         }
     }
 }
