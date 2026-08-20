@@ -11,6 +11,21 @@ use crate::board_accumlator::*;
 use crate::nnue_network::*;
 use arrayvec::ArrayVec;
 
+use std::arch::aarch64::{
+    int32x4_t,
+    vaddvq_s32,      // Sums all 4 lanes of a 32-bit vector into a single i32 scalar
+    vdupq_n_s32,     // Fills all 4 lanes of a 32-bit register with zeros
+    vld1q_s8,        // Loads 16 elements of i8 safely from memory
+    vld1q_s16,       // Loads 8 elements of i16 safely from memory
+    vget_low_s8,     // Splits off the lower 8 elements from an i8 vector register
+    vget_high_s8,    // Splits off the upper 8 elements from an i8 vector register
+    vmovl_s8,        // Widens 8 signed elements from i8 to i16 precision
+    vget_low_s16,    // Splits off the lower 4 elements from an i16 vector register
+    vmlal_s16,       // Multiplies the lower 4 elements of i16 vectors and adds to an i32 register
+    vmlal_high_s16,  // Multiplies the upper 4 elements of i16 vectors and adds to an i32 register
+};
+
+
 // 0 -> White / 1 -> Black
 #[derive(Debug, Clone)] 
 pub struct ChessBoard {
@@ -811,15 +826,90 @@ impl ChessBoard {
         // Shift Down by >> 7 to Scale (32)
         // Clamp at 32 to match Python's ReLU1 (1.0).
         let l2_layer = self.nnue_network.l2_weights.iter().zip(self.nnue_network.l2_biases.iter());
-        for (neuron, (row, &bias)) in l2_layer.enumerate().take(64) {
-            let mut sum: i32 = bias;
 
-            // Process chunks of 16 elements to enable aggressive SIMD auto-vectorization
+        for (neuron, (row, &bias)) in l2_layer.enumerate().take(64) {
+            let mut sum: i32;
+
             let inputs = &buffer.l2_inputs[..512];
-            for (chunk_weights, chunk_inputs) in row.chunks_exact(16).zip(inputs.chunks_exact(16)) {
-                for (&w, &inp) in chunk_weights.iter().zip(chunk_inputs.iter()) {
-                    sum += (inp as i32) * (w as i32);
+            
+            // Get raw pointers to the start of the 512-element arrays
+            let mut ptr_w = row.as_ptr();
+            let mut ptr_in = inputs.as_ptr();
+
+            unsafe {
+                // Clear 4 separate 128-bit vector registers to serve as parallel accumulators
+                let mut acc0: std::arch::aarch64::int32x4_t = std::mem::zeroed();
+                let mut acc1: std::arch::aarch64::int32x4_t = std::mem::zeroed();
+                let mut acc2: std::arch::aarch64::int32x4_t = std::mem::zeroed();
+                let mut acc3: std::arch::aarch64::int32x4_t = std::mem::zeroed();
+
+                // Unroll the loop by processing 4 blocks of 16 elements (64 elements total) per iteration.
+                // 512 total elements / 64 elements per loop = 8 loop iterations total.
+                for _ in 0..8 {
+                    std::arch::asm!(
+                        // --- BLOCK 1 (Elements 0-15) ---
+                        "ld1 {{v4.16b}}, [{ptr_w}], #16",       // Load 16 weights (i8), advance ptr 16 bytes
+                        "ld1 {{v5.8h, v6.8h}}, [{ptr_in}], #32", // Load 16 inputs (i16), advance ptr 32 bytes
+                        "sxtl v7.8h, v4.8b",                     // Sign-extend lower 8 weights from i8 to i16
+                        "sxtl2 v8.8h, v4.16b",                   // Sign-extend upper 8 weights from i8 to i16
+                        "smlal {a0}.4s, v5.4h, v7.4h",           // Multiply-accumulate lower half
+                        "smlal2 {a0}.4s, v5.8h, v7.8h",          // Multiply-accumulate upper half
+                        "smlal {a0}.4s, v6.4h, v8.4h",           
+                        "smlal2 {a0}.4s, v6.8h, v8.8h",          
+
+                        // --- BLOCK 2 (Elements 16-31) ---
+                        "ld1 {{v4.16b}}, [{ptr_w}], #16",       
+                        "ld1 {{v5.8h, v6.8h}}, [{ptr_in}], #32", 
+                        "sxtl v7.8h, v4.8b",                     
+                        "sxtl2 v8.8h, v4.16b",                   
+                        "smlal {a1}.4s, v5.4h, v7.4h",           
+                        "smlal2 {a1}.4s, v5.8h, v7.8h",          
+                        "smlal {a1}.4s, v6.4h, v8.4h",           
+                        "smlal2 {a1}.4s, v6.8h, v8.8h",          
+
+                        // --- BLOCK 3 (Elements 32-47) ---
+                        "ld1 {{v4.16b}}, [{ptr_w}], #16",       
+                        "ld1 {{v5.8h, v6.8h}}, [{ptr_in}], #32", 
+                        "sxtl v7.8h, v4.8b",                     
+                        "sxtl2 v8.8h, v4.16b",                   
+                        "smlal {a2}.4s, v5.4h, v7.4h",           
+                        "smlal2 {a2}.4s, v5.8h, v7.8h",          
+                        "smlal {a2}.4s, v6.4h, v8.4h",           
+                        "smlal2 {a2}.4s, v6.8h, v8.8h",          
+
+                        // --- BLOCK 4 (Elements 48-63) ---
+                        "ld1 {{v4.16b}}, [{ptr_w}], #16",       
+                        "ld1 {{v5.8h, v6.8h}}, [{ptr_in}], #32", 
+                        "sxtl v7.8h, v4.8b",                     
+                        "sxtl2 v8.8h, v4.16b",                   
+                        "smlal {a3}.4s, v5.4h, v7.4h",           
+                        "smlal2 {a3}.4s, v5.8h, v7.8h",          
+                        "smlal {a3}.4s, v6.4h, v8.4h",           
+                        "smlal2 {a3}.4s, v6.8h, v8.8h",          
+
+                        ptr_w  = inout(reg) ptr_w,
+                        ptr_in = inout(reg) ptr_in,
+                        a0     = inout(vreg) acc0,
+                        a1     = inout(vreg) acc1,
+                        a2     = inout(vreg) acc2,
+                        a3     = inout(vreg) acc3,
+                        out("v4") _, out("v5") _, out("v6") _, out("v7") _, out("v8") _,
+                    );
                 }
+
+                // Combine the 4 independent parallel accumulators together into acc0
+                std::arch::asm!(
+                    "add {v0}.4s, {v0}.4s, {v1}.4s",
+                    "add {v2}.4s, {v2}.4s, {v3}.4s",
+                    "add {v0}.4s, {v0}.4s, {v2}.4s",
+                    v0 = inout(vreg) acc0,
+                    v1 = in(vreg) acc1,
+                    v2 = inout(vreg) acc2,
+                    v3 = in(vreg) acc3,
+                );
+
+                // Horizontally sum the final 4 lanes of acc0 and add the bias
+                sum = bias + std::arch::aarch64::vaddvq_s32(acc0);
             }
 
             let activated = sum >> 7;
@@ -831,14 +921,83 @@ impl ChessBoard {
         // Shift Down by 5 to Scale (32)
         // Clamp at 32 to match Python's ReLU1 (1.0).
         let l3_layer = self.nnue_network.l3_weights.iter().zip(self.nnue_network.l3_biases.iter());
-        for (neuron, (row, &bias)) in l3_layer.enumerate().take(32) {
-            let mut sum: i32 = bias;
 
+        for (neuron, (row, &bias)) in l3_layer.enumerate().take(32) {
+            let mut sum: i32;
             let inputs = &buffer.l3_inputs[..64];
-            for (chunk_weights, chunk_inputs) in row.chunks_exact(16).zip(inputs.chunks_exact(16)) {
-                for (&w, &inp) in chunk_weights.iter().zip(chunk_inputs.iter()) {
-                    sum += (inp as i32) * (w as i32);
-                }
+            
+            let mut ptr_w = row.as_ptr();
+            let mut ptr_in = inputs.as_ptr();
+
+            unsafe {
+                // Initialize 4 parallel 32-bit accumulators to 0
+                let mut acc0: std::arch::aarch64::int32x4_t = std::mem::zeroed();
+                let mut acc1: std::arch::aarch64::int32x4_t = std::mem::zeroed();
+                let mut acc2: std::arch::aarch64::int32x4_t = std::mem::zeroed();
+                let mut acc3: std::arch::aarch64::int32x4_t = std::mem::zeroed();
+
+                std::arch::asm!(
+                    // --- BLOCK 1 (Elements 0-15) ---
+                    "ld1 {{v4.16b}}, [{ptr_w}], #16",       // Load 16 weights (i8)
+                    "ld1 {{v5.8h, v6.8h}}, [{ptr_in}], #32", // Load 16 inputs (i16)
+                    "sxtl v7.8h, v4.8b",                     // Widen lower 8 weights to i16
+                    "sxtl2 v8.8h, v4.16b",                   // Widen upper 8 weights to i16
+                    "smlal {a0}.4s, v5.4h, v7.4h",           // Multiply-accumulate 
+                    "smlal2 {a0}.4s, v5.8h, v7.8h",          
+                    "smlal {a0}.4s, v6.4h, v8.4h",           
+                    "smlal2 {a0}.4s, v6.8h, v8.8h",          
+
+                    // --- BLOCK 2 (Elements 16-31) ---
+                    "ld1 {{v4.16b}}, [{ptr_w}], #16",       
+                    "ld1 {{v5.8h, v6.8h}}, [{ptr_in}], #32", 
+                    "sxtl v7.8h, v4.8b",                     
+                    "sxtl2 v8.8h, v4.16b",                   
+                    "smlal {a1}.4s, v5.4h, v7.4h",           
+                    "smlal2 {a1}.4s, v5.8h, v7.8h",          
+                    "smlal {a1}.4s, v6.4h, v8.4h",           
+                    "smlal2 {a1}.4s, v6.8h, v8.8h",          
+
+                    // --- BLOCK 3 (Elements 32-47) ---
+                    "ld1 {{v4.16b}}, [{ptr_w}], #16",       
+                    "ld1 {{v5.8h, v6.8h}}, [{ptr_in}], #32", 
+                    "sxtl v7.8h, v4.8b",                     
+                    "sxtl2 v8.8h, v4.16b",                   
+                    "smlal {a2}.4s, v5.4h, v7.4h",           
+                    "smlal2 {a2}.4s, v5.8h, v7.8h",          
+                    "smlal {a2}.4s, v6.4h, v8.4h",           
+                    "smlal2 {a2}.4s, v6.8h, v8.8h",          
+
+                    // --- BLOCK 4 (Elements 48-63) ---
+                    "ld1 {{v4.16b}}, [{ptr_w}]",             // Final loads, pointer updates not needed
+                    "ld1 {{v5.8h, v6.8h}}, [{ptr_in}]", 
+                    "sxtl v7.8h, v4.8b",                     
+                    "sxtl2 v8.8h, v4.16b",                   
+                    "smlal {a3}.4s, v5.4h, v7.4h",           
+                    "smlal2 {a3}.4s, v5.8h, v7.8h",          
+                    "smlal {a3}.4s, v6.4h, v8.4h",           
+                    "smlal2 {a3}.4s, v6.8h, v8.8h",          
+
+                    ptr_w  = inout(reg) ptr_w => _,
+                    ptr_in = inout(reg) ptr_in => _,
+                    a0     = inout(vreg) acc0,
+                    a1     = inout(vreg) acc1,
+                    a2     = inout(vreg) acc2,
+                    a3     = inout(vreg) acc3,
+                    out("v4") _, out("v5") _, out("v6") _, out("v7") _, out("v8") _,
+                );
+
+                // Fold the accumulators together
+                std::arch::asm!(
+                    "add {v0}.4s, {v0}.4s, {v1}.4s",
+                    "add {v2}.4s, {v2}.4s, {v3}.4s",
+                    "add {v0}.4s, {v0}.4s, {v2}.4s",
+                    v0 = inout(vreg) acc0,
+                    v1 = in(vreg) acc1,
+                    v2 = inout(vreg) acc2,
+                    v3 = in(vreg) acc3,
+                );
+
+                sum = bias + std::arch::aarch64::vaddvq_s32(acc0);
             }
 
             let activated = sum >> 5;
@@ -851,13 +1010,55 @@ impl ChessBoard {
         // Shift Down by 5 to Scale (128)
         let mut final_sum: i32 = self.nnue_network.output_bias[0];
         let row = &self.nnue_network.output_weights[0];
-
         let inputs = &buffer.l4_inputs[..32];
-        for (chunk_weights, chunk_inputs) in row.chunks_exact(16).zip(inputs.chunks(16)) {
-            for (&w, &inp) in chunk_weights.iter().zip(chunk_inputs.iter()) {
-                final_sum += (inp as i32) * (w as i32);
-            }
+
+        let mut ptr_w = row.as_ptr();
+        let mut ptr_in = inputs.as_ptr();
+
+        unsafe {
+            // Clear 2 parallel accumulators to 0
+            let mut acc0: std::arch::aarch64::int32x4_t = std::mem::zeroed();
+            let mut acc1: std::arch::aarch64::int32x4_t = std::mem::zeroed();
+
+            std::arch::asm!(
+                // --- BLOCK 1 (Elements 0-15) ---
+                "ld1 {{v4.16b}}, [{ptr_w}], #16",       // Load 16 weights (i8)
+                "ld1 {{v5.8h, v6.8h}}, [{ptr_in}], #32", // Load 16 inputs (i16)
+                "sxtl v7.8h, v4.8b",                     // Sign-extend weights to i16
+                "sxtl2 v8.8h, v4.16b",                   
+                "smlal {a0}.4s, v5.4h, v7.4h",           // Multiply-accumulate 
+                "smlal2 {a0}.4s, v5.8h, v7.8h",          
+                "smlal {a0}.4s, v6.4h, v8.4h",           
+                "smlal2 {a0}.4s, v6.8h, v8.8h",          
+
+                // --- BLOCK 2 (Elements 16-31) ---
+                "ld1 {{v4.16b}}, [{ptr_w}]",             // Final loads
+                "ld1 {{v5.8h, v6.8h}}, [{ptr_in}]", 
+                "sxtl v7.8h, v4.8b",                     
+                "sxtl2 v8.8h, v4.16b",                   
+                "smlal {a1}.4s, v5.4h, v7.4h",           
+                "smlal2 {a1}.4s, v5.8h, v7.8h",          
+                "smlal {a1}.4s, v6.4h, v8.4h",           
+                "smlal2 {a1}.4s, v6.8h, v8.8h",          
+
+                ptr_w  = inout(reg) ptr_w => _,
+                ptr_in = inout(reg) ptr_in => _,
+                a0     = inout(vreg) acc0,
+                a1     = inout(vreg) acc1,
+                out("v4") _, out("v5") _, out("v6") _, out("v7") _, out("v8") _,
+            );
+
+            // Merge the 2 accumulators
+            std::arch::asm!(
+                "add {v0}.4s, {v0}.4s, {v1}.4s",
+                v0 = inout(vreg) acc0,
+                v1 = in(vreg) acc1,
+            );
+
+            // Add up the lanes into the final scalar value
+            final_sum += std::arch::aarch64::vaddvq_s32(acc0);
         }
+
         let internal_pawns_scaled = final_sum >> 5;
 
         // Shift by >> 7 remove remaining scale
