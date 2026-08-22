@@ -17,6 +17,7 @@ pub mod search_worker;
 pub mod parser;
 pub mod nnue_network;
 pub mod board_accumlator;
+pub mod search_command;
 
 use crate::chess_game::{init_attack_tables};
 use crate::chess_game::ChessGame;

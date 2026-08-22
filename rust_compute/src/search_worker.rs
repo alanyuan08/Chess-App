@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Instant, Duration};
 use crate::transposition_table::*;
 use arrayvec::ArrayVec;
+use std::sync::Arc;
 use std::cmp;
 
 use crate::move_command::*;
@@ -11,10 +12,11 @@ use crate::lmr_table::*;
 use crate::parser::*;
 use crate::chess_board::*;
 use crate::nnue_network::*;
+use crate::search_command::*;
 
 #[derive(Clone)] 
-pub struct SearchWorker<'a>  {
-    transposition_table: &'a TranspositionTable,
+pub struct SearchWorker  {
+    transposition_table: Arc<TranspositionTable>,
     nodes_processed: usize,
 
     history: [Option<UndoMove>; 1024],
@@ -26,15 +28,16 @@ pub struct SearchWorker<'a>  {
     position_stack_len: usize,
 
     killer_move_table: [[Option<ForwardMove>; MAX_DEPTH as usize]; 2],
-    thread_id: i32,
+    thread_id: usize,
 
     thread_buffer: NnueInferenceBuffer,
 }
 
-impl<'a> SearchWorker<'a> {
+impl SearchWorker {
     pub fn new(
-        transposition_table: &'a TranspositionTable,
-        nnue_network: &'static NnueNetwork
+        transposition_table: Arc<TranspositionTable>,
+        nnue_network: &'static NnueNetwork,
+        thread_id: usize
     ) -> Self {
         Self {
             history: [None; 1024],
@@ -57,31 +60,6 @@ impl<'a> SearchWorker<'a> {
             transposition_table,
 
             killer_move_table: [[None; MAX_DEPTH as usize]; 2],
-            thread_id: 0,
-
-            thread_buffer: NnueInferenceBuffer::default(),
-        }
-    }
-
-    pub fn from_game_state(
-        transposition_table: &'a TranspositionTable, 
-        search_worker: &SearchWorker,
-        thread_id: i32
-    ) -> Self {
-        Self {
-            // History move records are left blank as they aren't needed for future searches
-            history: [None; 1024],
-            history_index: search_worker.history_index,
-            chess_board: search_worker.chess_board.clone(),
-
-            // Populate our repetition detection array
-            traversed_positions: search_worker.traversed_positions,
-            position_stack_len: search_worker.position_stack_len, 
-            
-            nodes_processed: 0,
-            transposition_table,
-
-            killer_move_table: [[None; MAX_DEPTH as usize]; 2],
             thread_id,
 
             thread_buffer: NnueInferenceBuffer::default(),
@@ -89,8 +67,9 @@ impl<'a> SearchWorker<'a> {
     }
 
     // Search Entry Point
-    pub fn root_search(&mut self,
-        max_depth: i32, stop_signal: &AtomicBool) -> (Option<ForwardMove>, usize){
+    pub fn root_search(&mut self, 
+        max_depth: i32, stop_signal: &AtomicBool
+    ) -> (Option<ForwardMove>, usize){
         // Start the timer
         let start_time = Instant::now();
         let time_limit = Duration::from_secs(SEARCH_TIME_LIMIT);
@@ -176,14 +155,15 @@ impl<'a> SearchWorker<'a> {
         false
     }
 
-    pub fn process_moves(&mut self, prev_moves: Vec<String>) {
-        for uci_move in &prev_moves {
-            if self.history_index >= 1024 { break; } 
+    pub fn process_move(&mut self, uci_move: String) {
+        if self.history_index >= 1024 { 
+            eprintln!("History Index too long");
+            return;
+         } 
 
-            let move_command: ForwardMove = 
-                parse_forward_move_with_board(uci_move, &self.chess_board);
-            self.process_forward_move(move_command);
-        }
+        let move_command: ForwardMove = 
+            parse_forward_move_with_board(uci_move, &self.chess_board);
+        self.process_forward_move(move_command);
     }
 
     fn process_forward_move(&mut self, forward_move: ForwardMove) {

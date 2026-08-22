@@ -2,7 +2,7 @@ use crate::move_command::*;
 use std::collections::HashMap;
 use crate::chess_board::ChessBoard;
 
-pub fn parse_uci(forward_move: ForwardMove) -> String {
+pub fn fowardMove_to_uci(forward_move: ForwardMove) -> String {
     let map = HashMap::from([
         (0, 'a'), (1, 'b'), (2, 'c'), (3, 'd'),
         (4, 'e'), (5, 'f'), (6, 'g'), (7, 'h'),
@@ -23,7 +23,7 @@ pub fn parse_uci(forward_move: ForwardMove) -> String {
     format!("{}{}{}{}{}", start_file, start_rank, end_file, end_rank, promo)
 }
 
-pub fn parse_forward_move_with_board(uci: &str, board: &ChessBoard) -> ForwardMove {
+pub fn parse_forward_move_with_board(uci: String, board: &ChessBoard) -> ForwardMove {
     fn sq_from_uci(file: char, rank: char) -> usize {
         let file_idx = (file as u8 - b'a') as usize;
         let rank_idx = (rank as u8 - b'1') as usize;
