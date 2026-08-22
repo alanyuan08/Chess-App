@@ -129,7 +129,7 @@ impl ChessGame {
         // Propagate Move to Worker Channels
         let start_time = Instant::now();
 
-        // Update History
+        // Update Workers
         for result_tx in &self.worker_channels {
             let _ = result_tx.send(SearchCommand::UpdateHistory { 
                 uci_move: uci_move.clone() 
@@ -152,9 +152,16 @@ impl ChessGame {
                 println!("{} Nodes Procesed in {} milliseconds", 
                     result.nodes_processed, elapsed_time.as_millis());
                         
-                let uci = fowardMove_to_uci(result.best_move);
-                println!("{}", uci);
-                let py_str = PyString::new(py, &uci);
+                let ai_move = fowardMove_to_uci(result.best_move);
+
+                // Propagate Best Move to Channels
+                for result_tx in &self.worker_channels {
+                    let _ = result_tx.send(SearchCommand::UpdateHistory { 
+                        uci_move: ai_move.clone() 
+                    });
+                }
+
+                let py_str = PyString::new(py, &ai_move);
 
                 let py_obj = py_str.into_pyobject(py)?.unbind();
                 Ok(py_obj.into_bound(py))
