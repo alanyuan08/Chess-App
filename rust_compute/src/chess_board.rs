@@ -744,6 +744,7 @@ impl ChessBoard {
     }
 
     // Create from Scratch
+     #[inline(always)]
     pub fn create_accumlator_from_scratch(&mut self) {
         // Retrieve King Squares
         let w_king_sq = self.kings[Side::WHITE as usize].trailing_zeros() as usize;
@@ -761,16 +762,16 @@ impl ChessBoard {
         
         // Accumulate all active pieces for White in a single contiguous memory stream
        for sq in 0..64 {
-        let piece = self.mailbox[sq];
-        if piece != BoardPiece::NONE {
-            let w_idx = get_feature_index(w_king_sq, piece, sq, false);
-            let w_row = &self.nnue_network.l1_weights[w_idx][..256];
+            let piece = self.mailbox[sq];
+            if piece != BoardPiece::NONE {
+                let w_idx = get_feature_index(w_king_sq, piece, sq, false);
+                let w_row = &self.nnue_network.l1_weights[w_idx][..256];
 
-            for i in 0..256 {
-                target_white[i] = target_white[i].wrapping_add(w_row[i]);
+                for i in 0..256 {
+                    target_white[i] = target_white[i].wrapping_add(w_row[i]);
+                }
             }
         }
-}
         // --- 2. PROCESS BLACK ACCUMULATOR COMPLETELY ---
         // Initialize Black cleanly
         for i in 0..256 {
@@ -791,6 +792,7 @@ impl ChessBoard {
         }
     }
 
+    #[inline(always)]
     pub fn evaluate(&mut self, buffer: &mut NnueInferenceBuffer) -> i32 {
         // --- PERSPECTIVE ROUTING ---
         // Side to move (US) always fills the first 256 inputs.
@@ -872,7 +874,6 @@ impl ChessBoard {
     }
 
     /// Progresses the network forward incrementally during move making
-    #[inline(always)]
     pub fn make_move(
         &mut self, 
         mv: ForwardMove,

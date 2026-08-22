@@ -1,4 +1,5 @@
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{ AtomicBool };
+use crossbeam_channel::{ unbounded, Sender, Receiver };
 use pyo3::prelude::*;
 use pyo3::types::PyString;
 use std::sync::Arc;
@@ -12,6 +13,8 @@ use crate::transposition_table::*;
 use crate::search_worker::*;
 use crate::parser::*;
 use crate::nnue_network::*;
+use crate::search_command::*;
+use crate::move_command::*;
 
 pub const PV_DEPTH: i32 = 18;
 pub const MAX_DEPTH: i32 = 22;
@@ -30,19 +33,22 @@ pub const MATE_THRESHOLD: i32 = MATE_VALUE - (MAX_DEPTH * 2);
 // This is tuned for the Mac M4 Pro Chip
 // Thread Count is set to the number of Performance Cores to avoid 
 // Heterogeneous Thread Migration between Performance and Efficiency
-pub const NUM_THREADS: i32 = 8;
+pub const NUM_THREADS: usize = 8;
 
 // Condon-Thompson Bucket Transposition Table
-pub const CACHE_SIZE: usize = 64;
+pub const CACHE_SIZE: usize = 12 * 1024;
 
 // Model path
 pub const MODEL_PATH: &str = "nnue-training/nnue_weights.bin";
 
 #[pyclass]
 pub struct ChessGame {
-    nodes_processed: Arc<AtomicUsize>,
     transposition_table: Arc<TranspositionTable>,
     nnue_network: &'static NnueNetwork, 
+
+    worker_channels: Vec<Sender<SearchCommand>>, 
+    search_result_channel: Receiver<WorkerSearchResult>,
+    stop_signal: Arc<AtomicBool>, 
 }
 
 #[pymethods]
@@ -54,12 +60,63 @@ impl ChessGame {
             .expect("Catastrophic Initializer Failure: Could not load NNUE model file matrices");
 
         // 2. Leak the Box memory to acquire an immutable reference for all search threads
-        let network_static: &'static NnueNetwork = Box::leak(network_box);
+        let nnue_network: &'static NnueNetwork = Box::leak(network_box);    
 
+        // 3. Transposition Tables
+        let transposition_table = Arc::new(TranspositionTable::new(CACHE_SIZE));
+
+        // 3. Create a Fleet of Workers to maintain in between
+        let mut worker_channels = Vec::with_capacity(NUM_THREADS);
+        let stop_signal = Arc::new(AtomicBool::new(false));
+
+        // 4. Main Thread Receiver
+        let (main_sender, main_reciever) = unbounded::<WorkerSearchResult>(); 
+
+        // 5. Create Worker Threads
+        for thread_id in 0..NUM_THREADS {
+            // Create Worker Sender / Reciever
+            let (worker_sender, worker_reciever) = unbounded::<SearchCommand>();
+            worker_channels.push(worker_sender);
+
+            // Clone Sender for Main Thread
+            let main_sender_clone = main_sender.clone(); 
+
+            // Clone Transposition table Arc
+            let tt_arc = Arc::clone(&transposition_table);
+
+            // Clone Stop Signal
+            let stop_signal_clone = Arc::clone(&stop_signal);
+
+            thread::spawn(move || {
+                let mut search_worker = SearchWorker::new(tt_arc, nnue_network, thread_id);
+
+                // Worker Thread Execution
+                while let Ok(command) = worker_reciever.recv() {
+                    match command {
+                        SearchCommand::UpdateHistory { uci_move } => {
+                            // Incrementally update the worker's internal state/NNUE accumulators
+                            search_worker.process_move(uci_move);
+                        }
+                        SearchCommand::StartSearch { max_depth } => {
+                            let (thread_best_move, nodes_processed) = 
+                                search_worker.root_search(max_depth, &stop_signal_clone);
+
+                            let best_move: ForwardMove = thread_best_move.unwrap();
+                            let _ = main_sender_clone.send(
+                                WorkerSearchResult { nodes_processed, best_move }
+                            );
+                        }
+                    }
+                }
+            });
+        }
         Self {
-            nodes_processed: Arc::new(AtomicUsize::new(0)),
-            transposition_table: Arc::new(TranspositionTable::new(CACHE_SIZE)),
-            nnue_network: network_static,
+            transposition_table,
+            nnue_network,
+
+            worker_channels,
+            search_result_channel: main_reciever,
+            stop_signal,
         }
     }
 
@@ -67,83 +124,49 @@ impl ChessGame {
     pub fn compute_next_move<'py>(
         &self,
         py: Python<'py>, 
-        prev_moves: Vec<String>
-    ) -> PyResult<Bound<'py, PyString>> {
-        let mut final_best_move = None;
-
-        // Search Time
+        uci_move: String
+    ) -> PyResult<Bound<'py, PyString>> {        
+        // Propagate Move to Worker Channels
         let start_time = Instant::now();
 
-        self.nodes_processed.store(0, Ordering::Relaxed);
-        let network_ref = self.nnue_network;
+        // Update Workers
+        for result_tx in &self.worker_channels {
+            let _ = result_tx.send(SearchCommand::UpdateHistory { 
+                uci_move: uci_move.clone() 
+            });
+        }
 
-        // Shared stop signal across all M4 Pro performance cores
-        let stop_search = Arc::new(AtomicBool::new(false));
+        // Initiate Search
+        let mut total_nodes_processed = 0;
+        for result_tx in &self.worker_channels {
+            let _ = result_tx.send(SearchCommand::StartSearch {
+                max_depth: PV_DEPTH,
+            });
+        }
 
-        let tt_ref = &*self.transposition_table; 
-        let nodes_counter_ref = &*self.nodes_processed;
-        
-        // Clone Search Worker
-        let mut clone_search_worker = SearchWorker::new(tt_ref, network_ref);
-        clone_search_worker.process_moves(prev_moves);
+        // Return Result to Python
+        match self.search_result_channel.recv() {
+            Ok(result) => {
+                let elapsed_time = start_time.elapsed();
+                total_nodes_processed += result.nodes_processed;
+                println!("{} Nodes Procesed in {} milliseconds", 
+                    result.nodes_processed, elapsed_time.as_millis());
+                        
+                let ai_move = fowardMove_to_uci(result.best_move);
 
-        // Reset Count
-        let worker_source_ptr: &SearchWorker<'_> = &clone_search_worker;
-
-        thread::scope(|s| {
-            let mut handlers = Vec::new();
-
-            for thread_id in 0..NUM_THREADS {
-                let worker_ref = worker_source_ptr; 
-
-                let thread_stop_signal = Arc::clone(&stop_search);
-
-                let handle = s.spawn(move || {
-                    let mut search_worker = SearchWorker::from_game_state(
-                        tt_ref, worker_ref, thread_id
-                    );
-
-                    let (thread_best_move, nodes_processed) = search_worker.root_search(
-                        PV_DEPTH, 
-                        &thread_stop_signal
-                    );
-
-                    nodes_counter_ref.fetch_add(nodes_processed, Ordering::Relaxed);
-
-                    (thread_id, thread_best_move)
-                });
-
-                handlers.push(handle);
-            }
-
-            // Aggregate Responses (Fixed Scoped Handle Join API)
-            for handle in handlers {
-                let (thread_id, best_move) = handle.join().unwrap(); 
-                
-                if thread_id == 0 {
-                    final_best_move = best_move;
+                // Propagate Best Move to Channels
+                for result_tx in &self.worker_channels {
+                    let _ = result_tx.send(SearchCommand::UpdateHistory { 
+                        uci_move: ai_move.clone() 
+                    });
                 }
+
+                let py_str = PyString::new(py, &ai_move);
+
+                let py_obj = py_str.into_pyobject(py)?.unbind();
+                Ok(py_obj.into_bound(py))
             }
-        });
-
-        let elapsed_time = start_time.elapsed();
-        let node_procesed =  self.nodes_processed.load(Ordering::Relaxed);
-        println!("{} Nodes Procesed in {} milliseconds", 
-            node_procesed, elapsed_time.as_millis());
-                
-        if let Some(mv) = final_best_move {
-            let uci = parse_uci(mv);
-
-            // Step 1: Bound<PyString>
-            let py_str = PyString::new(py, &uci);
-
-            // Step 2: Bound<PyString> → Py<PyString>
-            let py_obj = py_str.into_pyobject(py)?.unbind();
-
-            // Step 3: Py<PyString> → Bound<PyAny>
-            Ok(py_obj.into_bound(py))
-        } else {
-            Ok(PyString::new(py, ""))
+            Err(_) => Err(pyo3::exceptions::PyRuntimeError::new_err("Search threads crashed")),
         }
     }
 }

@@ -33,6 +33,10 @@ class ChessGameModel():
     # Return Moves in UCI for Rust Computations
     def returnChessMoves(self) -> list[str]:
         return self.chessBoard.previousMoves
+    
+    # Retur Last Chess Move
+    def returnLastChessMove(self) -> str:
+        return self.chessBoard.previousMoves[-1]
 
     # Move Piece
     def movePiece(self, cmd: MoveCommand):
@@ -79,5 +83,5 @@ class ChessGameModel():
             return self.currOpeningMove.randomSubsequentCmd()
         
         # Rust Compute Next Move
-        uci_move = self.game_engine.compute_next_move(self.returnChessMoves())
+        uci_move = self.game_engine.compute_next_move(self.returnLastChessMove())
         return self.chessBoard.uci_to_move_command(uci_move)
