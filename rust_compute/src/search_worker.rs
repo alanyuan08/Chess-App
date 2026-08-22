@@ -161,6 +161,8 @@ impl SearchWorker {
             return;
          } 
 
+
+        println!("{} {}", self.thread_id, uci_move);
         let move_command: ForwardMove = 
             parse_forward_move_with_board(uci_move, &self.chess_board);
         self.process_forward_move(move_command);

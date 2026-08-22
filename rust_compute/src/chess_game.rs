@@ -120,21 +120,28 @@ impl ChessGame {
         }
     }
 
-    // Prev Moves provided in UCI Format
-    pub fn compute_next_move<'py>(
+    // Update Workers
+    pub fn update_workers<'py>(
         &self,
         py: Python<'py>, 
         uci_move: String
-    ) -> PyResult<Bound<'py, PyString>> {        
-        // Propagate Move to Worker Channels
-        let start_time = Instant::now();
-
-        // Update Workers
+    ) -> PyResult<Bound<'py, PyString>> { 
         for result_tx in &self.worker_channels {
             let _ = result_tx.send(SearchCommand::UpdateHistory { 
                 uci_move: uci_move.clone() 
             });
         }
+
+        Ok(PyString::new(py, ""))
+    }
+
+    // Prev Moves provided in UCI Format
+    pub fn compute_next_move<'py>(
+        &self,
+        py: Python<'py>, 
+    ) -> PyResult<Bound<'py, PyString>> {        
+        // Propagate Move to Worker Channels
+        let start_time = Instant::now();
 
         // Initiate Search
         let mut total_nodes_processed = 0;
@@ -152,15 +159,7 @@ impl ChessGame {
                 println!("{} Nodes Procesed in {} milliseconds", 
                     result.nodes_processed, elapsed_time.as_millis());
                         
-                let ai_move = fowardMove_to_uci(result.best_move);
-
-                // Propagate Best Move to Channels
-                for result_tx in &self.worker_channels {
-                    let _ = result_tx.send(SearchCommand::UpdateHistory { 
-                        uci_move: ai_move.clone() 
-                    });
-                }
-
+                let ai_move = parse_uci(result.best_move);
                 let py_str = PyString::new(py, &ai_move);
 
                 let py_obj = py_str.into_pyobject(py)?.unbind();

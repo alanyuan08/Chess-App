@@ -1,6 +1,6 @@
 # Model
 from modelComponent.chessBoardModel import ChessBoardModel
-from modelComponent.moveCommand import MoveCommand
+from modelComponent.moveCommand import MoveCommand, move_command_to_uci
 from modelComponent.openingMoveProtocal import OpeningMoveNodeProtocal
 
 # Enum
@@ -30,19 +30,15 @@ class ChessGameModel():
         # Rust Chess Engine
         self.game_engine = rust_compute.ChessGame()
     
-    # Return Moves in UCI for Rust Computations
-    def returnChessMoves(self) -> list[str]:
-        return self.chessBoard.previousMoves
-    
-    # Retur Last Chess Move
-    def returnLastChessMove(self) -> str:
-        return self.chessBoard.previousMoves[-1]
-
     # Move Piece
     def movePiece(self, cmd: MoveCommand):
         # Move the Chess Piece
         if cmd and cmd.moveType != MoveCommandType.NULL: 
             self.chessBoard.movePiece(cmd)
+
+        # Update Backend
+        uci_cmd = move_command_to_uci(cmd)
+        self.game_engine.update_workers(uci_cmd)
 
         if self.currOpeningMove:
             self.currOpeningMove = self.currOpeningMove.stepForward(cmd)
@@ -83,5 +79,5 @@ class ChessGameModel():
             return self.currOpeningMove.randomSubsequentCmd()
         
         # Rust Compute Next Move
-        uci_move = self.game_engine.compute_next_move(self.returnLastChessMove())
+        uci_move = self.game_engine.compute_next_move()
         return self.chessBoard.uci_to_move_command(uci_move)
