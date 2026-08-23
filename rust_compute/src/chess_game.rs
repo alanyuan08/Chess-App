@@ -24,7 +24,7 @@ pub const MAX_DEPTH: i32 = 22;
 // termination signal to the other threads.
 
 // The other threads the single every 2048 executions
-pub const SEARCH_TIME_LIMIT: u64 = 10;
+pub const SEARCH_TIME_LIMIT: u64 = 15;
 
 pub const INFINITY: i32 = 32000;
 pub const MATE_VALUE: i32 = 30000;

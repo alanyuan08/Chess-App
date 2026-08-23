@@ -12,6 +12,7 @@ pub enum SearchCommand {
 pub struct SearchResult {
     pub score: i32,
     pub best_move: Option<ForwardMove>,
+    pub was_aborted: bool,
 }
 
 #[derive(Clone, Copy)]

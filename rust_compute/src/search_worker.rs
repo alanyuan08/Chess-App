@@ -81,11 +81,10 @@ impl SearchWorker {
             let result = self.negamax(depth, 0, -INFINITY, INFINITY, best_move_overall, true);
             
             if !self.stop_signal.load(Ordering::Relaxed){
-                best_move_overall = result.best_move;
-
                 if self.thread_id == 0 {
+                    best_move_overall = result.best_move;
                     println!("[Master Thread] Completed Depth: {} | Best Move Score: {:?}", 
-                        depth, result.best_move);
+                        depth, best_move_overall);
                     if depth >= PV_DEPTH { 
                         self.stop_signal.store(true, Ordering::Relaxed);
                         break;
@@ -243,7 +242,6 @@ impl SearchWorker {
             base_reduction
         } else {
             let thread_offset = if self.thread_id % 2 == 1 { 1 } else { -1 };
-
             let total_reduction = (base_reduction + thread_offset).max(0);
 
             if total_reduction >= depth {
@@ -310,7 +308,7 @@ impl SearchWorker {
 
         // Halt Signal
         if self.nodes_processed & 0x3FFF == 0 && self.stop_signal.load(Ordering::Relaxed) {
-            return SearchResult { score: 0, best_move: None };
+            return SearchResult { score: 0, best_move: None, was_aborted: true };
         }
 
         // Nodes Processed
@@ -324,6 +322,7 @@ impl SearchWorker {
             return SearchResult {
                 score: 0,
                 best_move: None,
+                was_aborted: false,
             };
         }
 
@@ -346,6 +345,7 @@ impl SearchWorker {
                     return SearchResult {
                         score: retrieved_score,
                         best_move: pv_move_hint,
+                        was_aborted: false,
                     };
                 }
                     
@@ -363,6 +363,7 @@ impl SearchWorker {
                     return SearchResult {
                         score: retrieved_score,
                         best_move: pv_move_hint,
+                        was_aborted: false,
                     };
                 }
             }
@@ -373,6 +374,7 @@ impl SearchWorker {
             return SearchResult {
                 score: self.quiescence_search(alpha, beta, ply, -1),
                 best_move: None,
+                was_aborted: false,
             };
         }
 
@@ -420,7 +422,7 @@ impl SearchWorker {
                 
                 // Fail-high cutoff: The position is so good we can prune it completely
                 if null_score >= beta {
-                    return SearchResult { score: beta, best_move: None };
+                    return SearchResult { score: beta, best_move: None, was_aborted: false };
                 }
             }
         }
@@ -463,6 +465,11 @@ impl SearchWorker {
             // Undo Move + TimeCat
             self.process_backward_move();
 
+            // Do not Store Results
+            if negamax_result.was_aborted {
+                return SearchResult { score: 0, best_move: None, was_aborted: true };
+            }
+
             // Track maximum evaluations
             if score > best_score {
                 best_score = score;
@@ -479,7 +486,7 @@ impl SearchWorker {
                 // Move Triggered a Beta Cutoff - Store as Killer Move
                 self.store_killer_move(*forward_move, depth);
 
-                return SearchResult { score: best_score, best_move };
+                return SearchResult { score: best_score, best_move, was_aborted: false };
             }
 
             if score > alpha {
@@ -501,7 +508,8 @@ impl SearchWorker {
                 // Checkmate
                 return SearchResult { 
                     score: mate_score, 
-                    best_move: None 
+                    best_move: None,
+                    was_aborted: false
                 };
             } else {
                 self.transposition_table.store(
@@ -511,7 +519,8 @@ impl SearchWorker {
                 // Stalemate
                 return SearchResult { 
                     score: 0, 
-                    best_move: None 
+                    best_move: None,
+                    was_aborted: false,
                 };
             }
         }
@@ -524,7 +533,7 @@ impl SearchWorker {
 
         // Adjust mate scores to absolute bounds before saving final loop results
         self.transposition_table.store(hash, best_score, ply, best_move, depth, flag);
-        SearchResult { score: best_score, best_move }
+        SearchResult { score: best_score, best_move, was_aborted: false }
     }
 
     fn board_eval(&mut self) -> i32 {
@@ -535,12 +544,6 @@ impl SearchWorker {
 
     // Quiescence Search 
     fn quiescence_search(&mut self, mut alpha: i32, mut beta: i32, ply: i32, depth: i32) -> i32 {
-
-        // Halt Signal
-        if self.nodes_processed & 0x3FFF == 0 && self.stop_signal.load(Ordering::Relaxed) {
-            return 0;
-        }
-
         // Nodes Processed
         self.nodes_processed += 1;
 
@@ -662,7 +665,9 @@ impl SearchWorker {
         }
 
         // Store evaluation state inside the Transposition Table
-        self.transposition_table.store(hash, best_score, ply, best_move, depth, hash_flag);
+        if depth == -1 {
+            self.transposition_table.store(hash, best_score, ply, best_move, depth, hash_flag);
+        }
         best_score
     }   
 
