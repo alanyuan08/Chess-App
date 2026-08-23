@@ -34,11 +34,12 @@ class ChessGameModel():
     def movePiece(self, cmd: MoveCommand):
         # Move the Chess Piece
         if cmd and cmd.moveType != MoveCommandType.NULL: 
-            self.chessBoard.movePiece(cmd)
+            # Update Rust BE 
+            uci_cmd = move_command_to_uci(cmd)
+            self.game_engine.update_workers(uci_cmd)
 
-        # Update Backend
-        uci_cmd = move_command_to_uci(cmd)
-        self.game_engine.update_workers(uci_cmd)
+            # Update FE 
+            self.chessBoard.movePiece(cmd)
 
         if self.currOpeningMove:
             self.currOpeningMove = self.currOpeningMove.stepForward(cmd)

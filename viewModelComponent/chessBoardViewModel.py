@@ -3,7 +3,6 @@ from communicatorProxy import CommunicatorProxy
 
 # Models
 from modelComponent.chessBoardModel import ChessBoardModel
-from modelComponent.moveCommand import MoveCommand
 
 # QTCore
 from PySide6.QtCore import QRunnable, QThreadPool, Slot

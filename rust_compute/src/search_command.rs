@@ -5,9 +5,7 @@ pub enum SearchCommand {
         uci_move: String,
     },
     
-    StartSearch {
-        max_depth: i32,
-    },
+    StartSearch
 }
 
 #[derive(Clone, Copy)]
@@ -19,5 +17,6 @@ pub struct SearchResult {
 #[derive(Clone, Copy)]
 pub struct WorkerSearchResult {
     pub nodes_processed: usize,
-    pub best_move: ForwardMove,
+    pub thread_best_move: Option<ForwardMove>,
+    pub thread_id: usize,
 }

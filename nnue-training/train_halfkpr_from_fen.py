@@ -445,15 +445,15 @@ def train_nnue_on_fens():
         y_true: Target score from your dataset (Pawn units, e.g., +1.50)
         y_pred: Network output (Model evaluation in Pawn units, e.g., +1.42)
         """
-        # 1. STOCK_FISH CONSTANT SCALING
-        STOCK_FISH = 0.575653
+        # 1. STOCK_FISH CONSTANT SCALINGS - 0.575653
+        LICHESS_CONSTANT = 0.368208
 
         # 2. CONVERT TRUE SCORES TO TARGET PROBABILITIES (0.0 to 1.0)
-        target_probability = 1.0 / (1.0 + tf.math.exp(-STOCK_FISH * y_true))
+        target_probability = 1.0 / (1.0 + tf.math.exp(-LICHESS_CONSTANT * y_true))
 
         # 3. CONVERT NETWORK PREDICTIONS TO PREDICTED PROBABILITIES (0.0 to 1.0)
         # This keeps the sigmoid behavior active during the training pass
-        predicted_probability = 1.0 / (1.0 + tf.math.exp(-STOCK_FISH * y_pred))
+        predicted_probability = 1.0 / (1.0 + tf.math.exp(-LICHESS_CONSTANT * y_pred))
 
         # 4. COMPUTE MEAN SQUARED ERROR ON THE PROBABILITIES
         # Linear, steady gradients that won't stall on equal/drawish positions
