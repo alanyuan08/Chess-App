@@ -145,11 +145,6 @@ impl TranspositionTable {
     pub fn store(&self, key: u64, score: i32, ply: i32, 
         forward_move: Option<ForwardMove>, depth: i32, flag: HashFlag) 
     {
-        // Too Shallow
-        if depth <= 2 {
-            return;
-        }
-
         let index = (key as usize) & self.mask;
         let bucket = &self.buckets[index];
 

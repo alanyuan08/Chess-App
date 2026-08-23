@@ -665,9 +665,7 @@ impl SearchWorker {
         }
 
         // Store evaluation state inside the Transposition Table
-        if depth == -1 {
-            self.transposition_table.store(hash, best_score, ply, best_move, depth, hash_flag);
-        }
+        self.transposition_table.store(hash, best_score, ply, best_move, depth, hash_flag);
         best_score
     }   
 
