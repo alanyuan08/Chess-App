@@ -447,19 +447,7 @@ impl SearchWorker {
             // LMR Reduction
             let mut negamax_result;
             if lmr_eligibility {
-                let mut reduction = self.calculate_lmr_reduction(depth, moves_tried);
-                // Introduce Lazy SMP Divergence
-                if self.thread_id > 0 {
-                    // Even threads search slightly deeper on quiet lines, odd threads prune harder
-                    if self.thread_id % 2 == 0 {
-                        reduction += 1; // Prune deeper paths aggressively
-                    } else {
-                        // Skip certain reductions entirely to look for hidden tactical refutations
-                        if moves_tried > 6 { reduction = reduction.saturating_sub(1); }
-                    }
-                }
-
-                let reduced_depth = (depth - 1 - reduction).max(1);
+                let reduced_depth = self.calculate_lmr_reduction(depth, moves_tried);
 
                 negamax_result = self.negamax(reduced_depth, ply + 1,  -alpha - 1, -alpha, None, true);
 
