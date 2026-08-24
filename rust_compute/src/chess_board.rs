@@ -63,7 +63,7 @@ impl ChessBoard {
             occupied: 0,
 
             castling_rights: 0b1111,
-            en_passant: 0,
+            en_passant: 64,
             active_player: Side::WHITE,
 
             mailbox: [BoardPiece::NONE; 64],
