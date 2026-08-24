@@ -17,7 +17,7 @@ use crate::nnue_network::*;
 use crate::search_command::*;
 use crate::move_command::*;
 
-pub const PV_DEPTH: i32 = 18;
+pub const PV_DEPTH: i32 = 15;
 pub const MAX_DEPTH: i32 = 22;
 
 // When a thread finishes, if it exceeds the time, it will send the 
@@ -153,11 +153,11 @@ impl ChessGame {
         }
 
         // 3. Initiate 20 second safety timer worker 
-        let stop_signal_clone = Arc::clone(&self.stop_signal); 
-        thread::spawn(move || {
-            thread::sleep(Duration::from_secs(SEARCH_TIME_LIMIT));            
-            stop_signal_clone.store(true, Ordering::Relaxed);
-        });
+        // let stop_signal_clone = Arc::clone(&self.stop_signal); 
+        // thread::spawn(move || {
+        //    thread::sleep(Duration::from_secs(SEARCH_TIME_LIMIT));            
+        //    stop_signal_clone.store(true, Ordering::Relaxed);
+        //});
 
          // 3. Wait for all Threads to exit
         let mut best_move = String::new();
