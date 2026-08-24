@@ -92,14 +92,14 @@ pub static BISHOP_ATTACKS: LazyLock<Box<[u64; BISHOP_ATTACK_SIZE]>> = LazyLock::
 });
 
 // Retrieve the Bishop Attack Paths for board / position
-pub fn bishop_attack_paths(sq: usize, board: u64) -> u64 {
+pub fn bishop_attack_paths(sq: u8, board: u64) -> u64 {
     unsafe {
         // SAFETY: Assumes `sq` is always within bounds (0..64) for all global arrays,
         // and the computed index fits within the total size of `BISHOP_ATTACKS`.
-        let magic_number = *BISHOP_MAGIC.get_unchecked(sq);
-        let shift = *BISHOP_SHIFT.get_unchecked(sq);
-        let mask = *BISHOP_MASKS.get_unchecked(sq);
-        let offset = *BISHOP_OFFSETS.get_unchecked(sq);
+        let magic_number = *BISHOP_MAGIC.get_unchecked(sq as usize);
+        let shift = *BISHOP_SHIFT.get_unchecked(sq as usize);
+        let mask = *BISHOP_MASKS.get_unchecked(sq as usize);
+        let offset = *BISHOP_OFFSETS.get_unchecked(sq as usize);
 
         let index = ((board & mask).wrapping_mul(magic_number)) >> (64 - shift);
 
@@ -213,14 +213,14 @@ pub fn bishop_moves(chess_board: &mut ChessBoard, player_index: usize, opp_index
     let mut bishop_bitboard = chess_board.bishops[player_index];
 
     while bishop_bitboard != 0 {
-        let bishop = bishop_bitboard.trailing_zeros() as usize;
+        let bishop = bishop_bitboard.trailing_zeros() as u8;
         let bishop_attack_paths = bishop_attack_paths(bishop, chess_board.occupied);
 
         let mut bishop_moves = bishop_attack_paths & !chess_board.occupied;
         let mut bishop_captures = bishop_attack_paths & chess_board.all_pieces[opp_index];
 
         while bishop_moves != 0 {
-            let target = bishop_moves.trailing_zeros() as usize;
+            let target = bishop_moves.trailing_zeros() as u8;
             moves.push(ForwardMove { 
                 start_sq: bishop, end_sq: target, move_type: MoveFlag::MOVE, pv_score: 1000
             });
@@ -228,7 +228,7 @@ pub fn bishop_moves(chess_board: &mut ChessBoard, player_index: usize, opp_index
         }
 
         while bishop_captures != 0 {
-            let target = bishop_captures.trailing_zeros() as usize;
+            let target = bishop_captures.trailing_zeros() as u8;
             
             let captured_piece_val = piece_value(chess_board.mailbox_piece(target));
             let pv_score = 100 - (captured_piece_val * 10) + 2; 

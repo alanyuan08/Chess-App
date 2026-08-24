@@ -27,7 +27,7 @@ pub struct ChessBoard {
     pub mailbox: [BoardPiece; 64],
 
     castling_rights: u8,
-    en_passant: u64,
+    en_passant: u8,
     active_player: Side,
 
     // Zobrist Hash
@@ -184,7 +184,7 @@ impl ChessBoard {
     }
 
     // Return En Passant
-    pub fn en_passant(&self) -> u64 {   
+    pub fn en_passant(&self) -> u8 {   
         self.en_passant
     }
 
@@ -199,8 +199,8 @@ impl ChessBoard {
     }
 
     // Return Mailbox Piece
-    pub fn mailbox_piece(&self, target: usize) -> BoardPiece {   
-        self.mailbox[target]
+    pub fn mailbox_piece(&self, target: u8) -> BoardPiece {   
+        self.mailbox[target as usize]
     }
 
     // Used to Calculate Castling / King Safety
@@ -235,13 +235,13 @@ impl ChessBoard {
         // 4. Sliders (Bishops, Rooks, Queens)
         let mut bishops = self.bishops[index] | self.queens[index];
         while bishops != 0 {
-            attacks |= bishop_attack_paths(bishops.trailing_zeros() as usize, occ);
+            attacks |= bishop_attack_paths(bishops.trailing_zeros() as u8, occ);
             bishops &= bishops - 1;
         }
 
         let mut rooks = self.rooks[index] | self.queens[index];
         while rooks != 0 {
-            attacks |= rook_attack_paths(rooks.trailing_zeros() as usize, occ);
+            attacks |= rook_attack_paths(rooks.trailing_zeros() as u8, occ);
             rooks &= rooks - 1;
         }
 
@@ -320,12 +320,12 @@ impl ChessBoard {
     // helper method for move piece
     fn _move_piece(&mut self, move_command: ForwardMove) {
         // Remove Start Piece / Add End Piece
-        let piece_type = piece_type_zobrist(self.mailbox[move_command.start_sq]);
+        let piece_type = piece_type_zobrist(self.mailbox[move_command.start_sq as usize]);
 
-        self.zobrist_hash ^= ZOBRIST_TABLE_MAP[piece_type][move_command.start_sq];
-        self.zobrist_hash ^= ZOBRIST_TABLE_MAP[piece_type][move_command.end_sq];
+        self.zobrist_hash ^= ZOBRIST_TABLE_MAP[piece_type][move_command.start_sq as usize];
+        self.zobrist_hash ^= ZOBRIST_TABLE_MAP[piece_type][move_command.end_sq as usize];
 
-        let move_piece = self.mailbox[move_command.start_sq];
+        let move_piece = self.mailbox[move_command.start_sq as usize];
         let player_index = self.player_index(piece_player(move_piece));
 
         match move_piece {
@@ -362,8 +362,8 @@ impl ChessBoard {
             },
         }
 
-        self.mailbox[move_command.start_sq] = BoardPiece::NONE;
-        self.mailbox[move_command.end_sq] = move_piece;
+        self.mailbox[move_command.start_sq as usize] = BoardPiece::NONE;
+        self.mailbox[move_command.end_sq as usize] = move_piece;
 
         self.all_pieces[player_index] &= !(1u64 << move_command.start_sq);
         self.all_pieces[player_index] |= 1u64 << move_command.end_sq;
@@ -464,17 +464,17 @@ impl ChessBoard {
             MoveFlag::CAPTURE | MoveFlag::PROMOTIONQUEEN |
             MoveFlag::PROMOTIONROOK | MoveFlag::PROMOTIONBISHOP | 
             MoveFlag::PROMOTIONKNIGHT => {
-                if self.mailbox[move_command.end_sq] != BoardPiece::NONE {
-                    remove_piece = self.mailbox[move_command.end_sq];
+                if self.mailbox[move_command.end_sq as usize] != BoardPiece::NONE {
+                    remove_piece = self.mailbox[move_command.end_sq as usize];
                 }
             },
             MoveFlag::ENPASSANT => {
                 match self.active_player {
                     Side::WHITE => {
-                        remove_piece = self.mailbox[move_command.end_sq - 8];
+                        remove_piece = self.mailbox[(move_command.end_sq - 8) as usize];
                     },
                     Side::BLACK => {
-                        remove_piece = self.mailbox[move_command.end_sq + 8];
+                        remove_piece = self.mailbox[(move_command.end_sq + 8) as usize];
                     },
                 }
             },
@@ -508,15 +508,15 @@ impl ChessBoard {
             },
             MoveFlag::PAWNOPENMOVE => {
                 // Update En Passant
-                let piece = self.mailbox[move_command.start_sq];
+                let piece = self.mailbox[move_command.start_sq as usize];
                 if (piece == BoardPiece::WPAWN || piece == BoardPiece::BPAWN) && 
                 (move_command.start_sq as i8 - move_command.end_sq as i8).abs() == 16 {
                     match self.active_player {
                         Side::WHITE => {
-                            self.en_passant = 1u64 << (move_command.start_sq + 8);
+                            self.en_passant = move_command.start_sq + 8;
                         },
                         Side::BLACK => {
-                            self.en_passant = 1u64 << (move_command.start_sq - 8);
+                            self.en_passant = move_command.start_sq - 8;
                         },
                     }
                 }
@@ -577,20 +577,20 @@ impl ChessBoard {
             },
             MoveFlag::PROMOTIONQUEEN | MoveFlag::PROMOTIONROOK |
             MoveFlag::PROMOTIONBISHOP | MoveFlag::PROMOTIONKNIGHT => {
-                self._remove_piece(move_command.start_sq);
+                self._remove_piece(move_command.start_sq as usize);
 
                 if remove_piece != BoardPiece::NONE {
-                    self._remove_piece(move_command.end_sq);
+                    self._remove_piece(move_command.end_sq as usize);
                 }
 
                 match self.active_player {
                     Side::WHITE => {
-                        self._place_piece(move_command.end_sq, 
+                        self._place_piece(move_command.end_sq as usize, 
                             white_promotion_piece(move_command.move_type)
                         );
                     },
                     Side::BLACK => {
-                        self._place_piece(move_command.end_sq, 
+                        self._place_piece(move_command.end_sq as usize, 
                             black_promotion_piece(move_command.move_type)
                         );
                     },
@@ -600,15 +600,15 @@ impl ChessBoard {
                 self._move_piece(move_command);
                 match self.active_player {
                     Side::WHITE => {
-                        self._remove_piece(move_command.end_sq - 8);
+                        self._remove_piece((move_command.end_sq - 8) as usize);
                     },
                     Side::BLACK => {
-                        self._remove_piece(move_command.end_sq + 8);
+                        self._remove_piece((move_command.end_sq + 8) as usize);
                     },
                 }
             },
             MoveFlag::CAPTURE => {
-                self._remove_piece(move_command.end_sq);
+                self._remove_piece(move_command.end_sq as usize);
                 self._move_piece(move_command);
             },
             MoveFlag::NULL => {},
@@ -646,23 +646,23 @@ impl ChessBoard {
                 match self.active_player {
                     Side::WHITE => {
                         let king_move_cmd = ForwardMove { 
-                            start_sq: 6, end_sq: 4, move_type: MoveFlag::MOVE, pv_score: 0 
+                            start_sq: 6, end_sq: 4, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(king_move_cmd);
 
                         let rook_move_cmd = ForwardMove { 
-                            start_sq: 5, end_sq: 7, move_type: MoveFlag::MOVE, pv_score: 0 
+                            start_sq: 5, end_sq: 7, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(rook_move_cmd);
                     },
                     Side::BLACK => {
                         let king_move_cmd = ForwardMove { 
-                            start_sq: 62, end_sq: 60, move_type: MoveFlag::MOVE, pv_score: 0  
+                            start_sq: 62, end_sq: 60, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(king_move_cmd);
 
                         let rook_move_cmd = ForwardMove { 
-                            start_sq: 61, end_sq: 63, move_type: MoveFlag::MOVE, pv_score: 0 
+                            start_sq: 61, end_sq: 63, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(rook_move_cmd);
                     },
@@ -672,7 +672,7 @@ impl ChessBoard {
                 match self.active_player {
                     Side::WHITE => {
                         let king_move_cmd = ForwardMove { 
-                            start_sq: 2, end_sq: 4, move_type: MoveFlag::MOVE, pv_score: 0 
+                            start_sq: 2, end_sq: 4, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(king_move_cmd);
 
@@ -696,14 +696,14 @@ impl ChessBoard {
             },
             MoveFlag::PROMOTIONQUEEN | MoveFlag::PROMOTIONROOK | 
             MoveFlag::PROMOTIONBISHOP | MoveFlag::PROMOTIONKNIGHT => {
-                self._remove_piece(undo_move_cmd.end_sq);
+                self._remove_piece(undo_move_cmd.end_sq as usize);
 
                 match self.active_player {
                     Side::WHITE => {
-                        self._place_piece(undo_move_cmd.start_sq, BoardPiece::WPAWN);
+                        self._place_piece(undo_move_cmd.start_sq as usize, BoardPiece::WPAWN);
                     },
                     Side::BLACK => {
-                        self._place_piece(undo_move_cmd.start_sq, BoardPiece::BPAWN);
+                        self._place_piece(undo_move_cmd.start_sq as usize, BoardPiece::BPAWN);
                     },
                 }
             },
@@ -716,12 +716,12 @@ impl ChessBoard {
                 MoveFlag::CAPTURE | MoveFlag::PROMOTIONQUEEN | 
                 MoveFlag::PROMOTIONROOK | MoveFlag::PROMOTIONBISHOP | 
                 MoveFlag::PROMOTIONKNIGHT => {
-                    self._place_piece(undo_move_cmd.end_sq, undo_move_cmd.captured_piece);
+                    self._place_piece(undo_move_cmd.end_sq as usize, undo_move_cmd.captured_piece);
                 },
                 MoveFlag::ENPASSANT => {
                     let ep_square = if self.active_player == Side::WHITE { 
                         undo_move_cmd.end_sq - 8 } else { undo_move_cmd.end_sq + 8 };
-                    self._place_piece(ep_square, undo_move_cmd.captured_piece);
+                    self._place_piece(ep_square as usize, undo_move_cmd.captured_piece);
                 },
                 _ => {},
             }
@@ -749,8 +749,8 @@ impl ChessBoard {
      #[inline(always)]
     pub fn create_accumlator_from_scratch(&mut self) {
         // Retrieve King Squares
-        let w_king_sq = self.kings[Side::WHITE as usize].trailing_zeros() as usize;
-        let b_king_sq = self.kings[Side::BLACK as usize].trailing_zeros() as usize;
+        let w_king_sq = self.kings[Side::WHITE as usize].trailing_zeros() as u8;
+        let b_king_sq = self.kings[Side::BLACK as usize].trailing_zeros() as u8;
 
         let target_white = &mut self.accumulators[self.ply].white.vals[..256];
         let target_black = &mut self.accumulators[self.ply].black.vals[..256];
@@ -780,8 +780,8 @@ impl ChessBoard {
         // --- SINGLE PASS: GATHER ALL FEATURE INDICES ---
         // This eliminates all duplicate mailbox lookups and bitboard scans!
         while pieces_bitboard != 0 {
-            let sq = pieces_bitboard.trailing_zeros() as usize;
-            let piece = self.mailbox[sq];
+            let sq = pieces_bitboard.trailing_zeros() as u8;
+            let piece = self.mailbox[sq as usize];
 
             // Pre-calculate the exact NNUE weight pointer rows for both perspectives
             white_indices[active_piece_count] = get_feature_index(w_king_sq, piece, sq, false);
@@ -901,10 +901,10 @@ impl ChessBoard {
         mv: ForwardMove,
     ) {
         // Retrieve King Squares
-        let w_king_sq = self.kings[Side::WHITE as usize].trailing_zeros() as usize;
-        let b_king_sq = self.kings[Side::BLACK as usize].trailing_zeros() as usize;
+        let w_king_sq = self.kings[Side::WHITE as usize].trailing_zeros() as u8;
+        let b_king_sq = self.kings[Side::BLACK as usize].trailing_zeros() as u8;
 
-        let move_piece: BoardPiece = self.mailbox[mv.start_sq];
+        let move_piece: BoardPiece = self.mailbox[mv.start_sq as usize];
 
         // --- 1. Identify Target Added Piece (Handles Promotions) ---
         let mut added_piece = move_piece;
@@ -931,9 +931,9 @@ impl ChessBoard {
             } else {
                 mv.end_sq + 8 
             };
-            (sq, self.mailbox[sq])
+            (sq, self.mailbox[sq as usize])
         } else {
-            (mv.end_sq, self.mailbox[mv.end_sq])
+            (mv.end_sq, self.mailbox[mv.end_sq as usize])
         };
 
         // --- 3. Compute Sparse Feature Indices ---

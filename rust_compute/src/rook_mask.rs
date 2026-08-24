@@ -92,14 +92,14 @@ pub static ROOK_ATTACKS: LazyLock<Box<[u64; ROOK_ATTACK_SIZE]>> = LazyLock::new(
 });
 
 // Retrieve the Rook Attack Paths for board / position
-pub fn rook_attack_paths(sq: usize, board: u64) -> u64 {
+pub fn rook_attack_paths(sq: u8, board: u64) -> u64 {
     unsafe {
         // SAFETY: Assumes `sq` is always within bounds (0..64) for all global arrays,
         // and the computed index fits within the total size of `ROOK_ATTACKS`.
-        let magic_number = *ROOK_MAGIC.get_unchecked(sq);
-        let shift = *ROOK_SHIFT.get_unchecked(sq);
-        let mask = *ROOK_MASKS.get_unchecked(sq);
-        let offset = *ROOK_OFFSETS.get_unchecked(sq);
+        let magic_number = *ROOK_MAGIC.get_unchecked(sq as usize);
+        let shift = *ROOK_SHIFT.get_unchecked(sq as usize);
+        let mask = *ROOK_MASKS.get_unchecked(sq as usize);
+        let offset = *ROOK_OFFSETS.get_unchecked(sq as usize);
 
         let index = ((board & mask).wrapping_mul(magic_number)) >> (64 - shift);
 
@@ -238,14 +238,14 @@ pub fn rook_moves(chess_board: &mut ChessBoard, player_index: usize, opp_index: 
     let mut rook_bitboard = chess_board.rooks[player_index];
 
     while rook_bitboard != 0 {
-        let rook = rook_bitboard.trailing_zeros() as usize;
+        let rook = rook_bitboard.trailing_zeros() as u8;
 
         let rook_attack_paths = rook_attack_paths(rook, chess_board.occupied);
         let mut rook_moves = rook_attack_paths & !chess_board.occupied;
         let mut rook_captures = rook_attack_paths & chess_board.all_pieces[opp_index];
 
         while rook_moves != 0 {
-            let target = rook_moves.trailing_zeros() as usize;
+            let target = rook_moves.trailing_zeros() as u8;
             moves.push(ForwardMove { 
                 start_sq: rook, end_sq: target, move_type: MoveFlag::MOVE, pv_score: 1000 
             });
@@ -253,7 +253,7 @@ pub fn rook_moves(chess_board: &mut ChessBoard, player_index: usize, opp_index: 
         }
 
         while rook_captures != 0 {
-            let target = rook_captures.trailing_zeros() as usize;
+            let target = rook_captures.trailing_zeros() as u8;
 
             let captured_piece_val = piece_value(chess_board.mailbox_piece(target));
             let pv_score = 100 - (captured_piece_val * 10) + 3; 

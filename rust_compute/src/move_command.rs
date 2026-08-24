@@ -1,22 +1,31 @@
 #[derive(Debug, Clone, Copy)]
+#[repr(C)] // Ensures a predictable layout in memory
 pub struct ForwardMove {
-    pub start_sq: usize,
-    pub end_sq: usize,
-    pub move_type: MoveFlag,
-    pub pv_score: i32,
+    pub pv_score: i32,       // 32 bits | Move ordering score
+    pub start_sq: u8,        //  8 bits | 0 to 63
+    pub end_sq: u8,          //  8 bits | 0 to 63
+    pub move_type: MoveFlag, //  8 bits | Enum marked with #[repr(u8)]
 }
 
 // Packs the move into a single u16 for the Transposition Table
 impl ForwardMove {
+    // Packs the move into a single u16 for the Transposition Table
     pub fn pack(&self) -> u16 {
         (self.start_sq as u16) | ((self.end_sq as u16) << 6) | ((self.move_type as u16) << 12)
     }
 
+    // Unpacks the u16 back into our 64-bit struct safely with zero overhead
     pub fn unpack(packed: u16) -> Self {
+        // Extract the 4-bit move type flag (bits 12 to 15)
+        let raw_flag = ((packed >> 12) & 0x0F) as u8;
+        
+        // Map the raw integer back to your exact enum variants safely
+        let move_type = MoveFlag::try_from(raw_flag).unwrap_or(MoveFlag::NULL);
+
         Self {
-            start_sq: (packed & 0x3F) as usize,
-            end_sq: ((packed >> 6) & 0x3F) as usize,
-            move_type: unsafe { std::mem::transmute::<u32, MoveFlag>((packed >> 12) as u32) }, 
+            start_sq: (packed & 0x3F) as u8,
+            end_sq: ((packed >> 6) & 0x3F) as u8,
+            move_type,
             pv_score: 0,
         }
     }
@@ -41,28 +50,30 @@ impl PartialEq for ForwardMove {
 impl Eq for ForwardMove {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(C, align(16))]
 pub struct UndoMove {
-    pub start_sq: usize,
-    pub end_sq: usize,
-    pub move_type: MoveFlag,
-    pub captured_piece: BoardPiece,
-    pub prev_castle_rights: u8,
-    pub prev_en_passant: u64,
+    pub start_sq: u8,               // 8 bits | 0 to 63
+    pub end_sq: u8,                 // 8 bits | 0 to 63
+    pub prev_castle_rights: u8,     // 8 bits | Packed bitmask
+    pub prev_en_passant: u8,     // 8 bits | Square index (0-63), or 64 for None
+    
+    pub move_type: MoveFlag,        // 8 bits | (Requires #[repr(u8)] on MoveFlag)
+    pub captured_piece: BoardPiece, // 8 bits | (Requires #[repr(u8)] on BoardPiece)
 }
 
 impl UndoMove {
     pub const NULL_UNDO_MOVE: Self = UndoMove {
         start_sq: 0,
         end_sq: 0,
+        prev_castle_rights: 0,
+        prev_en_passant: 64, 
         move_type: MoveFlag::NULL,
         captured_piece: BoardPiece::NONE,
-        prev_castle_rights: 0,
-        prev_en_passant: 0
     };
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-#[repr(u32)]
+#[repr(u8)]
 pub enum MoveFlag {
     MOVE = 0,
     PAWNOPENMOVE = 1,
@@ -118,10 +129,10 @@ pub fn black_promotion_piece(promotion_flag: MoveFlag) -> BoardPiece {
     }
 }
 
-impl TryFrom<u32> for MoveFlag {
+impl TryFrom<u8> for MoveFlag {
     type Error = ();
 
-    fn try_from(v: u32) -> Result<Self, Self::Error> {
+    fn try_from(v: u8) -> Result<Self, Self::Error> {
         match v {
             0 => Ok(MoveFlag::MOVE),
             1 => Ok(MoveFlag::PAWNOPENMOVE),
@@ -171,22 +182,22 @@ impl BoardPiece {
     /// Maps the BoardPiece enum to a 0..11 integer matching your Python layout.
     /// Panic-free optimization since we filter out NONE at call sites.
     #[inline(always)]
-    pub fn to_nnue_type(self) -> usize {
+    pub fn to_nnue_type(self) -> u8 {
         debug_assert!(self != BoardPiece::NONE);
-        (self as usize) - 1
+        (self as u8) - 1
     }
 }
 
 /// Flips a square vertically for Black's perspective (e.g., square 0/a1 becomes 56/a8)
 #[inline(always)]
-pub fn flip_square(sq: usize) -> usize {
+pub fn flip_square(sq: u8) -> u8 {
     sq ^ 63
 }
 
 /// Computes the unique index [0..49151] for a piece from a specific player's perspective
 #[inline(always)]
-pub fn get_feature_index(king_sq: usize, piece: BoardPiece, 
-    piece_sq: usize, is_black_active: bool) -> usize {
+pub fn get_feature_index(king_sq: u8, piece: BoardPiece, 
+    piece_sq: u8, is_black_active: bool) -> usize {
     let piece_type = piece.to_nnue_type();
 
     // Fen Notation used is training assumes incorrect order
@@ -203,7 +214,7 @@ pub fn get_feature_index(king_sq: usize, piece: BoardPiece,
     };
 
     // Index Formula: (KingSquare * 768) + (PieceType * 64) + PieceSquare
-    (k_sq * 768) + (p_type * 64) + p_sq
+    (k_sq as usize) * 768 + (p_type as usize) * 64 + (p_sq as usize)
 }
 
 pub fn is_pawn(piece: BoardPiece) -> bool {

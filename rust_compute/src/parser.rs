@@ -24,9 +24,9 @@ pub fn parse_uci(forward_move: ForwardMove) -> String {
 }
 
 pub fn parse_forward_move_with_board(uci: String, board: &ChessBoard) -> ForwardMove {
-    fn sq_from_uci(file: char, rank: char) -> usize {
-        let file_idx = (file as u8 - b'a') as usize;
-        let rank_idx = (rank as u8 - b'1') as usize;
+    fn sq_from_uci(file: char, rank: char) -> u8 {
+        let file_idx = file as u8 - b'a';
+        let rank_idx = rank as u8 - b'1';
         rank_idx * 8 + file_idx
     }
 

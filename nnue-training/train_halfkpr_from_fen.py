@@ -439,25 +439,18 @@ def train_nnue_on_fens():
     )
 
     def stockfish_nnue_probability_mse_loss(y_true, y_pred):
-        """
-        MSE loss computed on stockfish win probabilities.
-        
-        y_true: Target score from your dataset (Pawn units, e.g., +1.50)
-        y_pred: Network output (Model evaluation in Pawn units, e.g., +1.42)
-        """
-        # 1. STOCK_FISH CONSTANT SCALINGS - 0.575653
         SF_CONSTANT = 0.575653
 
-        # 2. CONVERT TRUE SCORES TO TARGET PROBABILITIES (0.0 to 1.0)
-        target_probability = 1.0 / (1.0 + tf.math.exp(-SF_CONSTANT * y_true))
+        # Sigmoid Probability Loss
+        target_prob = 1.0 / (1.0 + tf.math.exp(-SF_CONSTANT * y_true))
+        pred_prob = 1.0 / (1.0 + tf.math.exp(-SF_CONSTANT * y_pred))
+        prob_loss = tf.reduce_mean(tf.square(target_prob - pred_prob))
 
-        # 3. CONVERT NETWORK PREDICTIONS TO PREDICTED PROBABILITIES (0.0 to 1.0)
-        # This keeps the sigmoid behavior active during the training pass
-        predicted_probability = 1.0 / (1.0 + tf.math.exp(-SF_CONSTANT * y_pred))
+        # Small Pure Linear Score Loss (Prevents close-position blindness)
+        # This acts as a safety net so the network always seeks exact pawn values
+        linear_loss = tf.reduce_mean(tf.abs(y_true - y_pred)) * 0.05 
 
-        # 4. COMPUTE MEAN SQUARED ERROR ON THE PROBABILITIES
-        # Linear, steady gradients that won't stall on equal/drawish positions
-        return tf.reduce_mean(tf.square(target_probability - predicted_probability))
+        return prob_loss + linear_loss
     
     model.compile(
         optimizer=keras.optimizers.Adam(learning_rate=0.001),

@@ -59,7 +59,7 @@ pub fn piece_type_zobrist(piece_type: BoardPiece) -> usize {
 }
 
 // Convert En Passant Square to hash
-pub fn en_passant_zobrist(en_passant: u64) -> usize {
+pub fn en_passant_zobrist(en_passant: u8) -> usize {
     if en_passant == 0 {
         return 8;
     }

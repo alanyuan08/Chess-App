@@ -165,15 +165,14 @@ impl SearchWorker {
 
         self.chess_board.increment_ply();
 
+        let undo = &mut self.history[self.history_index];
+
         if forward_move.move_type == MoveFlag::NULL {
             self.chess_board.execute_move(forward_move); 
-
             self.chess_board.null_move_accumulator();
 
-            // Push Move History
-            self.push_position();
-            self.history[self.history_index] = UndoMove::NULL_UNDO_MOVE;
-            self.history_index += 1;
+            // Set the Move Type
+            undo.move_type = MoveFlag::NULL;
         } else {
             let move_piece = self.chess_board.mailbox_piece(forward_move.start_sq);
             let is_king_or_castle = move_piece == BoardPiece::WKING 
@@ -192,18 +191,17 @@ impl SearchWorker {
                 self.chess_board.create_accumlator_from_scratch();
             }
 
-            // Push Move History
-            self.push_position();
-            self.history[self.history_index] = UndoMove {
-                    start_sq: forward_move.start_sq,
-                    end_sq: forward_move.end_sq,
-                    move_type: forward_move.move_type,
-                    captured_piece: remove_piece,
-                    prev_castle_rights,
-                    prev_en_passant,
-                };
-            self.history_index += 1;
+            undo.start_sq = forward_move.start_sq;
+            undo.end_sq = forward_move.end_sq;
+            undo.move_type = forward_move.move_type;
+            undo.captured_piece = remove_piece;
         }
+
+        undo.prev_castle_rights = prev_castle_rights;
+        undo.prev_en_passant = prev_en_passant;
+
+        self.push_position();
+        self.history_index += 1;
     }
 
     fn process_backward_move(&mut self) {
@@ -213,7 +211,6 @@ impl SearchWorker {
 
         self.history_index -= 1;
         let undo_move = self.history[self.history_index];
-        // Timecat Undo
         self.chess_board.unmake_move();
 
         // ChessBoard Undo Move
