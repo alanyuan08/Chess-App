@@ -743,6 +743,16 @@ impl ChessBoard {
         self.zobrist_xor();
     }
 
+    pub fn null_move_accumulator(&mut self) {
+        let current_ply = self.ply;
+        let prev_ply = self.ply - 1; 
+
+        let prev_white_vals = self.accumulators[prev_ply].white.vals;
+
+        self.accumulators[current_ply].white.vals = self.accumulators[prev_ply].black.vals;
+        self.accumulators[current_ply].black.vals = prev_white_vals;
+    }
+
     // Create from Scratch
      #[inline(always)]
     pub fn create_accumlator_from_scratch(&mut self) {
@@ -898,8 +908,6 @@ impl ChessBoard {
         &mut self, 
         mv: ForwardMove,
     ) {
-        self.increment_ply();
-
         // Retrieve King Squares
         let w_king_sq = self.kings[Side::WHITE as usize].trailing_zeros() as usize;
         let b_king_sq = self.kings[Side::BLACK as usize].trailing_zeros() as usize;

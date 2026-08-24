@@ -163,22 +163,23 @@ impl SearchWorker {
         let prev_castle_rights = self.chess_board.castle_rights(); 
         let prev_en_passant = self.chess_board.en_passant();
 
+        self.chess_board.increment_ply();
+
         if forward_move.move_type == MoveFlag::NULL {
-            self.chess_board.increment_ply();
             self.chess_board.execute_move(forward_move); 
 
-            let undo_move = UndoMove {
+            self.chess_board.null_move_accumulator();
+
+            // Push Move History
+            self.push_position();
+            self.history[self.history_index] = Some(UndoMove {
                 start_sq: 0,
                 end_sq: 0,
                 move_type: MoveFlag::NULL,
                 captured_piece: None,
                 prev_castle_rights,
                 prev_en_passant,
-            };
-
-            // Push Move History
-            self.push_position();
-            self.history[self.history_index] = Some(undo_move);
+            });
             self.history_index += 1;
         } else {
             let move_piece = self.chess_board.mailbox_piece(forward_move.start_sq);
@@ -192,25 +193,23 @@ impl SearchWorker {
             }
 
             let remove_piece = self.chess_board.execute_move(forward_move);
-            let undo_move = UndoMove {
-                start_sq: forward_move.start_sq,
-                end_sq: forward_move.end_sq,
-                move_type: forward_move.move_type,
-                captured_piece: remove_piece,
-                prev_castle_rights,
-                prev_en_passant,
-            };
-
-            // Push Move History
-            self.push_position();
-            self.history[self.history_index] = Some(undo_move);
-            self.history_index += 1;
 
             // Forced Recompute due to King
             if is_king_or_castle {
-                self.chess_board.increment_ply();
                 self.chess_board.create_accumlator_from_scratch();
             }
+
+            // Push Move History
+            self.push_position();
+            self.history[self.history_index] = Some(UndoMove {
+                    start_sq: forward_move.start_sq,
+                    end_sq: forward_move.end_sq,
+                    move_type: forward_move.move_type,
+                    captured_piece: remove_piece,
+                    prev_castle_rights,
+                    prev_en_passant,
+                });
+            self.history_index += 1;
         }
     }
 
@@ -279,7 +278,7 @@ impl SearchWorker {
     // StockFish NMP Reduction algorithm
     fn calculate_nmp_reduction(&self, depth: i32, static_eval: i32, beta: i32) -> i32 {
         let base_reduction = 3 + (depth / 4);
-        let eval_bonus = ((static_eval - beta) / 200).clamp(0, 2);
+        let eval_bonus = ((beta - static_eval) / 200).clamp(0, 2);
         
         base_reduction + eval_bonus
     }
