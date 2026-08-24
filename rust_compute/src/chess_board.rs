@@ -760,41 +760,55 @@ impl ChessBoard {
             target_black[i] = biases[i] as i16;
         }
 
-        // Create a bitboard of ALL pieces on the board
-        let all_pieces_bb = self.all_pieces[0] | self.all_pieces[1];
+        // FIX 1: Combine ALL piece bitboards to ensure nothing (especially the Kings!) is missed.
+        let mut pieces_bitboard = (self.pawns[0] | self.pawns[1])
 
-        // --- LOOP 1: PROCESS WHITE PERSPECTIVE COMPLETELY ---
-        let mut pieces_bitboard = all_pieces_bb;
+            | (self.knights[0] | self.knights[1])
+            | (self.bishops[0] | self.bishops[1])
+            | (self.rooks[0] | self.rooks[1])
+            | (self.queens[0] | self.queens[1])
+            | (self.kings[0] | self.kings[1]);
+
+        // Create tiny arrays on the stack to hold our pre-calculated weight indices.
+        // 32 slots is plenty since a chess board can never have more than 32 pieces.
+        let mut white_indices = [0usize; 32];
+        let mut black_indices = [0usize; 32];
+        let mut active_piece_count = 0;
+
+        // --- SINGLE PASS: GATHER ALL FEATURE INDICES ---
+        // This eliminates all duplicate mailbox lookups and bitboard scans!
         while pieces_bitboard != 0 {
             let sq = pieces_bitboard.trailing_zeros() as usize;
             let piece = self.mailbox[sq];
 
-            let w_idx = get_feature_index(w_king_sq, piece, sq, false);
-            let w_row = &self.nnue_network.l1_weights[w_idx][..256];
-
-            // Perfect auto-vectorization! The CPU fills all registers with White data.
-            for i in 0..256 {
-                target_white[i] = target_white[i].wrapping_add(w_row[i]);
-            }
-
+            // Pre-calculate the exact NNUE weight pointer rows for both perspectives
+            white_indices[active_piece_count] = get_feature_index(w_king_sq, piece, sq, false);
+            black_indices[active_piece_count] = get_feature_index(b_king_sq, piece, sq, true);
+            
+            active_piece_count += 1;
             pieces_bitboard &= pieces_bitboard - 1;
         }
 
+        // --- LOOP 1: PROCESS WHITE PERSPECTIVE COMPLETELY ---
+        // Perfect auto-vectorization! The CPU fills all registers exclusively with White data.
+        for p in 0..active_piece_count {
+            let w_idx = white_indices[p];
+            let w_row = &self.nnue_network.l1_weights[w_idx][..256];
+            
+            for i in 0..256 {
+                target_white[i] = target_white[i].wrapping_add(w_row[i]);
+            }
+        }
+
         // --- LOOP 2: PROCESS BLACK PERSPECTIVE COMPLETELY ---
-        let mut pieces_bitboard = all_pieces_bb;
-        while pieces_bitboard != 0 {
-            let sq = pieces_bitboard.trailing_zeros() as usize;
-            let piece = self.mailbox[sq];
-
-            let b_idx = get_feature_index(b_king_sq, piece, sq, true);
+        // Perfect auto-vectorization! The CPU reuses those same registers exclusively for Black data.
+        for p in 0..active_piece_count {
+            let b_idx = black_indices[p];
             let b_row = &self.nnue_network.l1_weights[b_idx][..256];
-
-            // Perfect auto-vectorization! The CPU reuse registers exclusively for Black data.
+            
             for i in 0..256 {
                 target_black[i] = target_black[i].wrapping_add(b_row[i]);
             }
-
-            pieces_bitboard &= pieces_bitboard - 1;
         }
     }
 
@@ -876,7 +890,7 @@ impl ChessBoard {
         let internal_pawns_scaled = final_sum >> 5;
 
         // Shift by >> 7 remove remaining scale
-        (internal_pawns_scaled * 100) / 128
+        (internal_pawns_scaled * 100) >> 7
     }
 
     /// Progresses the network forward incrementally during move making
