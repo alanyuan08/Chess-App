@@ -273,6 +273,14 @@ impl SearchWorker {
         self.killer_move_table[0][depth_idx] = Some(new_killer_move);
     }
 
+    pub fn is_killer(&self, forward_move: ForwardMove, depth: i32) -> bool {
+        let depth_idx = depth as usize;
+
+        // Check if the move matches either our primary (0) or secondary (1) killer slot
+        self.killer_move_table[0][depth_idx] == Some(forward_move) 
+            || self.killer_move_table[1][depth_idx] == Some(forward_move)
+    }
+
     // StockFish NMP Reduction algorithm
     fn calculate_nmp_reduction(&self, depth: i32, static_eval: i32, beta: i32) -> i32 {
         let base_reduction = 3 + (depth / 4);
@@ -422,6 +430,15 @@ impl SearchWorker {
                 
                 // Fail-high cutoff: The position is so good we can prune it completely
                 if null_score >= beta {
+                    self.transposition_table.store(
+                        hash,
+                        beta,
+                        ply,
+                        None,
+                        depth, 
+                        HashFlag::LOWERBOUND
+                    );
+
                     return SearchResult { score: beta, best_move: None, was_aborted: false };
                 }
             }
@@ -430,7 +447,9 @@ impl SearchWorker {
         for forward_move in &gen_moves {
             // Check LMR Eligibility
             lmr_eligibility = false;
-            if depth >= 3 && moves_tried > 2 && !king_in_check && matches!(forward_move.move_type, MoveFlag::MOVE) {
+            let is_killer_move = self.is_killer(*forward_move, depth);
+            if depth >= 3 && moves_tried > 2 && !king_in_check && 
+                !is_killer_move && matches!(forward_move.move_type, MoveFlag::MOVE) {
                 lmr_eligibility = true;
             }
 

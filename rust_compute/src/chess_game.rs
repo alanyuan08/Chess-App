@@ -24,7 +24,7 @@ pub const MAX_DEPTH: i32 = 22;
 // termination signal to the other threads.
 
 // The other threads the single every 2048 executions
-pub const SEARCH_TIME_LIMIT: u64 = 15;
+pub const SEARCH_TIME_LIMIT: u64 = 25;
 
 pub const INFINITY: i32 = 32000;
 pub const MATE_VALUE: i32 = 30000;
@@ -37,7 +37,7 @@ pub const MATE_THRESHOLD: i32 = MATE_VALUE - (MAX_DEPTH * 2);
 pub const NUM_THREADS: usize = 8;
 
 // Condon-Thompson Bucket Transposition Table
-pub const CACHE_SIZE: usize = 12 * 1024;
+pub const CACHE_SIZE: usize = 1024;
 
 // Model path
 pub const MODEL_PATH: &str = "nnue-training/nnue_weights.bin";
