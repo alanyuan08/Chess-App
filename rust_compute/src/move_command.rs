@@ -20,6 +20,13 @@ impl ForwardMove {
             pv_score: 0,
         }
     }
+
+    pub const NULL_MOVE: Self = ForwardMove {
+        start_sq: 0,
+        end_sq: 0,
+        move_type: MoveFlag::NULL,
+        pv_score: 0,
+    };
 }
 
 // Custom PartialEq to exclude pv_score from equality checks
@@ -38,9 +45,20 @@ pub struct UndoMove {
     pub start_sq: usize,
     pub end_sq: usize,
     pub move_type: MoveFlag,
-    pub captured_piece: Option<BoardPiece>,
+    pub captured_piece: BoardPiece,
     pub prev_castle_rights: u8,
     pub prev_en_passant: u64,
+}
+
+impl UndoMove {
+    pub const NULL_UNDO_MOVE: Self = UndoMove {
+        start_sq: 0,
+        end_sq: 0,
+        move_type: MoveFlag::NULL,
+        captured_piece: BoardPiece::NONE,
+        prev_castle_rights: 0,
+        prev_en_passant: 0
+    };
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

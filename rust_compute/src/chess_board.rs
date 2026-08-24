@@ -267,9 +267,9 @@ impl ChessBoard {
     // Generate Pseudo-Moves - Only Validate King Safety for Castle / King Movement
     pub fn generate_moves(&mut self, 
         gen_moves: &mut ArrayVec::<ForwardMove, 256>, 
-        pv_move_hint: Option<ForwardMove>,
+        pv_move_hint: ForwardMove,
         depth: i32,
-        killer_move_table: &[[Option<ForwardMove>; MAX_DEPTH as usize]; 2]
+        killer_move_table: &[[ForwardMove; MAX_DEPTH as usize]; 2]
     ) {        
         let player_index = self.player_index(self.active_player);
         let opp_index = self.player_index(self.opponent_player());
@@ -296,28 +296,20 @@ impl ChessBoard {
         }
         
         if depth >= 0 {
-            // 1. Allocate PV Move in Front (Highest Priority)
-            if let Some(hint) = pv_move_hint {
-                // Rust automatically uses your custom PartialEq logic via ==
-                if let Some(cmd) = gen_moves.iter_mut().find(|m| **m == hint) {
-                    cmd.pv_score = -2_000_000; 
-                }
-            }
-            // 2. Allocate Killer Moves (High Priority, but below PV move)
+            let has_valid_pv = pv_move_hint.move_type != MoveFlag::NULL;
+            let k0 = killer_move_table[0][depth as usize];
+            let k1 = killer_move_table[1][depth as usize];
+            
+            let has_k0 = k0.move_type != MoveFlag::NULL && (!has_valid_pv || k0 != pv_move_hint);
+            let has_k1 = k1.move_type != MoveFlag::NULL && (!has_valid_pv || k1 != pv_move_hint);
 
-            // Primary Killer
-            let killer_0 = killer_move_table[0][depth as usize];
-            if killer_0 != pv_move_hint {
-                if let Some(cmd) = gen_moves.iter_mut().find(|m| Some(**m) == killer_0) {
-                    cmd.pv_score = 200;
-                }
-            }
-
-            // Secondary Killer
-            let killer_1 = killer_move_table[1][depth as usize];
-            if killer_1 != pv_move_hint {
-                if let Some(cmd) = gen_moves.iter_mut().find(|m| Some(**m) == killer_1) {
-                    cmd.pv_score = 210;
+            for m in gen_moves.iter_mut() {
+                if has_valid_pv && *m == pv_move_hint {
+                    m.pv_score = -2_000_000;
+                } else if has_k0 && *m == k0 {
+                    m.pv_score = 200;
+                } else if has_k1 && *m == k1 {
+                    m.pv_score = 210;
                 }
             }
         }
@@ -462,27 +454,27 @@ impl ChessBoard {
         self.zobrist_hash ^= ZOBRIST_CASTLING[self.castling_rights as usize];
     }
 
-    pub fn execute_move(&mut self, move_command: ForwardMove) -> Option<BoardPiece> {
+    pub fn execute_move(&mut self, move_command: ForwardMove) -> BoardPiece {
         // XOR the current State for Castle, En Passant and Side to Move
         self.zobrist_xor();
 
-        let mut remove_piece = None;
+        let mut remove_piece = BoardPiece::NONE;
         // Store Removed Piece / No bitboard Operations
         match move_command.move_type { 
             MoveFlag::CAPTURE | MoveFlag::PROMOTIONQUEEN |
             MoveFlag::PROMOTIONROOK | MoveFlag::PROMOTIONBISHOP | 
             MoveFlag::PROMOTIONKNIGHT => {
                 if self.mailbox[move_command.end_sq] != BoardPiece::NONE {
-                    remove_piece = Some(self.mailbox[move_command.end_sq]);
+                    remove_piece = self.mailbox[move_command.end_sq];
                 }
             },
             MoveFlag::ENPASSANT => {
                 match self.active_player {
                     Side::WHITE => {
-                        remove_piece = Some(self.mailbox[move_command.end_sq - 8]);
+                        remove_piece = self.mailbox[move_command.end_sq - 8];
                     },
                     Side::BLACK => {
-                        remove_piece = Some(self.mailbox[move_command.end_sq + 8]);
+                        remove_piece = self.mailbox[move_command.end_sq + 8];
                     },
                 }
             },
@@ -587,7 +579,7 @@ impl ChessBoard {
             MoveFlag::PROMOTIONBISHOP | MoveFlag::PROMOTIONKNIGHT => {
                 self._remove_piece(move_command.start_sq);
 
-                if remove_piece.is_some() {
+                if remove_piece != BoardPiece::NONE {
                     self._remove_piece(move_command.end_sq);
                 }
 
@@ -719,17 +711,17 @@ impl ChessBoard {
         }
 
         // Restore Piece only if one was actually captured
-        if let Some(piece) = undo_move_cmd.captured_piece {
+        if undo_move_cmd.captured_piece != BoardPiece::NONE {
             match undo_move_cmd.move_type { 
                 MoveFlag::CAPTURE | MoveFlag::PROMOTIONQUEEN | 
                 MoveFlag::PROMOTIONROOK | MoveFlag::PROMOTIONBISHOP | 
                 MoveFlag::PROMOTIONKNIGHT => {
-                    self._place_piece(undo_move_cmd.end_sq, piece);
+                    self._place_piece(undo_move_cmd.end_sq, undo_move_cmd.captured_piece);
                 },
                 MoveFlag::ENPASSANT => {
                     let ep_square = if self.active_player == Side::WHITE { 
                         undo_move_cmd.end_sq - 8 } else { undo_move_cmd.end_sq + 8 };
-                    self._place_piece(ep_square, piece);
+                    self._place_piece(ep_square, undo_move_cmd.captured_piece);
                 },
                 _ => {},
             }

@@ -167,7 +167,7 @@ impl ChessGame {
                     total_nodes_processed += result.nodes_processed;
                     
                     if result.thread_id == 0 {
-                        let unwrap_move: ForwardMove = result.thread_best_move.unwrap();
+                        let unwrap_move: ForwardMove = result.thread_best_move;
                         best_move = parse_uci(unwrap_move);
                     }
                 }

@@ -18,7 +18,7 @@ pub struct SearchWorker  {
     transposition_table: Arc<TranspositionTable>,
     nodes_processed: usize,
 
-    history: [Option<UndoMove>; 1024],
+    history: [UndoMove; 1024],
     history_index: usize,
 
     chess_board: ChessBoard,
@@ -26,7 +26,7 @@ pub struct SearchWorker  {
     traversed_positions: [u64; 1024],
     position_stack_len: usize,
 
-    killer_move_table: [[Option<ForwardMove>; MAX_DEPTH as usize]; 2],
+    killer_move_table: [[ForwardMove; MAX_DEPTH as usize]; 2],
     thread_id: usize,
 
     thread_buffer: NnueInferenceBuffer,
@@ -41,7 +41,7 @@ impl SearchWorker {
         thread_id: usize
     ) -> Self {
         Self {
-            history: [None; 1024],
+            history: [UndoMove::NULL_UNDO_MOVE; 1024],
             history_index: 0,
 
             chess_board: {
@@ -60,7 +60,7 @@ impl SearchWorker {
             nodes_processed: 0,
             transposition_table,
 
-            killer_move_table: [[None; MAX_DEPTH as usize]; 2],
+            killer_move_table: [[ForwardMove::NULL_MOVE; MAX_DEPTH as usize]; 2],
             thread_id,
 
             thread_buffer: NnueInferenceBuffer::default(),
@@ -69,12 +69,12 @@ impl SearchWorker {
     }
 
     // Search Entry Point
-     pub fn root_search(&mut self) -> (Option<ForwardMove>, usize, usize){
+     pub fn root_search(&mut self) -> (ForwardMove, usize, usize){
         // Start the timer
         self.nodes_processed = 0;
 
         // --- ITERATIVE DEEPENING LOOP ---
-        let mut best_move_overall: Option<ForwardMove> = None;
+        let mut best_move_overall: ForwardMove = ForwardMove::NULL_MOVE;
         let mut depth = 1;
 
         while depth <= MAX_DEPTH {
@@ -172,14 +172,7 @@ impl SearchWorker {
 
             // Push Move History
             self.push_position();
-            self.history[self.history_index] = Some(UndoMove {
-                start_sq: 0,
-                end_sq: 0,
-                move_type: MoveFlag::NULL,
-                captured_piece: None,
-                prev_castle_rights,
-                prev_en_passant,
-            });
+            self.history[self.history_index] = UndoMove::NULL_UNDO_MOVE;
             self.history_index += 1;
         } else {
             let move_piece = self.chess_board.mailbox_piece(forward_move.start_sq);
@@ -201,14 +194,14 @@ impl SearchWorker {
 
             // Push Move History
             self.push_position();
-            self.history[self.history_index] = Some(UndoMove {
+            self.history[self.history_index] = UndoMove {
                     start_sq: forward_move.start_sq,
                     end_sq: forward_move.end_sq,
                     move_type: forward_move.move_type,
                     captured_piece: remove_piece,
                     prev_castle_rights,
                     prev_en_passant,
-                });
+                };
             self.history_index += 1;
         }
     }
@@ -219,14 +212,13 @@ impl SearchWorker {
         }
 
         self.history_index -= 1;
-        if let Some(undo_move) = self.history[self.history_index].take() {
-            // Timecat Undo
-            self.chess_board.unmake_move();
+        let undo_move = self.history[self.history_index];
+        // Timecat Undo
+        self.chess_board.unmake_move();
 
-            // ChessBoard Undo Move
-            self.chess_board.unexecute_move(undo_move);
-            self.pop_position();
-        }
+        // ChessBoard Undo Move
+        self.chess_board.unexecute_move(undo_move);
+        self.pop_position();
     }
 
     // A simple, linear-logarithmic approximation using integer division:
@@ -266,13 +258,13 @@ impl SearchWorker {
         let depth_idx = depth as usize;
 
         // If this move is already our primary killer, do nothing
-        if self.killer_move_table[0][depth_idx] == Some(new_killer_move) {
+        if self.killer_move_table[0][depth_idx] == new_killer_move {
             return;
         }
         
         // Later Moves would case a stronger beta cutoff
         self.killer_move_table[1][depth_idx] = self.killer_move_table[0][depth_idx];
-        self.killer_move_table[0][depth_idx] = Some(new_killer_move);
+        self.killer_move_table[0][depth_idx] = new_killer_move;
     }
 
     // StockFish NMP Reduction algorithm
@@ -306,11 +298,11 @@ impl SearchWorker {
 
     // Process Negamax
     fn negamax(&mut self, depth: i32, ply: i32, mut alpha: i32, mut beta: i32, 
-        mut pv_move_hint: Option<ForwardMove>, allow_null: bool) -> SearchResult {
+        mut pv_move_hint: ForwardMove, allow_null: bool) -> SearchResult {
 
         // Halt Signal
         if self.nodes_processed & 0x3FFF == 0 && self.stop_signal.load(Ordering::Relaxed) {
-            return SearchResult { score: 0, best_move: None, was_aborted: true };
+            return SearchResult { score: 0, best_move: ForwardMove::NULL_MOVE, was_aborted: true };
         }
 
         // Nodes Processed
@@ -323,24 +315,25 @@ impl SearchWorker {
         if self.is_three_move_repetition() {
             return SearchResult {
                 score: 0,
-                best_move: None,
+                best_move: ForwardMove::NULL_MOVE,
                 was_aborted: false,
             };
         }
 
         let hash = self.chess_board.zobrist_hash();
-        let mut tt_move = None;
+        let mut tt_move = ForwardMove::NULL_MOVE;
 
-        if let Some(tt_entry) = self.transposition_table.probe(hash, ply) {
+        let tt_entry = self.transposition_table.probe(hash, ply);
+        if tt_entry.flag != HashFlag::EMPTY {
             let retrieved_score: i32 = tt_entry.score as i32;
             let retrieved_depth: i32 = tt_entry.depth as i32;
             
             if tt_entry.move_id != 0 {
                 let mut mv = ForwardMove::unpack(tt_entry.move_id);
                 mv.pv_score = -2_000_000;
-                tt_move = Some(mv);
+                tt_move = mv;
 
-                if pv_move_hint.is_none() {
+                if pv_move_hint != ForwardMove::NULL_MOVE {
                     pv_move_hint = tt_move;
                 }
             };
@@ -348,9 +341,15 @@ impl SearchWorker {
             if retrieved_depth >= depth {
                 // EXACT: The true minimax value was found; return it immediately.
                 if tt_entry.flag == HashFlag::EXACT {
+                    let chosen_move = if tt_move.move_type != MoveFlag::NULL {
+                        tt_move
+                    } else {
+                        pv_move_hint
+                    };
+
                     return SearchResult {
                         score: retrieved_score,
-                        best_move: tt_move.or(pv_move_hint),
+                        best_move: chosen_move,
                         was_aborted: false,
                     };
                 }
@@ -366,9 +365,15 @@ impl SearchWorker {
 
                 // If the bounds adjusted alpha/beta enough to cause a cutoff, return early
                 if alpha >= beta {
+                    let chosen_move = if tt_move.move_type != MoveFlag::NULL {
+                        tt_move
+                    } else {
+                        pv_move_hint
+                    };
+
                     return SearchResult {
                         score: retrieved_score,
-                        best_move: tt_move.or(pv_move_hint),
+                        best_move: chosen_move,
                         was_aborted: false,
                     };
                 }
@@ -382,12 +387,12 @@ impl SearchWorker {
 
             return SearchResult {
                 score: if aborted { 0 } else { q_score },
-                best_move: None,
+                best_move: ForwardMove::NULL_MOVE,
                 was_aborted: aborted,
             };
         }
 
-        let mut best_move = None;   
+        let mut best_move = ForwardMove::NULL_MOVE;   
         let mut legal_moves_played = 0;
         let mut best_score = -INFINITY;
 
@@ -413,21 +418,17 @@ impl SearchWorker {
                 let next_depth = (depth - reduction).max(0); 
 
                 // Make the null move (switch sides, update en-passant/hash keys)
-                let null_move = ForwardMove { 
-                    start_sq: 0, end_sq: 0, 
-                    move_type: MoveFlag::NULL, pv_score: 0
-                };
-                
+                let null_move = ForwardMove::NULL_MOVE;
                 self.process_forward_move(null_move);
                 
-                let null_result = self.negamax(next_depth, ply + 1, -beta, -beta + 1, None, false);
+                let null_result = self.negamax(next_depth, ply + 1, -beta, -beta + 1, ForwardMove::NULL_MOVE, false);
                 let mut null_score = -null_result.score;
                 
                 self.process_backward_move();
 
                 // Was Aborted
                 if null_result.was_aborted {
-                    return SearchResult { score: 0, best_move: None, was_aborted: true };
+                    return SearchResult { score: 0, best_move: ForwardMove::NULL_MOVE, was_aborted: true };
                 }
 
                 if null_score >= MATE_THRESHOLD {
@@ -436,7 +437,7 @@ impl SearchWorker {
                 
                 // Fail-high cutoff: The position is so good we can prune it completely
                 if null_score >= beta {
-                    return SearchResult { score: beta, best_move: None, was_aborted: false };
+                    return SearchResult { score: beta, best_move: ForwardMove::NULL_MOVE, was_aborted: false };
                 }
             }
         }
@@ -466,13 +467,13 @@ impl SearchWorker {
             if lmr_eligibility {
                 let reduced_depth = self.calculate_lmr_reduction(depth, moves_tried);
 
-                negamax_result = self.negamax(reduced_depth, ply + 1,  -alpha - 1, -alpha, None, true);
+                negamax_result = self.negamax(reduced_depth, ply + 1,  -alpha - 1, -alpha, ForwardMove::NULL_MOVE, true);
 
                 if -negamax_result.score > alpha {
-                    negamax_result = self.negamax(depth - 1, ply + 1, -beta, -alpha, None, true);
+                    negamax_result = self.negamax(depth - 1, ply + 1, -beta, -alpha, ForwardMove::NULL_MOVE, true);
                 }
             } else {
-                negamax_result = self.negamax(depth - 1, ply + 1, -beta, -alpha, None, true);
+                negamax_result = self.negamax(depth - 1, ply + 1, -beta, -alpha, ForwardMove::NULL_MOVE, true);
             }
 
             let score = -negamax_result.score;
@@ -482,13 +483,13 @@ impl SearchWorker {
 
             // Was Aborted
             if negamax_result.was_aborted {
-                return SearchResult { score: 0, best_move: None, was_aborted: true };
+                return SearchResult { score: 0, best_move: ForwardMove::NULL_MOVE, was_aborted: true };
             }
 
             // Track maximum evaluations
             if score > best_score {
                 best_score = score;
-                best_move = Some(*forward_move);
+                best_move = *forward_move;
             }
 
             // Alpha-Beta Cutoff
@@ -516,24 +517,24 @@ impl SearchWorker {
                 let mate_score = -MATE_VALUE + ply;
 
                 self.transposition_table.store(
-                    hash, mate_score, ply, None, MAX_DEPTH, HashFlag::EXACT
+                    hash, mate_score, ply, ForwardMove::NULL_MOVE, MAX_DEPTH, HashFlag::EXACT
                 );
 
                 // Checkmate
                 return SearchResult { 
                     score: mate_score, 
-                    best_move: None,
+                    best_move: ForwardMove::NULL_MOVE,
                     was_aborted: false
                 };
             } else {
                 self.transposition_table.store(
-                    hash, 0, ply, None, MAX_DEPTH, HashFlag::EXACT
+                    hash, 0, ply, ForwardMove::NULL_MOVE, MAX_DEPTH, HashFlag::EXACT
                 );
 
                 // Stalemate
                 return SearchResult { 
                     score: 0, 
-                    best_move: None,
+                    best_move: ForwardMove::NULL_MOVE,
                     was_aborted: false,
                 };
             }
@@ -570,18 +571,19 @@ impl SearchWorker {
             return 0;
         }
 
-        let mut pv_move_hint = None;
+        let mut pv_move_hint = ForwardMove::NULL_MOVE;
         let hash = self.chess_board.zobrist_hash();
 
         const Q_DEPTH_MARKER: i32 = -1;
-        if let Some(tt_entry) = self.transposition_table.probe(hash, ply) {
+        let tt_entry = self.transposition_table.probe(hash, ply);
+        if tt_entry.flag != HashFlag::EMPTY {
             let retrieved_score: i32 = tt_entry.score as i32;
             let retrieved_depth: i32 = tt_entry.depth as i32;
             
             if tt_entry.move_id != 0 {
                 let mut mv = ForwardMove::unpack(tt_entry.move_id);
                 mv.pv_score = -2_000_000;
-                pv_move_hint = Some(mv);
+                pv_move_hint = mv;
             };
 
             if retrieved_depth >= Q_DEPTH_MARKER {
@@ -605,6 +607,7 @@ impl SearchWorker {
                 }
             }
         }
+    
 
         let static_eval = self.board_eval();
 
@@ -626,7 +629,7 @@ impl SearchWorker {
         }
 
         let mut legal_moves_played = 0;
-        let mut best_move = None;
+        let mut best_move = ForwardMove::NULL_MOVE;
         let mut hash_flag = HashFlag::UPPERBOUND;
 
         // Generate strictly legal tactical moves directly onto the global stack
@@ -668,7 +671,7 @@ impl SearchWorker {
             // Fail-soft updates
             if score > best_score {
                 best_score = score;
-                best_move = Some(*forward_move);
+                best_move = *forward_move;
 
                 if score > alpha {
                     alpha = score;
@@ -699,7 +702,7 @@ impl SearchWorker {
     fn filter_psuedo_legal_quiescence_moves(&mut self, 
         gen_moves: &mut ArrayVec::<ForwardMove, 256>
     ) {
-        self.chess_board.generate_moves(gen_moves, None, 
+        self.chess_board.generate_moves(gen_moves, ForwardMove::NULL_MOVE, 
             -1, &self.killer_move_table);
         gen_moves.retain(|cmd| {
             matches!(

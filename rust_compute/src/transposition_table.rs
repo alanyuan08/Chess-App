@@ -10,6 +10,7 @@ pub enum HashFlag {
     EXACT = 0,
     LOWERBOUND = 1,
     UPPERBOUND = 2,
+    EMPTY = 3,
 }
 
 // TTEntry Structure
@@ -83,72 +84,93 @@ impl TranspositionTable {
 
     /// Unpacks a 64-bit word into an operational TTEntry if the tag matches
     #[inline(always)]
-    fn unpack_entry(packed: u64, key: u64, ply: i32) -> Option<TTEntry> {
+    fn unpack_entry(packed: u64, key: u64, ply: i32) -> TTEntry {
+        let empty_entry = TTEntry {
+            key: 0,
+            move_id: 0,
+            score: 0,
+            depth: 0,
+            flag: HashFlag::EMPTY,
+        };
+
         if packed == 0 {
-            return None;
+            return empty_entry;
         }
 
         let stored_tag = ((packed >> 40) & 0x3F_FFFF) as u32;
         let current_tag = ((key >> 42) & 0x3F_FFFF) as u32; 
 
-        if stored_tag == current_tag {
-            let move_id = packed as u16;
-            let score = (packed >> 16) as i16;
-            let depth = ((packed >> 32) & 0xFF) as u8 as i8;
-            
-            let flag_val = ((packed >> 62) & 0b11) as u8;
-            let flag = match flag_val {
-                0 => HashFlag::EXACT,
-                1 => HashFlag::LOWERBOUND,
-                _ => HashFlag::UPPERBOUND,
-            };
-
-            let mut entry = TTEntry {
-                key, 
-                move_id,
-                score,
-                depth,
-                flag,
-            };
-
-            if entry.score > (MATE_VALUE - MAX_DEPTH) as i16 { 
-                entry.score -= ply as i16; 
-            } else if entry.score < (-MATE_VALUE + MAX_DEPTH) as i16 { 
-                entry.score += ply as i16; 
-            }
-            return Some(entry);
+        if stored_tag != current_tag {
+            return empty_entry;
         }
-        None
+        
+        let move_id = packed as u16;
+        let score = (packed >> 16) as i16;
+        let depth = ((packed >> 32) & 0xFF) as u8 as i8;
+        
+        let flag_val = ((packed >> 62) & 0b11) as u8;
+        let flag = match flag_val {
+            0 => HashFlag::EXACT,
+            1 => HashFlag::LOWERBOUND,
+            _ => HashFlag::UPPERBOUND,
+        };
+
+        let mut entry = TTEntry {
+            key, 
+            move_id,
+            score,
+            depth,
+            flag,
+        };
+
+        if entry.score > (MATE_VALUE - MAX_DEPTH) as i16 { 
+            entry.score -= ply as i16; 
+        } else if entry.score < (-MATE_VALUE + MAX_DEPTH) as i16 { 
+            entry.score += ply as i16; 
+        }
+        entry
     }
 
     #[inline(always)]
-    pub fn probe(&self, key: u64, ply: i32) -> Option<TTEntry> {
+    pub fn probe(&self, key: u64, ply: i32) -> TTEntry {
         let index = (key as usize) & self.mask;
         let bucket = &self.buckets[index];
         
         // Fetching depth_preferred pulls the entire TT_Bucket cache line into L1.
         let dp_packed = bucket.depth_preferred.load(Ordering::Relaxed);
-        if let Some(entry) = Self::unpack_entry(dp_packed, key, ply) {
-            return Some(entry);
+        let entry =  Self::unpack_entry(dp_packed, key, ply);
+        if entry.flag != HashFlag::EMPTY {
+            return entry;
         }
 
         // Fetching always_replace is an immediate L1 hit (0 penalty)
         let ar_packed = bucket.always_replace.load(Ordering::Relaxed);
-        if let Some(entry) = Self::unpack_entry(ar_packed, key, ply) {
-            return Some(entry);
+        let entry = Self::unpack_entry(ar_packed, key, ply);
+        if entry.flag != HashFlag::EMPTY {
+            return entry;
         }
         
-        None
+        TTEntry {
+            key: 0,
+            move_id: 0,
+            score: 0,
+            depth: 0,
+            flag: HashFlag::EMPTY,
+        }
     }
 
     #[inline(always)]
     pub fn store(&self, key: u64, score: i32, ply: i32, 
-        forward_move: Option<ForwardMove>, depth: i32, flag: HashFlag) 
+        forward_move: ForwardMove, depth: i32, flag: HashFlag) 
     {
         let index = (key as usize) & self.mask;
         let bucket = &self.buckets[index];
 
-        let move_id = forward_move.map_or(0, |mv| mv.pack()); 
+        let move_id = if forward_move.move_type == MoveFlag::NULL {
+            0
+        } else {
+            forward_move.pack()
+        };
         let new_packed = Self::pack_entry(move_id, score as i16, depth, flag, key, ply);
 
         // --- SLOT 1: DEPTH PREFERRED ---
