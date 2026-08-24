@@ -75,7 +75,7 @@ impl TranspositionTable {
         let mut packed = 0u64;
         packed |= (move_id as u64) & 0xFFFF;
         packed |= (store_score as u64) << 16;
-        packed |= ((depth as u8) as u64) << 32;
+        packed |= ((depth as u8) as u64 & 0xFF) << 32;
         packed |= tag_22 << 40;
         packed |= (flag as u8 as u64) << 62;
         packed
@@ -94,7 +94,7 @@ impl TranspositionTable {
         if stored_tag == current_tag {
             let move_id = packed as u16;
             let score = (packed >> 16) as i16;
-            let depth = ((packed >> 32) & 0xFF) as i8;
+            let depth = ((packed >> 32) & 0xFF) as u8 as i8;
             
             let flag_val = ((packed >> 62) & 0b11) as u8;
             let flag = match flag_val {

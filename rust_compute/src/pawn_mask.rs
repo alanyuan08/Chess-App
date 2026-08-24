@@ -58,7 +58,7 @@ pub fn white_pawn_moves(chess_board: &mut ChessBoard, player_index: usize, opp_i
         let target = promotion_move.trailing_zeros() as usize;
         
         moves.push(ForwardMove { 
-            start_sq: target - 8, end_sq: target, move_type: MoveFlag::PROMOTIONQUEEN, pv_score: 10 
+            start_sq: target - 8, end_sq: target, move_type: MoveFlag::PROMOTIONQUEEN, pv_score: 50 
         });
 
         moves.push(ForwardMove { 

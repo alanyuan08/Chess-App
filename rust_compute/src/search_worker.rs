@@ -163,19 +163,23 @@ impl SearchWorker {
         let prev_castle_rights = self.chess_board.castle_rights(); 
         let prev_en_passant = self.chess_board.en_passant();
 
-        // Null Move
-        let mut undo_move = UndoMove {
-            start_sq: 0,
-            end_sq: 0,
-            move_type: MoveFlag::NULL,
-            captured_piece: None,
-            prev_castle_rights,
-            prev_en_passant,
-        };
-
         if forward_move.move_type == MoveFlag::NULL {
             self.chess_board.increment_ply();
             self.chess_board.execute_move(forward_move); 
+
+            let undo_move = UndoMove {
+                start_sq: 0,
+                end_sq: 0,
+                move_type: MoveFlag::NULL,
+                captured_piece: None,
+                prev_castle_rights,
+                prev_en_passant,
+            };
+
+            // Push Move History
+            self.push_position();
+            self.history[self.history_index] = Some(undo_move);
+            self.history_index += 1;
         } else {
             let move_piece = self.chess_board.mailbox_piece(forward_move.start_sq);
             let is_king_or_castle = move_piece == BoardPiece::WKING 
@@ -188,7 +192,7 @@ impl SearchWorker {
             }
 
             let remove_piece = self.chess_board.execute_move(forward_move);
-            undo_move = UndoMove {
+            let undo_move = UndoMove {
                 start_sq: forward_move.start_sq,
                 end_sq: forward_move.end_sq,
                 move_type: forward_move.move_type,
@@ -197,18 +201,17 @@ impl SearchWorker {
                 prev_en_passant,
             };
 
+            // Push Move History
+            self.push_position();
+            self.history[self.history_index] = Some(undo_move);
+            self.history_index += 1;
+
             // Forced Recompute due to King
             if is_king_or_castle {
                 self.chess_board.increment_ply();
                 self.chess_board.create_accumlator_from_scratch();
             }
         }
-
-        // Push Move History
-        self.push_position();
-
-        self.history[self.history_index] = Some(undo_move);
-        self.history_index += 1;
     }
 
     fn process_backward_move(&mut self) {
@@ -327,6 +330,8 @@ impl SearchWorker {
         }
 
         let hash = self.chess_board.zobrist_hash();
+        let mut tt_move = None;
+
         if let Some(tt_entry) = self.transposition_table.probe(hash, ply) {
             let retrieved_score: i32 = tt_entry.score as i32;
             let retrieved_depth: i32 = tt_entry.depth as i32;
@@ -334,17 +339,19 @@ impl SearchWorker {
             if tt_entry.move_id != 0 {
                 let mut mv = ForwardMove::unpack(tt_entry.move_id);
                 mv.pv_score = -2_000_000;
-                pv_move_hint = Some(mv);
+                tt_move = Some(mv);
+
+                if pv_move_hint.is_none() {
+                    pv_move_hint = tt_move;
+                }
             };
 
             if retrieved_depth >= depth {
-
                 // EXACT: The true minimax value was found; return it immediately.
                 if tt_entry.flag == HashFlag::EXACT {
-                    self.nodes_processed += 1;
                     return SearchResult {
                         score: retrieved_score,
-                        best_move: pv_move_hint,
+                        best_move: tt_move.or(pv_move_hint),
                         was_aborted: false,
                     };
                 }
@@ -362,7 +369,7 @@ impl SearchWorker {
                 if alpha >= beta {
                     return SearchResult {
                         score: retrieved_score,
-                        best_move: pv_move_hint,
+                        best_move: tt_move.or(pv_move_hint),
                         was_aborted: false,
                     };
                 }
@@ -371,10 +378,13 @@ impl SearchWorker {
 
         // Leaf Node Condition -> Drop into Quiescence Search
         if depth == 0 {
+            let q_score = self.quiescence_search(alpha, beta, ply, -1);
+            let aborted = self.stop_signal.load(Ordering::Relaxed);
+
             return SearchResult {
-                score: self.quiescence_search(alpha, beta, ply, -1),
+                score: if aborted { 0 } else { q_score },
                 best_move: None,
-                was_aborted: false,
+                was_aborted: aborted,
             };
         }
 
@@ -416,6 +426,11 @@ impl SearchWorker {
                 
                 self.process_backward_move();
 
+                // Was Aborted
+                if null_result.was_aborted {
+                    return SearchResult { score: 0, best_move: None, was_aborted: true };
+                }
+
                 if null_score >= MATE_THRESHOLD {
                     null_score = beta;
                 }
@@ -428,12 +443,6 @@ impl SearchWorker {
         }
 
         for forward_move in &gen_moves {
-            // Check LMR Eligibility
-            lmr_eligibility = false;
-            if depth >= 3 && moves_tried > 2 && !king_in_check && matches!(forward_move.move_type, MoveFlag::MOVE) {
-                lmr_eligibility = true;
-            }
-
             // Push move (handles UCI, board state, hash, and history internally)
             self.process_forward_move(*forward_move);
 
@@ -445,6 +454,13 @@ impl SearchWorker {
 
             // Move is Legal, Forward Move Time Cat
             legal_moves_played += 1;
+            moves_tried += 1;
+
+            // Check LMR Eligibility
+            lmr_eligibility = false;
+            if depth >= 3 && moves_tried > 2 && !king_in_check && matches!(forward_move.move_type, MoveFlag::MOVE) {
+                lmr_eligibility = true;
+            }
 
             // LMR Reduction
             let mut negamax_result;
@@ -465,7 +481,7 @@ impl SearchWorker {
             // Undo Move + TimeCat
             self.process_backward_move();
 
-            // Do not Store Results
+            // Was Aborted
             if negamax_result.was_aborted {
                 return SearchResult { score: 0, best_move: None, was_aborted: true };
             }
@@ -493,7 +509,6 @@ impl SearchWorker {
                 alpha = score;
             }
 
-            moves_tried += 1;
         }
 
         // 4. Handle terminal nodes cleanly if no legal moves exist
@@ -543,7 +558,11 @@ impl SearchWorker {
     }
 
     // Quiescence Search 
-    fn quiescence_search(&mut self, mut alpha: i32, mut beta: i32, ply: i32, depth: i32) -> i32 {
+    fn quiescence_search(&mut self, mut alpha: i32, mut beta: i32, ply: i32, depth: i32) -> i32 {        
+        if self.nodes_processed & 0x3FFF == 0 && self.stop_signal.load(Ordering::Relaxed) {
+            return alpha; 
+        }
+
         // Nodes Processed
         self.nodes_processed += 1;
 
@@ -553,8 +572,9 @@ impl SearchWorker {
         }
 
         let mut pv_move_hint = None;
-
         let hash = self.chess_board.zobrist_hash();
+
+        const Q_DEPTH_MARKER: i32 = -1;
         if let Some(tt_entry) = self.transposition_table.probe(hash, ply) {
             let retrieved_score: i32 = tt_entry.score as i32;
             let retrieved_depth: i32 = tt_entry.depth as i32;
@@ -565,8 +585,7 @@ impl SearchWorker {
                 pv_move_hint = Some(mv);
             };
 
-            if retrieved_depth >= depth {
-
+            if retrieved_depth >= Q_DEPTH_MARKER {
                 // EXACT: The true minimax value was found; return it immediately.
                 if tt_entry.flag == HashFlag::EXACT {
                     return retrieved_score;
@@ -643,6 +662,10 @@ impl SearchWorker {
             // Undo Move + TimeCat
             self.process_backward_move();
 
+            if self.stop_signal.load(Ordering::Relaxed) {
+                return alpha;
+            }
+
             // Fail-soft updates
             if score > best_score {
                 best_score = score;
@@ -664,8 +687,12 @@ impl SearchWorker {
             return -MATE_VALUE + ply;
         }
 
+        if self.stop_signal.load(Ordering::Relaxed) {
+            return alpha; 
+        }
+
         // Store evaluation state inside the Transposition Table
-        self.transposition_table.store(hash, best_score, ply, best_move, depth, hash_flag);
+        self.transposition_table.store(hash, best_score, ply, best_move, Q_DEPTH_MARKER, hash_flag);
         best_score
     }   
 

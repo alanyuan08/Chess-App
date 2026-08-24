@@ -754,41 +754,47 @@ impl ChessBoard {
         let target_black = &mut self.accumulators[self.ply].black.vals[..256];
         let biases = &self.nnue_network.l1_biases[..256];
 
-        // --- 1. PROCESS WHITE ACCUMULATOR COMPLETELY ---
-        // Initialize White with a clean copy (compiler can optimize this easily)
+        // Initialize both sides with biases first
         for i in 0..256 {
             target_white[i] = biases[i] as i16;
-        }
-        
-        // Accumulate all active pieces for White in a single contiguous memory stream
-       for sq in 0..64 {
-            let piece = self.mailbox[sq];
-            if piece != BoardPiece::NONE {
-                let w_idx = get_feature_index(w_king_sq, piece, sq, false);
-                let w_row = &self.nnue_network.l1_weights[w_idx][..256];
-
-                for i in 0..256 {
-                    target_white[i] = target_white[i].wrapping_add(w_row[i]);
-                }
-            }
-        }
-        // --- 2. PROCESS BLACK ACCUMULATOR COMPLETELY ---
-        // Initialize Black cleanly
-        for i in 0..256 {
             target_black[i] = biases[i] as i16;
         }
 
-        // Accumulate all active pieces for Black in a single contiguous memory stream
-        for sq in 0..64 {
-            let piece = self.mailbox[sq];
-            if piece != BoardPiece::NONE {
-                let b_idx = get_feature_index(b_king_sq, piece, sq, true);
-                let b_row = &self.nnue_network.l1_weights[b_idx][..256];
+        // Create a bitboard of ALL pieces on the board
+        let all_pieces_bb = self.all_pieces[0] | self.all_pieces[1];
 
-                for i in 0..256 {
-                    target_black[i] = target_black[i].wrapping_add(b_row[i]); 
-                }
+        // --- LOOP 1: PROCESS WHITE PERSPECTIVE COMPLETELY ---
+        let mut pieces_bitboard = all_pieces_bb;
+        while pieces_bitboard != 0 {
+            let sq = pieces_bitboard.trailing_zeros() as usize;
+            let piece = self.mailbox[sq];
+
+            let w_idx = get_feature_index(w_king_sq, piece, sq, false);
+            let w_row = &self.nnue_network.l1_weights[w_idx][..256];
+
+            // Perfect auto-vectorization! The CPU fills all registers with White data.
+            for i in 0..256 {
+                target_white[i] = target_white[i].wrapping_add(w_row[i]);
             }
+
+            pieces_bitboard &= pieces_bitboard - 1;
+        }
+
+        // --- LOOP 2: PROCESS BLACK PERSPECTIVE COMPLETELY ---
+        let mut pieces_bitboard = all_pieces_bb;
+        while pieces_bitboard != 0 {
+            let sq = pieces_bitboard.trailing_zeros() as usize;
+            let piece = self.mailbox[sq];
+
+            let b_idx = get_feature_index(b_king_sq, piece, sq, true);
+            let b_row = &self.nnue_network.l1_weights[b_idx][..256];
+
+            // Perfect auto-vectorization! The CPU reuse registers exclusively for Black data.
+            for i in 0..256 {
+                target_black[i] = target_black[i].wrapping_add(b_row[i]);
+            }
+
+            pieces_bitboard &= pieces_bitboard - 1;
         }
     }
 
