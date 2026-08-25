@@ -52,7 +52,7 @@ impl NnueNetwork {
 
             // 1. Accumulator Layer (l1_weights is i16 = 2 bytes, l1_biases is i32 = 4 bytes)
             read_field(&mut network_box.l1_weights as *mut _ as *mut u8, 49152 * 256, 2)?;
-            read_field(&mut network_box.l1_biases as *mut _ as *mut u8, 256, 4)?; // FIXED: element size is 4 for i32
+            read_field(&mut network_box.l1_biases as *mut _ as *mut u8, 256, 4)?;
 
             // 2. Hidden Layer 2
             read_field(&mut network_box.l2_weights as *mut _ as *mut u8, 64 * 512, 1)?;

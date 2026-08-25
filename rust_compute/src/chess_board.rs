@@ -802,9 +802,8 @@ impl ChessBoard {
 
         // --- LOOP 1: PROCESS WHITE PERSPECTIVE COMPLETELY ---
         // Perfect auto-vectorization! The CPU fills all registers exclusively with White data.
-        for p in 0..active_piece_count {
-            let w_idx = white_indices[p];
-            let w_row = &self.nnue_network.l1_weights[w_idx][..256];
+        for &w_idx in white_indices.iter().take(active_piece_count) {
+            let w_row = &self.nnue_network.l1_weights[w_idx as usize][..256];
             
             for i in 0..256 {
                 target_white[i] = target_white[i].wrapping_add(w_row[i]);
@@ -813,9 +812,8 @@ impl ChessBoard {
 
         // --- LOOP 2: PROCESS BLACK PERSPECTIVE COMPLETELY ---
         // Perfect auto-vectorization! The CPU reuses those same registers exclusively for Black data.
-        for p in 0..active_piece_count {
-            let b_idx = black_indices[p];
-            let b_row = &self.nnue_network.l1_weights[b_idx][..256];
+        for &b_idx in black_indices.iter().take(active_piece_count) {
+            let b_row = &self.nnue_network.l1_weights[b_idx as usize][..256];
             
             for i in 0..256 {
                 target_black[i] = target_black[i].wrapping_add(b_row[i]);
