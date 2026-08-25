@@ -60,9 +60,9 @@
     - *Activation:* Clipped/Bounded Linear ReLU ($\text{ReLU1}$) bounded strictly between `0.0` and `1.0`.
   - **Output Layer:** Combines $(32, 1)$ outputs down to a single evaluation scalar using 8-bit weights (`i8`) and 32-bit biases (`i32`).
     - *Activation:* None
-  - **Loss Function:** Custom Mean Squared Error Function where the model output is converted from centipawn to Loss/ Win [0, 1] using the function ($\text{1.0 / (1.0 + tf.math.exp(LICHESS_CONSTANT * centipawn))}$)
+  - **Loss Function:** Custom Mean Squared Error Function where the model output is converted from centipawn to Loss/ Win [0, 1] using the function ($\text{1.0 / (1.0 + tf.math.exp(LICHESS-CONSTANT * centipawn))}$)
 
-  LICHESS_CONSTANT = 0.368208
+  LICHESS-CONSTANT = 0.368208
 
 ## 4. NNuE Training
 
