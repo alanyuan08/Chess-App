@@ -70,8 +70,8 @@ pub fn king_moves(chess_board: &mut ChessBoard, player_index: usize, opp_index: 
 
     // Check if King Capture / Move goes into Check
     while king_bitboard != 0 {
-        let king = king_bitboard.trailing_zeros() as usize;
-        let king_attack_paths = KING_ATTACKS[king];
+        let king = king_bitboard.trailing_zeros() as u8;
+        let king_attack_paths = KING_ATTACKS[king as usize];
 
         let king_safe_squares = king_attack_paths & !opponent_attacks;
 
@@ -79,7 +79,7 @@ pub fn king_moves(chess_board: &mut ChessBoard, player_index: usize, opp_index: 
         let mut king_captures = king_safe_squares & chess_board.all_pieces[opp_index];
 
         while king_moves != 0 {
-            let target = king_moves.trailing_zeros() as usize;
+            let target = king_moves.trailing_zeros() as u8;
             moves.push(ForwardMove { 
                 start_sq: king, end_sq: target, move_type: MoveFlag::MOVE, pv_score: 1000
             });
@@ -87,7 +87,7 @@ pub fn king_moves(chess_board: &mut ChessBoard, player_index: usize, opp_index: 
         }
 
         while king_captures != 0 {
-            let target = king_captures.trailing_zeros() as usize;
+            let target = king_captures.trailing_zeros() as u8;
             
             let captured_piece_val = piece_value(chess_board.mailbox_piece(target));
             let pv_score = 100 - (captured_piece_val * 10) + 5; 

@@ -2,7 +2,7 @@
 from appEnums import PieceType, Player, MoveCommandType, PROMOTION_MAP
 
 # Model 
-from modelComponent.moveCommand import MoveCommand, move_command_to_uci
+from modelComponent.moveCommand import MoveCommand
 from modelComponent.chessPieceModel import ChessPieceModel
 from modelComponent.chessBoardZobrist import ChessBoardZobrist
 
@@ -10,7 +10,6 @@ from modelComponent.chessBoardZobrist import ChessBoardZobrist
 from modelFactory.chessPieceFactory import ChessPieceFactory
 
 # Standard
-import math
 from typing import Optional, Union
 
 # Controller 
@@ -31,9 +30,6 @@ class ChessBoardModel():
 
         self.blackKingSquareRow = 7
         self.blackKingSquareCol = 4
-
-        # Previous Moves in UCI Format
-        self.previousMoves = []
 
         # Use for Zobrist Hash
         self.whiteCanQueenSide = True
@@ -233,21 +229,14 @@ class ChessBoardModel():
         # Update Board Position
         self.forwardPosition()
 
-        # Append Previous Position
-        uciMoveCommand = move_command_to_uci(cmd)
-        self.previousMoves.append(uciMoveCommand)
-
         # Create a new copy of the removed Piece
         return removedPiece, prevEnPassant
 
-    # Undo Move - Used to for Pruning
+    # Undo Move - Used for King Safety
     def undoMove(self, cmd: MoveCommand, restorePiece: Optional[ChessPieceModel], prevEnPassant: int) -> None:
         # Swap the Player Turn
         self.playerTurn = ChessBoardModel.opponent(self.playerTurn)
         prevCastleIndex = ChessBoardZobrist.castleIndex(self)
-
-        # Remove Last Move
-        self.previousMoves.pop()
 
         # Backtrack Board Position
         self.backtrackPosition()
