@@ -38,7 +38,7 @@ pub fn white_pawn_moves(chess_board: &mut ChessBoard, player_index: usize, opp_i
     let white_pawns = chess_board.pawns[player_index];
     let black_pieces = chess_board.all_pieces[opp_index];
     let occupancy = chess_board.occupied;
-    let en_passant_board: u64 = if chess_board.en_passant() == 0 {
+    let en_passant_board: u64 = if chess_board.en_passant() == 64 {
         0
     } else {
         1 << chess_board.en_passant()
@@ -196,7 +196,7 @@ pub fn black_pawn_moves(chess_board: &mut ChessBoard, player_index: usize, opp_i
     let black_pawns = chess_board.pawns[player_index];
     let white_pieces = chess_board.all_pieces[opp_index];
     let occupancy = chess_board.occupied;
-    let en_passant_board: u64 = if chess_board.en_passant() == 0 {
+    let en_passant_board: u64 = if chess_board.en_passant() == 64 {
         0
     } else {
         1 << chess_board.en_passant()
