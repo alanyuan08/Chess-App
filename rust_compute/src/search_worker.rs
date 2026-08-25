@@ -162,43 +162,40 @@ impl SearchWorker {
         // Store Value prior to Executing Move
         let prev_castle_rights = self.chess_board.castle_rights(); 
         let prev_en_passant = self.chess_board.en_passant();
-
         self.chess_board.increment_ply();
 
-        let undo = &mut self.history[self.history_index];
+        let mut captured_piece = BoardPiece::NONE;
+        let move_type = forward_move.move_type;
 
         if forward_move.move_type == MoveFlag::NULL {
             self.chess_board.execute_move(forward_move); 
             self.chess_board.null_move_accumulator();
-
-            // Set the Move Type
-            undo.move_type = MoveFlag::NULL;
         } else {
             let move_piece = self.chess_board.mailbox_piece(forward_move.start_sq);
-            let is_king_or_castle = move_piece == BoardPiece::WKING 
-                || move_piece == BoardPiece::BKING 
-                || forward_move.move_type == MoveFlag::KINGSIDECASTLE 
-                || forward_move.move_type == MoveFlag::QUEENSIDECASTLE;
+            let is_king_or_castle = (move_piece == BoardPiece::WKING || move_piece == BoardPiece::BKING)
+                || (forward_move.move_type == MoveFlag::KINGSIDECASTLE || forward_move.move_type == MoveFlag::QUEENSIDECASTLE);
 
             if !is_king_or_castle {
                 self.chess_board.make_move(forward_move);
             }
 
-            let remove_piece = self.chess_board.execute_move(forward_move);
+            captured_piece = self.chess_board.execute_move(forward_move);
 
             // Forced Recompute due to King
             if is_king_or_castle {
                 self.chess_board.create_accumlator_from_scratch();
             }
-
-            undo.start_sq = forward_move.start_sq;
-            undo.end_sq = forward_move.end_sq;
-            undo.move_type = forward_move.move_type;
-            undo.captured_piece = remove_piece;
         }
 
-        undo.prev_castle_rights = prev_castle_rights;
-        undo.prev_en_passant = prev_en_passant;
+        let undo_state = UndoMove {
+            start_sq: forward_move.start_sq,
+            end_sq: forward_move.end_sq,
+            prev_castle_rights,
+            prev_en_passant,
+            move_type,
+            captured_piece,
+        };
+        self.history[self.history_index] = undo_state;
 
         self.push_position();
         self.history_index += 1;
@@ -220,6 +217,7 @@ impl SearchWorker {
 
     // A simple, linear-logarithmic approximation using integer division:
     // R increases slowly as depth and move count grow.
+    #[inline]
     fn calculate_lmr_reduction(&mut self, depth: i32, moves_tried: i32) -> i32 {
         // Clamp depth to 0..=64
         let d = depth.clamp(0, 63) as usize;
@@ -265,6 +263,7 @@ impl SearchWorker {
     }
 
     // StockFish NMP Reduction algorithm
+    #[inline]
     fn calculate_nmp_reduction(&self, depth: i32, static_eval: i32, beta: i32) -> i32 {
         let base_reduction = 3 + (depth / 4);
         let eval_bonus = ((beta - static_eval) / 200).clamp(0, 2);
@@ -273,6 +272,7 @@ impl SearchWorker {
     }
 
     // NMP Static Eval to determine cuttoff eligability
+    #[inline]
     fn static_eval(&self) -> i32 {
         let static_white = (self.chess_board.rooks[0].count_ones() as i32 * 500)
             + (self.chess_board.knights[0].count_ones() as i32 * 300) 
@@ -548,12 +548,6 @@ impl SearchWorker {
         SearchResult { score: best_score, best_move, was_aborted: false }
     }
 
-    fn board_eval(&mut self) -> i32 {
-        self.chess_board.evaluate(
-            &mut self.thread_buffer
-        )
-    }
-
     // Quiescence Search 
     fn quiescence_search(&mut self, mut alpha: i32, mut beta: i32, ply: i32, depth: i32) -> i32 {        
         if self.nodes_processed & 0x3FFF == 0 && self.stop_signal.load(Ordering::Relaxed) {
@@ -604,10 +598,11 @@ impl SearchWorker {
                 }
             }
         }
+
+        let static_eval = self.chess_board.evaluate(
+            &mut self.thread_buffer
+        );
     
-
-        let static_eval = self.board_eval();
-
         if ply > MAX_DEPTH {
             return static_eval;
         }

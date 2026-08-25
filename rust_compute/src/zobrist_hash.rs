@@ -49,16 +49,19 @@ pub static ZOBRIST_SIDE_TO_MOVE: LazyLock<Box<[u64; 2]>> = LazyLock::new(|| {
 });
 
 // Convert Piece Type / Player to hash
+#[inline]
 pub fn active_player_zobrist(active_player: Side) -> usize {
     active_player as usize
 }
 
 // Player Index
+#[inline]
 pub fn piece_type_zobrist(piece_type: BoardPiece) -> usize {
     piece_type as usize
 }
 
 // Convert En Passant Square to hash
+#[inline]
 pub fn en_passant_zobrist(en_passant: u8) -> usize {
     if en_passant == 0 {
         return 8;

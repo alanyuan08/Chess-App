@@ -66,7 +66,7 @@ impl UndoMove {
         start_sq: 0,
         end_sq: 0,
         prev_castle_rights: 0,
-        prev_en_passant: 64, 
+        prev_en_passant: 0, 
         move_type: MoveFlag::NULL,
         captured_piece: BoardPiece::NONE,
     };

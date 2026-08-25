@@ -63,7 +63,7 @@ impl ChessBoard {
             occupied: 0,
 
             castling_rights: 0b1111,
-            en_passant: 64,
+            en_passant: 0,
             active_player: Side::WHITE,
 
             mailbox: [BoardPiece::NONE; 64],
@@ -122,6 +122,7 @@ impl ChessBoard {
     }
 
     // Null Move Pruning Zugzwang
+    #[inline]
     pub fn has_major_pieces(&self) -> bool {
         let side_idx = self.active_player as usize;
 
@@ -155,6 +156,7 @@ impl ChessBoard {
     }
 
     // Return Opponent 
+    #[inline]
     pub fn opponent_player(&self) -> Side {
         match self.active_player {
             Side::WHITE => {
@@ -167,6 +169,7 @@ impl ChessBoard {
     }
 
     // Return Index
+    #[inline]
     pub fn player_index(&self, player_side: Side) -> usize {
         match player_side {
             Side::WHITE => {
@@ -179,26 +182,31 @@ impl ChessBoard {
     }
 
     // Return Castle Rights
+    #[inline]
     pub fn castle_rights(&self) -> u8 {   
         self.castling_rights
     }
 
     // Return En Passant
+    #[inline]
     pub fn en_passant(&self) -> u8 {   
         self.en_passant
     }
 
     // Return Zobrist Hash
+    #[inline]
     pub fn zobrist_hash(&self) -> u64 {   
         self.zobrist_hash
     }
 
     // Return Active Player
+    #[inline]
     pub fn active_player(&self) -> Side {   
         self.active_player
     }
 
     // Return Mailbox Piece
+    #[inline]
     pub fn mailbox_piece(&self, target: u8) -> BoardPiece {   
         self.mailbox[target as usize]
     }
@@ -448,6 +456,7 @@ impl ChessBoard {
     }
 
     // Used Prior / After Execute Move/ Undo
+    #[inline(always)]
     fn zobrist_xor(&mut self) {
         self.zobrist_hash ^= ZOBRIST_SIDE_TO_MOVE[active_player_zobrist(self.active_player)];
         self.zobrist_hash ^= ZOBRIST_EN_PASSANT[en_passant_zobrist(self.en_passant)];
@@ -735,6 +744,7 @@ impl ChessBoard {
         self.zobrist_xor();
     }
 
+    #[inline(always)]
     pub fn null_move_accumulator(&mut self) {
         let current_ply = self.ply;
         let prev_ply = self.ply - 1; 
@@ -746,7 +756,6 @@ impl ChessBoard {
     }
 
     // Create from Scratch
-     #[inline(always)]
     pub fn create_accumlator_from_scratch(&mut self) {
         // Retrieve King Squares
         let w_king_sq = self.kings[Side::WHITE as usize].trailing_zeros() as u8;
@@ -814,7 +823,6 @@ impl ChessBoard {
         }
     }
 
-    #[inline(always)]
     pub fn evaluate(&mut self, buffer: &mut NnueInferenceBuffer) -> i32 {
         // --- PERSPECTIVE ROUTING ---
         // Side to move (US) always fills the first 256 inputs.
@@ -1002,6 +1010,7 @@ impl ChessBoard {
         }
     }
 
+    #[inline]
     pub fn unmake_move(&mut self) {
         if self.ply > 0 {
             self.ply -= 1; 
@@ -1010,6 +1019,7 @@ impl ChessBoard {
         }
     }
 
+    #[inline]
     pub fn increment_ply(&mut self) {
         self.ply += 1;
     }
