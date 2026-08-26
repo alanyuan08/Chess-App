@@ -73,10 +73,10 @@ impl SearchWorker {
         // Start the timer
         self.nodes_processed = 0;
 
-        // --- ITERATIVE DEEPENING LOOP ---
         let mut best_move_overall: ForwardMove = ForwardMove::NULL_MOVE;
         let mut depth = 1;
 
+        // --- ITERATIVE DEEPENING LOOP --
         while depth <= MAX_DEPTH {
             let result = self.negamax(depth, 0, -INFINITY, INFINITY, best_move_overall, true);
             
@@ -219,33 +219,43 @@ impl SearchWorker {
     // R increases slowly as depth and move count grow.
     #[inline]
     fn calculate_lmr_reduction(&mut self, depth: i32, moves_tried: i32) -> i32 {
-        // Clamp depth to 0..=64
+        // 1. Safe array bounds clamping
         let d = depth.clamp(0, 63) as usize;
-        
-        // Clamp moves_tried to 0..=64
         let m = moves_tried.clamp(0, 63) as usize;
 
         let base_reduction = LMR_TABLE[d][m];
+        let mut reduction = base_reduction;
 
-        if self.thread_id == 0 {
-            base_reduction
-        } else {
+        // 2. Apply thread diversity (helps different threads explore different paths)
+        if self.thread_id != 0 {
             let thread_offset = if self.thread_id % 2 == 1 { 1 } else { -1 };
-            let total_reduction = (base_reduction + thread_offset).max(0);
-
-            if total_reduction >= depth {
-                depth - 1
-            } else {
-                total_reduction
-            }
+            reduction = (base_reduction + thread_offset).max(0);
         }
+
+        // 3. Calculate the target depth
+        let mut reduced_depth = depth - 1 - reduction;
+
+        // 4. ✅ PERFECT LOCK: Ensure we always search at least depth 1, 
+        // and never search deeper than a standard depth step (depth - 1)
+        if reduced_depth < 1 {
+            reduced_depth = 1;
+        } else if reduced_depth >= depth {
+            reduced_depth = depth - 1;
+        }
+
+        reduced_depth
     }
 
     // Store Killer Move - No Captures
     fn store_killer_move(&mut self, new_killer_move: ForwardMove, depth: i32) {
         // Store Non-Captures for Killer Move
         if matches!(new_killer_move.move_type, 
-            MoveFlag::CAPTURE | MoveFlag::ENPASSANT | MoveFlag::PROMOTIONQUEEN
+            MoveFlag::CAPTURE | 
+            MoveFlag::ENPASSANT | 
+            MoveFlag::PROMOTIONQUEEN |
+            MoveFlag::PROMOTIONROOK |
+            MoveFlag::PROMOTIONBISHOP |
+            MoveFlag::PROMOTIONKNIGHT
         ) {
             return;
         }
@@ -294,19 +304,36 @@ impl SearchWorker {
     }
 
     // Process Negamax
+    // Transposition Table Summary
+    // Exact -> Preivous Function call found a value between Alpha and Beta
+    // - Pass Value to parent
+
+    // LOWER BOUND (Fail-High / Beta Cutoff): 
+    // - Previous search found a value that exceeded or met Beta.
+    // - The true value is AT LEAST this high. 
+    // - Action: alpha = cmp::max(alpha, retrieved_score)
+
+    // UPPER BOUND (Fail-Low): 
+    // - Previous search couldn't find any move that beat Alpha.
+    // - The true value is AT MOST this low. 
+    // - Action: beta = cmp::min(beta, retrieved_score)
+
+    // True Value -> If we ran Min-Max all the way down with zero pruning
+    // Alpha - Best value a Maximizer can guarantee, hence true value is greater than or equal to this
+    // Beta - Worst value a Minimizer can guarantee, hence true value is else than or equal to this
     fn negamax(&mut self, depth: i32, ply: i32, mut alpha: i32, mut beta: i32, 
         mut pv_move_hint: ForwardMove, allow_null: bool) -> SearchResult {
 
         // Halt Signal
         if self.nodes_processed & 0x3FFF == 0 && self.stop_signal.load(Ordering::Relaxed) {
-            return SearchResult { score: 0, best_move: ForwardMove::NULL_MOVE, was_aborted: true };
+            return SearchResult { 
+                score: 0, 
+                best_move: ForwardMove::NULL_MOVE, 
+                was_aborted: true 
+            };
         }
 
-        // Nodes Processed
         self.nodes_processed += 1;
-
-        // Original Alpha for Transposition Table
-        let original_alpha = alpha;
         
         // Three Move Repetition Draw
         if self.is_three_move_repetition() {
@@ -318,35 +345,25 @@ impl SearchWorker {
         }
 
         let hash = self.chess_board.zobrist_hash();
-        let mut tt_move = ForwardMove::NULL_MOVE;
 
         let tt_entry = self.transposition_table.probe(hash, ply);
         if tt_entry.flag != HashFlag::EMPTY {
             let retrieved_score: i32 = tt_entry.score as i32;
             let retrieved_depth: i32 = tt_entry.depth as i32;
             
+            // Transposition Move > PV Hint
             if tt_entry.move_id != 0 {
-                let mut mv = ForwardMove::unpack(tt_entry.move_id);
-                mv.pv_score = -2_000_000;
-                tt_move = mv;
-
-                if pv_move_hint != ForwardMove::NULL_MOVE {
-                    pv_move_hint = tt_move;
-                }
+                let mut tt_move = ForwardMove::unpack(tt_entry.move_id);
+                tt_move.pv_score = -2_000_000;
+                pv_move_hint = tt_move;
             };
 
             if retrieved_depth >= depth {
                 // EXACT: The true minimax value was found; return it immediately.
                 if tt_entry.flag == HashFlag::EXACT {
-                    let chosen_move = if tt_move.move_type != MoveFlag::NULL {
-                        tt_move
-                    } else {
-                        pv_move_hint
-                    };
-
                     return SearchResult {
                         score: retrieved_score,
-                        best_move: chosen_move,
+                        best_move: pv_move_hint,
                         was_aborted: false,
                     };
                 }
@@ -362,15 +379,9 @@ impl SearchWorker {
 
                 // If the bounds adjusted alpha/beta enough to cause a cutoff, return early
                 if alpha >= beta {
-                    let chosen_move = if tt_move.move_type != MoveFlag::NULL {
-                        tt_move
-                    } else {
-                        pv_move_hint
-                    };
-
                     return SearchResult {
                         score: retrieved_score,
-                        best_move: chosen_move,
+                        best_move: pv_move_hint,
                         was_aborted: false,
                     };
                 }
@@ -379,18 +390,12 @@ impl SearchWorker {
 
         // Leaf Node Condition -> Drop into Quiescence Search
         if depth == 0 {
-            let q_score = self.quiescence_search(alpha, beta, ply, -1);
-            let aborted = self.stop_signal.load(Ordering::Relaxed);
-
-            return SearchResult {
-                score: if aborted { 0 } else { q_score },
-                best_move: ForwardMove::NULL_MOVE,
-                was_aborted: aborted,
-            };
+            return self.quiescence_search(alpha, beta, ply);
         }
 
-        let mut best_move = ForwardMove::NULL_MOVE;   
         let mut legal_moves_played = 0;
+        let mut hash_flag = HashFlag::UPPERBOUND;
+        let mut best_move = ForwardMove::NULL_MOVE;   
         let mut best_score = -INFINITY;
 
         let mut gen_moves = ArrayVec::<ForwardMove, 256>::new();
@@ -423,18 +428,39 @@ impl SearchWorker {
                 
                 self.process_backward_move();
 
-                // Was Aborted
                 if null_result.was_aborted {
-                    return SearchResult { score: 0, best_move: ForwardMove::NULL_MOVE, was_aborted: true };
-                }
-
-                if null_score >= MATE_THRESHOLD {
-                    null_score = beta;
+                    return SearchResult { 
+                        score: 0, 
+                        best_move: ForwardMove::NULL_MOVE, 
+                        was_aborted: true 
+                    };
                 }
                 
-                // Fail-high cutoff: The position is so good we can prune it completely
+                // The position is so good we can prune it completely
                 if null_score >= beta {
-                    return SearchResult { score: beta, best_move: ForwardMove::NULL_MOVE, was_aborted: false };
+                    if self.stop_signal.load(Ordering::Relaxed) {
+                         return SearchResult { 
+                            score: alpha, 
+                            best_move: ForwardMove::NULL_MOVE, 
+                            was_aborted: true 
+                        };
+                    }
+
+                    if null_score >= MATE_THRESHOLD {
+                        null_score = beta; 
+                    } else if null_score <= -MATE_THRESHOLD {
+                        null_score = -beta;
+                    }
+
+                    self.transposition_table.store(
+                        hash, null_score, ply, ForwardMove::NULL_MOVE, depth, HashFlag::LOWERBOUND
+                    );
+
+                    return SearchResult { 
+                        score: null_score, 
+                        best_move: ForwardMove::NULL_MOVE, 
+                        was_aborted: false 
+                    };
                 }
             }
         }
@@ -463,10 +489,9 @@ impl SearchWorker {
             let mut negamax_result;
             if lmr_eligibility {
                 let reduced_depth = self.calculate_lmr_reduction(depth, moves_tried);
-
                 negamax_result = self.negamax(reduced_depth, ply + 1,  -alpha - 1, -alpha, ForwardMove::NULL_MOVE, true);
 
-                if -negamax_result.score > alpha {
+                if !negamax_result.was_aborted && -negamax_result.score > alpha {
                     negamax_result = self.negamax(depth - 1, ply + 1, -beta, -alpha, ForwardMove::NULL_MOVE, true);
                 }
             } else {
@@ -480,32 +505,31 @@ impl SearchWorker {
 
             // Was Aborted
             if negamax_result.was_aborted {
-                return SearchResult { score: 0, best_move: ForwardMove::NULL_MOVE, was_aborted: true };
+                return SearchResult { 
+                    score: 0, 
+                    best_move: ForwardMove::NULL_MOVE, 
+                    was_aborted: true 
+                };
             }
 
             // Track maximum evaluations
             if score > best_score {
                 best_score = score;
                 best_move = *forward_move;
+
+                // Score is Greater than Alpha -> EXACT OR LOWERBOUND
+                // If no Score is greater than Alpha -> retain UPPERBOUND
+                if score > alpha {
+                    alpha = score;
+                    hash_flag = HashFlag::EXACT;
+
+                    if score >= beta {
+                        hash_flag = HashFlag::LOWERBOUND;
+                        self.store_killer_move(best_move, depth);
+                        break;
+                    }
+                }
             }
-
-            // Alpha-Beta Cutoff
-            if best_score >= beta {
-                // Adjust mate scores to absolute bounds before saving
-                self.transposition_table.store(
-                    hash, best_score, ply, best_move, depth, HashFlag::LOWERBOUND
-                );
-
-                // Move Triggered a Beta Cutoff - Store as Killer Move
-                self.store_killer_move(*forward_move, depth);
-
-                return SearchResult { score: best_score, best_move, was_aborted: false };
-            }
-
-            if score > alpha {
-                alpha = score;
-            }
-
         }
 
         // 4. Handle terminal nodes cleanly if no legal moves exist
@@ -514,7 +538,7 @@ impl SearchWorker {
                 let mate_score = -MATE_VALUE + ply;
 
                 self.transposition_table.store(
-                    hash, mate_score, ply, ForwardMove::NULL_MOVE, MAX_DEPTH, HashFlag::EXACT
+                    hash, mate_score, ply, ForwardMove::NULL_MOVE, depth, HashFlag::EXACT
                 );
 
                 // Checkmate
@@ -525,7 +549,7 @@ impl SearchWorker {
                 };
             } else {
                 self.transposition_table.store(
-                    hash, 0, ply, ForwardMove::NULL_MOVE, MAX_DEPTH, HashFlag::EXACT
+                    hash, 0, ply, ForwardMove::NULL_MOVE, depth, HashFlag::EXACT
                 );
 
                 // Stalemate
@@ -537,21 +561,33 @@ impl SearchWorker {
             }
         }
 
-        let flag = if best_score > original_alpha {
-            HashFlag::EXACT
-        } else {
-            HashFlag::UPPERBOUND
-        };
+        if self.stop_signal.load(Ordering::Relaxed) {
+            return SearchResult { 
+                score: alpha, 
+                best_move: ForwardMove::NULL_MOVE, 
+                was_aborted: true 
+            };
+        }
 
-        // Adjust mate scores to absolute bounds before saving final loop results
-        self.transposition_table.store(hash, best_score, ply, best_move, depth, flag);
-        SearchResult { score: best_score, best_move, was_aborted: false }
+        // Cache Normal Loop
+        self.transposition_table.store(
+            hash, best_score, ply, best_move, depth, hash_flag
+        );
+        SearchResult { 
+            score: best_score, 
+            best_move, 
+            was_aborted: false 
+        }
     }
 
-    // Quiescence Search 
-    fn quiescence_search(&mut self, mut alpha: i32, mut beta: i32, ply: i32, depth: i32) -> i32 {        
+    // Quiescence Search -> Q-Search only uses Score and was_aborted. 
+    fn quiescence_search(&mut self, mut alpha: i32, mut beta: i32, ply: i32) -> SearchResult {        
         if self.nodes_processed & 0x3FFF == 0 && self.stop_signal.load(Ordering::Relaxed) {
-            return alpha; 
+            return SearchResult { 
+                score: 0, 
+                best_move: ForwardMove::NULL_MOVE,
+                was_aborted: true,
+            };
         }
 
         // Nodes Processed
@@ -559,7 +595,11 @@ impl SearchWorker {
 
         // Three Move Repetition Draw
         if self.is_three_move_repetition() {
-            return 0;
+            return SearchResult { 
+                score: 0, 
+                best_move: ForwardMove::NULL_MOVE,
+                was_aborted: false,
+            };
         }
 
         let mut pv_move_hint = ForwardMove::NULL_MOVE;
@@ -572,15 +612,19 @@ impl SearchWorker {
             let retrieved_depth: i32 = tt_entry.depth as i32;
             
             if tt_entry.move_id != 0 {
-                let mut mv = ForwardMove::unpack(tt_entry.move_id);
-                mv.pv_score = -2_000_000;
-                pv_move_hint = mv;
+                let mut tt_move = ForwardMove::unpack(tt_entry.move_id);
+                tt_move.pv_score = -2_000_000;
+                pv_move_hint = tt_move;
             };
 
             if retrieved_depth >= Q_DEPTH_MARKER {
                 // EXACT: The true minimax value was found; return it immediately.
                 if tt_entry.flag == HashFlag::EXACT {
-                    return retrieved_score;
+                    return SearchResult { 
+                        score: retrieved_score, 
+                        best_move: pv_move_hint,
+                        was_aborted: false,
+                    };
                 }
                     
                 // LOWER BOUND: The true score is AT LEAST this high. 
@@ -594,7 +638,11 @@ impl SearchWorker {
 
                 // If the bounds adjusted alpha/beta enough to cause a cutoff, return early
                 if alpha >= beta {
-                    return retrieved_score;
+                    return SearchResult { 
+                        score: retrieved_score, 
+                        best_move: pv_move_hint, 
+                        was_aborted: false 
+                    };
                 }
             }
         }
@@ -604,16 +652,25 @@ impl SearchWorker {
         );
     
         if ply > MAX_DEPTH {
-            return static_eval;
+            return SearchResult { 
+                score: static_eval, 
+                best_move: ForwardMove::NULL_MOVE, 
+                was_aborted: false 
+            };
         }
 
         let king_in_check = self.chess_board.is_in_check(); 
         let mut best_score = if king_in_check { -INFINITY } else { static_eval };
 
         if !king_in_check {
-            // Only allow standing pat if your king is perfectly safe
+            // Q-Search is intended to check if there is a catastrophic horizon effect 
+            // it is not intended to check if it can improve the score
             if best_score >= beta {
-                return best_score;
+                return SearchResult { 
+                    score: best_score, 
+                    best_move: ForwardMove::NULL_MOVE, 
+                    was_aborted: false 
+                };
             }
             if best_score > alpha {
                 alpha = best_score;
@@ -630,7 +687,7 @@ impl SearchWorker {
         if king_in_check {
             // King IS in check: Generate all Moves
             self.chess_board.generate_moves(&mut gen_moves, pv_move_hint, 
-                depth, &self.killer_move_table);
+                0, &self.killer_move_table);
         } else {
             // King is NOT in check: Only generate captures, promotions, etc.
             self.filter_psuedo_legal_quiescence_moves(&mut gen_moves);
@@ -647,24 +704,30 @@ impl SearchWorker {
                 continue;
             }
 
-            // Move is Legal, Forward Move Time Cat
+            // Move is Legal
             legal_moves_played += 1;
 
             // Negamax search call
-            let score = -self.quiescence_search(-beta, -alpha, ply + 1, depth - 1);
+            let search_result = self.quiescence_search(-beta, -alpha, ply + 1);
             
-            // Undo Move + TimeCat
             self.process_backward_move();
 
-            if self.stop_signal.load(Ordering::Relaxed) {
-                return alpha;
+            if search_result.was_aborted {
+                return SearchResult { 
+                    score: 0, 
+                    best_move: ForwardMove::NULL_MOVE,
+                    was_aborted: true,
+                };
             }
 
-            // Fail-soft updates
+            let score = -search_result.score;
+            
             if score > best_score {
                 best_score = score;
                 best_move = *forward_move;
 
+                // Score is Greater than Alpha -> EXACT OR LOWERBOUND
+                // If no Score is greater than Alpha -> retain UPPERBOUND
                 if score > alpha {
                     alpha = score;
                     hash_flag = HashFlag::EXACT;
@@ -677,17 +740,34 @@ impl SearchWorker {
             }
         }
 
+        // CheckMate
         if legal_moves_played == 0 && king_in_check {
-            return -MATE_VALUE + ply;
+            let mate_score =  -MATE_VALUE + ply;
+            self.transposition_table.store(
+                hash, mate_score, ply, ForwardMove::NULL_MOVE, Q_DEPTH_MARKER, HashFlag::EXACT
+            );
+
+            return SearchResult { 
+                score: mate_score,
+                best_move: ForwardMove::NULL_MOVE, 
+                was_aborted: false 
+            };
         }
 
         if self.stop_signal.load(Ordering::Relaxed) {
-            return alpha; 
+            return SearchResult { 
+                score: alpha, 
+                best_move: ForwardMove::NULL_MOVE, 
+                was_aborted: true 
+            };
         }
 
-        // Store evaluation state inside the Transposition Table
         self.transposition_table.store(hash, best_score, ply, best_move, Q_DEPTH_MARKER, hash_flag);
-        best_score
+        return SearchResult { 
+            score: best_score, 
+            best_move,
+            was_aborted: false,
+        };
     }   
 
     // Filter all Capture & Promotion Moves
