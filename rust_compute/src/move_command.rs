@@ -20,7 +20,10 @@ impl ForwardMove {
         let raw_flag = ((packed >> 12) & 0x0F) as u8;
         
         // Map the raw integer back to your exact enum variants safely
-        let move_type = MoveFlag::try_from(raw_flag).unwrap_or(MoveFlag::NULL);
+        let move_type = match MoveFlag::try_from(raw_flag) {
+            Ok(flag) => flag,
+            Err(_) => MoveFlag::NULL,
+        };
 
         Self {
             start_sq: (packed & 0x3F) as u8,

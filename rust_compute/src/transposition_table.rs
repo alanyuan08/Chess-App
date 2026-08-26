@@ -37,6 +37,7 @@ pub struct TtBucket {
 pub struct TranspositionTable {
     buckets: Vec<TtBucket>,
     mask: usize,
+    age: u8
 }
 
 impl TranspositionTable {
@@ -58,33 +59,33 @@ impl TranspositionTable {
         Self {
             buckets,
             mask: final_count - 1,
+            age: 0,
         }
+    }
+
+    pub fn increment_age(&mut self) {
+        self.age = self.age.wrapping_add(1);
     }
 
     /// Packs raw components into a 64-bit word
     #[inline(always)]
-    fn pack_entry(move_id: u16, score: i16, depth: i32, flag: HashFlag, key: u64, ply: i32) -> u64 {
-        
-        let mut store_score = score;
-        if store_score > (MATE_VALUE - MAX_DEPTH) as i16 { 
-            store_score += ply as i16; 
-        } else if store_score < (-MATE_VALUE + MAX_DEPTH) as i16 { 
-            store_score -= ply as i16; 
-        }
+    fn pack_entry(&self, move_id: u16, score: i16, depth: i32, 
+        flag: HashFlag, key: u64) -> u64 {
         
         let tag_22 = (key >> 42) & 0x3F_FFFF; 
         let mut packed = 0u64;
+
         packed |= (move_id as u64) & 0xFFFF;
-        packed |= ((store_score as u16) as u64) << 16;
+        packed |= ((score as u16) as u64) << 16;
         packed |= ((depth as u8) as u64 & 0xFF) << 32;
-        packed |= tag_22 << 40;
+        packed |= (tag_22 & 0x3F_FFFF) << 40;
         packed |= (flag as u8 as u64) << 62;
         packed
     }
 
     /// Unpacks a 64-bit word into an operational TTEntry if the tag matches
     #[inline(always)]
-    fn unpack_entry(packed: u64, key: u64, ply: i32) -> TTEntry {
+    fn unpack_entry(&self, packed: u64, key: u64, ply: i32) -> TTEntry {
         let empty_entry = TTEntry {
             key: 0,
             move_id: 0,
@@ -107,12 +108,13 @@ impl TranspositionTable {
         let move_id = packed as u16;
         let score = ((packed >> 16) & 0xFFFF) as i16;
         let depth = ((packed >> 32) & 0xFF) as u8 as i8;
-        
         let flag_val = ((packed >> 62) & 0b11) as u8;
+
         let flag = match flag_val {
             0 => HashFlag::EXACT,
             1 => HashFlag::LOWERBOUND,
-            _ => HashFlag::UPPERBOUND,
+            2 => HashFlag::UPPERBOUND,
+            _ => HashFlag::EMPTY,
         };
 
         let mut entry = TTEntry {
@@ -123,9 +125,9 @@ impl TranspositionTable {
             flag,
         };
 
-        if entry.score > (MATE_VALUE - MAX_DEPTH) as i16 { 
+        if entry.score > MATE_THRESHOLD as i16 { 
             entry.score -= ply as i16; 
-        } else if entry.score < (-MATE_VALUE + MAX_DEPTH) as i16 { 
+        } else if entry.score < -MATE_THRESHOLD as i16 { 
             entry.score += ply as i16; 
         }
         entry
@@ -138,14 +140,14 @@ impl TranspositionTable {
         
         // Fetching depth_preferred pulls the entire TT_Bucket cache line into L1.
         let dp_packed = bucket.depth_preferred.load(Ordering::Relaxed);
-        let entry =  Self::unpack_entry(dp_packed, key, ply);
+        let entry = self.unpack_entry(dp_packed, key, ply);
         if entry.flag != HashFlag::EMPTY {
             return entry;
         }
 
         // Fetching always_replace is an immediate L1 hit (0 penalty)
         let ar_packed = bucket.always_replace.load(Ordering::Relaxed);
-        let entry = Self::unpack_entry(ar_packed, key, ply);
+        let entry = self.unpack_entry(ar_packed, key, ply);
         if entry.flag != HashFlag::EMPTY {
             return entry;
         }
@@ -171,49 +173,28 @@ impl TranspositionTable {
         } else {
             forward_move.pack()
         };
-        let new_packed = Self::pack_entry(move_id, score as i16, depth, flag, key, ply);
 
-        // --- SLOT 1: DEPTH PREFERRED ---
-        let current_dp = bucket.depth_preferred.load(Ordering::Relaxed);
-        let existing_dp_depth = ((current_dp >> 32) & 0xFF) as i8 as i32;
+        let mut storage_score = score;
+        if storage_score >= MATE_THRESHOLD {
+            storage_score += ply;
+        } else if storage_score <= -MATE_THRESHOLD {
+            storage_score -= ply;
+        }
 
-        if depth >= existing_dp_depth {
-            // If the new entry is deeper, overwrite depth_preferred.
-            // Demote the displaced deep entry down into the always_replace slot.
-            if bucket.depth_preferred.compare_exchange_weak(
-                current_dp,
-                new_packed,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ).is_ok() {
-                let current_ar = bucket.always_replace.load(Ordering::Relaxed);
-                let existing_ar_depth = ((current_ar >> 32) & 0xFF) as i8 as i32;
+        let packed_new = self.pack_entry(move_id, storage_score as i16, depth, flag, key);
 
-                // Only overwrite always_replace if our demoted data is higher quality
-                if current_dp != 0 && existing_dp_depth >= existing_ar_depth {
-                    let _ = bucket.always_replace.compare_exchange_weak(
-                        current_ar,
-                        current_dp,
-                        Ordering::Relaxed,
-                        Ordering::Relaxed,
-                    );
-                }
-            }
+        let packed_depth_slot = bucket.depth_preferred.load(Ordering::Relaxed);
+        let current_depth_entry = self.unpack_entry(packed_depth_slot, key, ply);
+
+        // Replacement Strategy Logic:
+        // Overwrite depth preferred if the slot is empty, if the old entry belongs to an 
+        // older engine search iteration, or if the new search depth is deeper.
+        if current_depth_entry.flag == HashFlag::EMPTY || (depth as i8) >= current_depth_entry.depth {
+            bucket.depth_preferred.store(packed_new, Ordering::Relaxed);
         } else {
-            // --- SLOT 2: FALLBACK TO ALWAYS REPLACE ---
-            // If it's too shallow for the depth slot, directly write it here.
-            let current_ar = bucket.always_replace.load(Ordering::Relaxed);
-            let existing_ar_depth = ((current_ar >> 32) & 0xFF) as i8 as i32;
-            
-            // Only store shallow entries if they are deeper than the current fallback entry
-            if depth >= existing_ar_depth {
-                let _ = bucket.always_replace.compare_exchange_weak(
-                    current_ar,
-                    new_packed,
-                    Ordering::Relaxed, // Correct: Purely atomic numeric update
-                    Ordering::Relaxed,
-                );
-            }
+            // If the depth slot is too high quality to overwrite, put this shallower entry
+            // (like a quiescence search result) into the secondary replacement tier.
+            bucket.always_replace.store(packed_new, Ordering::Relaxed);
         }
     }
 }

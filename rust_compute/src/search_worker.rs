@@ -218,7 +218,7 @@ impl SearchWorker {
     // A simple, linear-logarithmic approximation using integer division:
     // R increases slowly as depth and move count grow.
     #[inline]
-    fn calculate_lmr_reduction(&mut self, depth: i32, moves_tried: i32) -> i32 {
+    fn get_reduced_depth(&self, depth: i32, moves_tried: i32) -> i32 {
         // 1. Safe array bounds clamping
         let d = depth.clamp(0, 63) as usize;
         let m = moves_tried.clamp(0, 63) as usize;
@@ -235,7 +235,7 @@ impl SearchWorker {
         // 3. Calculate the target depth
         let mut reduced_depth = depth - 1 - reduction;
 
-        // 4. ✅ PERFECT LOCK: Ensure we always search at least depth 1, 
+        // 4. Safety lock: Ensure we always search at least depth 1,
         // and never search deeper than a standard depth step (depth - 1)
         if reduced_depth < 1 {
             reduced_depth = 1;
@@ -276,31 +276,17 @@ impl SearchWorker {
     #[inline]
     fn calculate_nmp_reduction(&self, depth: i32, static_eval: i32, beta: i32) -> i32 {
         let base_reduction = 3 + (depth / 4);
-        let eval_bonus = ((beta - static_eval) / 200).clamp(0, 2);
+        
+        // FIX: Changed to (static_eval - beta) so a higher score increases the reduction!
+        let eval_bonus = ((static_eval - beta) / 200).clamp(0, 2);
         
         base_reduction + eval_bonus
     }
 
-    // NMP Static Eval to determine cuttoff eligability
+    // Static Eval
     #[inline]
-    fn static_eval(&self) -> i32 {
-        let static_white = (self.chess_board.rooks[0].count_ones() as i32 * 500)
-            + (self.chess_board.knights[0].count_ones() as i32 * 300) 
-            + (self.chess_board.bishops[0].count_ones() as i32 * 300) 
-            + (self.chess_board.pawns[0].count_ones() as i32 * 100) 
-            + (self.chess_board.queens[0].count_ones() as i32 * 900);
-
-        let static_black = (self.chess_board.rooks[1].count_ones() as i32 * 500)
-            + (self.chess_board.knights[1].count_ones() as i32 * 300) 
-            + (self.chess_board.bishops[1].count_ones() as i32 * 300) 
-            + (self.chess_board.pawns[1].count_ones() as i32 * 100) 
-            + (self.chess_board.queens[1].count_ones() as i32 * 900);
-            
-        // 3. Return score relative to whoever's turn it is right now
-        match self.chess_board.active_player() {
-            Side::WHITE => static_white - static_black,
-            Side::BLACK => static_black - static_white,
-        }
+    fn static_eval(&mut self) -> i32 {
+        self.chess_board.evaluate(&mut self.thread_buffer)
     }
 
     // Process Negamax
@@ -359,31 +345,34 @@ impl SearchWorker {
             };
 
             if retrieved_depth >= depth {
-                // EXACT: The true minimax value was found; return it immediately.
-                if tt_entry.flag == HashFlag::EXACT {
-                    return SearchResult {
-                        score: retrieved_score,
-                        best_move: pv_move_hint,
-                        was_aborted: false,
-                    };
-                }
-                    
-                // LOWER BOUND: The true score is AT LEAST this high. 
-                else if tt_entry.flag == HashFlag::LOWERBOUND {
-                    alpha = cmp::max(alpha, retrieved_score);
-                }
-                // UPPER BOUND: The true score is AT MOST this high.
-                else if tt_entry.flag == HashFlag::UPPERBOUND {
-                    beta = cmp::min(beta, retrieved_score);
-                }  
+                // This is likely a 3 move repetition
+                if retrieved_score != 0 {
+                    // EXACT: The true minimax value was found; return it immediately.
+                    if tt_entry.flag == HashFlag::EXACT {
+                        return SearchResult {
+                            score: retrieved_score,
+                            best_move: pv_move_hint,
+                            was_aborted: false,
+                        };
+                    }
+                        
+                    // LOWER BOUND: The true score is AT LEAST this high. 
+                    else if tt_entry.flag == HashFlag::LOWERBOUND {
+                        alpha = cmp::max(alpha, retrieved_score);
+                    }
+                    // UPPER BOUND: The true score is AT MOST this high.
+                    else if tt_entry.flag == HashFlag::UPPERBOUND {
+                        beta = cmp::min(beta, retrieved_score);
+                    }  
 
-                // If the bounds adjusted alpha/beta enough to cause a cutoff, return early
-                if alpha >= beta {
-                    return SearchResult {
-                        score: retrieved_score,
-                        best_move: pv_move_hint,
-                        was_aborted: false,
-                    };
+                    // If the bounds adjusted alpha/beta enough to cause a cutoff, return early
+                    if alpha >= beta {
+                        return SearchResult {
+                            score: retrieved_score,
+                            best_move: pv_move_hint,
+                            was_aborted: false,
+                        };
+                    }
                 }
             }
         }
@@ -424,7 +413,7 @@ impl SearchWorker {
                 self.process_forward_move(null_move);
                 
                 let null_result = self.negamax(next_depth, ply + 1, -beta, -beta + 1, ForwardMove::NULL_MOVE, false);
-                let mut null_score = -null_result.score;
+                let null_score = -null_result.score;
                 
                 self.process_backward_move();
 
@@ -440,24 +429,24 @@ impl SearchWorker {
                 if null_score >= beta {
                     if self.stop_signal.load(Ordering::Relaxed) {
                          return SearchResult { 
-                            score: alpha, 
+                            score: 0, 
                             best_move: ForwardMove::NULL_MOVE, 
                             was_aborted: true 
                         };
                     }
 
-                    if null_score >= MATE_THRESHOLD {
-                        null_score = beta; 
-                    } else if null_score <= -MATE_THRESHOLD {
-                        null_score = -beta;
-                    }
+                    let final_nmp_score = if null_score >= MATE_THRESHOLD { 
+                        beta 
+                    } else { 
+                        null_score 
+                    };
 
                     self.transposition_table.store(
-                        hash, null_score, ply, ForwardMove::NULL_MOVE, depth, HashFlag::LOWERBOUND
+                        hash, final_nmp_score, ply, ForwardMove::NULL_MOVE, depth, HashFlag::LOWERBOUND
                     );
 
                     return SearchResult { 
-                        score: null_score, 
+                        score: final_nmp_score, 
                         best_move: ForwardMove::NULL_MOVE, 
                         was_aborted: false 
                     };
@@ -488,13 +477,15 @@ impl SearchWorker {
             // LMR Reduction
             let mut negamax_result;
             if lmr_eligibility {
-                let reduced_depth = self.calculate_lmr_reduction(depth, moves_tried);
-                negamax_result = self.negamax(reduced_depth, ply + 1,  -alpha - 1, -alpha, ForwardMove::NULL_MOVE, true);
-
+                let reduced_depth = self.get_reduced_depth(depth, moves_tried);
+                negamax_result = self.negamax(reduced_depth, ply + 1, -alpha - 1, -alpha, ForwardMove::NULL_MOVE, true);
+                
+                // If the reduced search failed high, we must re-search at full depth
                 if !negamax_result.was_aborted && -negamax_result.score > alpha {
                     negamax_result = self.negamax(depth - 1, ply + 1, -beta, -alpha, ForwardMove::NULL_MOVE, true);
                 }
             } else {
+                // Normal search without reduction
                 negamax_result = self.negamax(depth - 1, ply + 1, -beta, -alpha, ForwardMove::NULL_MOVE, true);
             }
 
@@ -534,31 +525,22 @@ impl SearchWorker {
 
         // 4. Handle terminal nodes cleanly if no legal moves exist
         if legal_moves_played == 0 {
-            if king_in_check {
-                let mate_score = -MATE_VALUE + ply;
-
-                self.transposition_table.store(
-                    hash, mate_score, ply, ForwardMove::NULL_MOVE, depth, HashFlag::EXACT
-                );
-
-                // Checkmate
-                return SearchResult { 
-                    score: mate_score, 
-                    best_move: ForwardMove::NULL_MOVE,
-                    was_aborted: false
-                };
+            let terminal_score = if king_in_check {
+                -MATE_VALUE + ply
             } else {
-                self.transposition_table.store(
-                    hash, 0, ply, ForwardMove::NULL_MOVE, depth, HashFlag::EXACT
-                );
+                0
+            };
 
-                // Stalemate
-                return SearchResult { 
-                    score: 0, 
-                    best_move: ForwardMove::NULL_MOVE,
-                    was_aborted: false,
-                };
-            }
+            self.transposition_table.store(
+                hash, terminal_score, ply, ForwardMove::NULL_MOVE, depth, HashFlag::EXACT
+            );
+
+            // Checkmate 
+            return SearchResult { 
+                score: terminal_score, 
+                best_move: ForwardMove::NULL_MOVE,
+                was_aborted: false
+            };
         }
 
         if self.stop_signal.load(Ordering::Relaxed) {
@@ -582,6 +564,7 @@ impl SearchWorker {
 
     // Quiescence Search -> Q-Search only uses Score and was_aborted. 
     fn quiescence_search(&mut self, mut alpha: i32, mut beta: i32, ply: i32) -> SearchResult {        
+        // 1. Halt Signal
         if self.nodes_processed & 0x3FFF == 0 && self.stop_signal.load(Ordering::Relaxed) {
             return SearchResult { 
                 score: 0, 
@@ -593,7 +576,7 @@ impl SearchWorker {
         // Nodes Processed
         self.nodes_processed += 1;
 
-        // Three Move Repetition Draw
+        // 2. Three Move Repetition Draw
         if self.is_three_move_repetition() {
             return SearchResult { 
                 score: 0, 
@@ -602,10 +585,11 @@ impl SearchWorker {
             };
         }
 
-        let mut pv_move_hint = ForwardMove::NULL_MOVE;
         let hash = self.chess_board.zobrist_hash();
-
+        let mut pv_move_hint = ForwardMove::NULL_MOVE;
         const Q_DEPTH_MARKER: i32 = -1;
+
+        // 3. Tranposition Table
         let tt_entry = self.transposition_table.probe(hash, ply);
         if tt_entry.flag != HashFlag::EMPTY {
             let retrieved_score: i32 = tt_entry.score as i32;
@@ -618,131 +602,126 @@ impl SearchWorker {
             };
 
             if retrieved_depth >= Q_DEPTH_MARKER {
-                // EXACT: The true minimax value was found; return it immediately.
-                if tt_entry.flag == HashFlag::EXACT {
-                    return SearchResult { 
-                        score: retrieved_score, 
-                        best_move: pv_move_hint,
-                        was_aborted: false,
-                    };
-                }
-                    
-                // LOWER BOUND: The true score is AT LEAST this high. 
-                else if tt_entry.flag == HashFlag::LOWERBOUND {
-                    alpha = cmp::max(alpha, retrieved_score);
-                }
-                // UPPER BOUND: The true score is AT MOST this high.
-                else if tt_entry.flag == HashFlag::UPPERBOUND {
-                    beta = cmp::min(beta, retrieved_score);
-                }  
+                // This is likely a 3 move repetition
+                if retrieved_score != 0 {
+                    // EXACT: The true minimax value was found; return it immediately.
+                    if tt_entry.flag == HashFlag::EXACT {
+                        return SearchResult { 
+                            score: retrieved_score, 
+                            best_move: pv_move_hint,
+                            was_aborted: false,
+                        };
+                    }
+                        
+                    // LOWER BOUND: The true score is AT LEAST this high. 
+                    else if tt_entry.flag == HashFlag::LOWERBOUND {
+                        alpha = cmp::max(alpha, retrieved_score);
+                    }
+                    // UPPER BOUND: The true score is AT MOST this high.
+                    else if tt_entry.flag == HashFlag::UPPERBOUND {
+                        beta = cmp::min(beta, retrieved_score);
+                    }  
 
-                // If the bounds adjusted alpha/beta enough to cause a cutoff, return early
-                if alpha >= beta {
-                    return SearchResult { 
-                        score: retrieved_score, 
-                        best_move: pv_move_hint, 
-                        was_aborted: false 
-                    };
-                }
-            }
-        }
-
-        let static_eval = self.chess_board.evaluate(
-            &mut self.thread_buffer
-        );
-    
-        if ply > MAX_DEPTH {
-            return SearchResult { 
-                score: static_eval, 
-                best_move: ForwardMove::NULL_MOVE, 
-                was_aborted: false 
-            };
-        }
-
-        let king_in_check = self.chess_board.is_in_check(); 
-        let mut best_score = if king_in_check { -INFINITY } else { static_eval };
-
-        if !king_in_check {
-            // Q-Search is intended to check if there is a catastrophic horizon effect 
-            // it is not intended to check if it can improve the score
-            if best_score >= beta {
-                return SearchResult { 
-                    score: best_score, 
-                    best_move: ForwardMove::NULL_MOVE, 
-                    was_aborted: false 
-                };
-            }
-            if best_score > alpha {
-                alpha = best_score;
-            }
-        }
-
-        let mut legal_moves_played = 0;
-        let mut best_move = ForwardMove::NULL_MOVE;
-        let mut hash_flag = HashFlag::UPPERBOUND;
-
-        // Generate strictly legal tactical moves directly onto the global stack
-        let mut gen_moves = ArrayVec::<ForwardMove, 256>::new();
-
-        if king_in_check {
-            // King IS in check: Generate all Moves
-            self.chess_board.generate_moves(&mut gen_moves, pv_move_hint, 
-                0, &self.killer_move_table);
-        } else {
-            // King is NOT in check: Only generate captures, promotions, etc.
-            self.filter_psuedo_legal_quiescence_moves(&mut gen_moves);
-        }
-
-        // Quiscence Search
-        for forward_move in &gen_moves {
-            // Push move (handles UCI, board state, hash, and history internally)
-            self.process_forward_move(*forward_move);
-            
-            // Psuedo legal move exposes check, undo move
-            if self.chess_board.is_previous_player_king_in_check() {
-                self.process_backward_move();
-                continue;
-            }
-
-            // Move is Legal
-            legal_moves_played += 1;
-
-            // Negamax search call
-            let search_result = self.quiescence_search(-beta, -alpha, ply + 1);
-            
-            self.process_backward_move();
-
-            if search_result.was_aborted {
-                return SearchResult { 
-                    score: 0, 
-                    best_move: ForwardMove::NULL_MOVE,
-                    was_aborted: true,
-                };
-            }
-
-            let score = -search_result.score;
-            
-            if score > best_score {
-                best_score = score;
-                best_move = *forward_move;
-
-                // Score is Greater than Alpha -> EXACT OR LOWERBOUND
-                // If no Score is greater than Alpha -> retain UPPERBOUND
-                if score > alpha {
-                    alpha = score;
-                    hash_flag = HashFlag::EXACT;
-
-                    if score >= beta { 
-                        hash_flag = HashFlag::LOWERBOUND;
-                        break;
+                    // If the bounds adjusted alpha/beta enough to cause a cutoff, return early
+                    if alpha >= beta {
+                        return SearchResult { 
+                            score: retrieved_score, 
+                            best_move: pv_move_hint, 
+                            was_aborted: false 
+                        };
                     }
                 }
             }
         }
 
-        // CheckMate
+        // 4. Standing Pat 
+        let king_in_check = self.chess_board.is_in_check(); 
+        let mut best_score = -INFINITY; 
+        
+        let mut best_move = ForwardMove::NULL_MOVE;
+        let mut hash_flag = HashFlag::UPPERBOUND;
+
+        if !king_in_check {
+            // Q-Search is intended to check if there is a catastrophic horizon effect 
+            // it is not intended to check if it can improve the score
+            let static_eval = self.static_eval();
+            best_score = static_eval;
+
+            if best_score > alpha {
+                alpha = best_score;
+                hash_flag = HashFlag::EXACT;
+
+                if best_score >= beta {
+                    hash_flag = HashFlag::LOWERBOUND;
+                }
+            }
+        }
+
+        // Generate strictly legal tactical moves directly onto the global stack
+        let mut gen_moves = ArrayVec::<ForwardMove, 256>::new();
+        let mut legal_moves_played = 0;
+
+        if best_score < beta {
+            if king_in_check {
+                // King IS in check: Generate all Moves
+                self.chess_board.generate_moves(&mut gen_moves, pv_move_hint, 
+                    0, &self.killer_move_table);
+            } else {
+                // King is NOT in check: Only generate captures, promotions, etc.
+                self.filter_psuedo_legal_quiescence_moves(&mut gen_moves);
+            }
+
+            // Quiscence Search
+            for forward_move in &gen_moves {
+                // Push move (handles UCI, board state, hash, and history internally)
+                self.process_forward_move(*forward_move);
+                
+                // Psuedo legal move exposes check, undo move
+                if self.chess_board.is_previous_player_king_in_check() {
+                    self.process_backward_move();
+                    continue;
+                }
+
+                // Move is Legal
+                legal_moves_played += 1;
+
+                // Q-search Call
+                let search_result = self.quiescence_search(-beta, -alpha, ply + 1);
+                
+                self.process_backward_move();
+
+                if search_result.was_aborted {
+                    return SearchResult { 
+                        score: 0, 
+                        best_move: ForwardMove::NULL_MOVE,
+                        was_aborted: true,
+                    };
+                }
+
+                let score = -search_result.score;
+                
+                if score > best_score {
+                    best_score = score;
+                    best_move = *forward_move;
+
+                    // Score is Greater than Alpha -> EXACT OR LOWERBOUND
+                    // If no Score is greater than Alpha -> retain UPPERBOUND
+                    if score > alpha {
+                        alpha = score;
+                        hash_flag = HashFlag::EXACT;
+
+                        if score >= beta { 
+                            hash_flag = HashFlag::LOWERBOUND;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // EndGame
         if legal_moves_played == 0 && king_in_check {
-            let mate_score =  -MATE_VALUE + ply;
+            let mate_score = -MATE_VALUE + ply;
             self.transposition_table.store(
                 hash, mate_score, ply, ForwardMove::NULL_MOVE, Q_DEPTH_MARKER, HashFlag::EXACT
             );
@@ -752,11 +731,11 @@ impl SearchWorker {
                 best_move: ForwardMove::NULL_MOVE, 
                 was_aborted: false 
             };
-        }
+    }
 
         if self.stop_signal.load(Ordering::Relaxed) {
             return SearchResult { 
-                score: alpha, 
+                score: 0, 
                 best_move: ForwardMove::NULL_MOVE, 
                 was_aborted: true 
             };
@@ -775,7 +754,7 @@ impl SearchWorker {
         gen_moves: &mut ArrayVec::<ForwardMove, 256>
     ) {
         self.chess_board.generate_moves(gen_moves, ForwardMove::NULL_MOVE, 
-            -1, &self.killer_move_table);
+            0, &self.killer_move_table);
         gen_moves.retain(|cmd| {
             matches!(
                 cmd.move_type,
