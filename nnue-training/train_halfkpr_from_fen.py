@@ -437,23 +437,50 @@ def train_nnue_on_fens():
         outputs=output
     )
 
-    def stockfish_nnue_probability_mse_loss(y_true, y_pred):
+    def stockfish_bce_pawn_loss(y_true, y_pred):
+        """
+        Input: y_true and y_pred in raw Pawn Units (e.g., +1.0, -2.5)
+        Process: Scales to centipawns, applies Stockfish constant, calculates Binary Cross Entropy
+        """
+        # 1. Convert raw pawn units to centipawns
+        y_true_cp = y_true * 100.0
+        y_pred_cp = y_pred * 100.0
+        
+        # 2. Official Stockfish constant for centipawns
         SF_CONSTANT = 0.575653
-
-        # Sigmoid Probability Loss
-        target_prob = 1.0 / (1.0 + tf.math.exp(-SF_CONSTANT * y_true))
-        pred_prob = 1.0 / (1.0 + tf.math.exp(-SF_CONSTANT * y_pred))
-        prob_loss = tf.reduce_mean(tf.square(target_prob - pred_prob))
-
-        # Small Pure Linear Score Loss (Prevents close-position blindness)
-        # This acts as a safety net so the network always seeks exact pawn values
-        linear_loss = tf.reduce_mean(tf.abs(y_true - y_pred)) * 0.05 
-
-        return prob_loss + linear_loss
+        
+        # 3. Scale the raw scores into logits
+        target_logits = y_true_cp * SF_CONSTANT
+        pred_logits = y_pred_cp * SF_CONSTANT
+        
+        # 4. Turn the target logit into a clean 0 to 1 probability
+        target_prob = tf.math.sigmoid(target_logits)
+        
+        # 5. Calculate Cross-Entropy safely using logits to prevent math breakdown
+        bce_loss = tf.reduce_mean(
+            tf.nn.sigmoid_cross_entropy_with_logits(labels=target_prob, logits=pred_logits)
+        )
     
+        return bce_loss
+    
+    def centipawn_diff_metric(y_true, y_pred):
+        # 1. Convert pawn units to centipawns
+        y_true_cp = y_true * 100.0
+        y_pred_cp = y_pred * 100.0
+        
+        # 2. Get the raw distance (difference) between them
+        raw_difference = y_true_cp - y_pred_cp
+        
+        # 3. Strip the negative signs so they don't cancel out
+        absolute_difference = tf.abs(raw_difference)
+        
+        # 4. Average them for the batch so you get one clean number
+        return tf.reduce_mean(absolute_difference)
+
     model.compile(
         optimizer=keras.optimizers.Adam(learning_rate=0.001),
-        loss=stockfish_nnue_probability_mse_loss
+        loss=stockfish_bce_pawn_loss,
+        metrics=[centipawn_diff_metric] 
     )
 
     # 90 / 10 Split for Training / Validation Shards
