@@ -76,11 +76,10 @@
 
 ## 5. Playing Level
 
-The Chess AI has been tested against ELO 3200+ Chess.com bots.
+The Chess AI has been tested against ELO 3200+ Chess.com bots - These bots are inflated and used primarily as a smoke test. 
 
 - [WIN - ELO 3200 Bot](https://www.chess.com/analysis/game/computer/1617707258/analysis)
 - [WIN - ELO 3200 Bot](https://www.chess.com/analysis/game/computer/1978599994/analysis)
-- [DRAW - ELO 3200 Bot](https://www.chess.com/analysis/game/computer/1574164820/analysis)
 
 - **Future Roadmap:** This engine has not been officially ratified by Computer Chess Rating Lists
 
