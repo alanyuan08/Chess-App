@@ -60,7 +60,7 @@
     - *Activation:* Clipped/Bounded Linear ReLU ($\text{ReLU1}$) bounded strictly between `0.0` and `1.0`.
   - **Output Layer:** Combines $(32, 1)$ outputs down to a single evaluation scalar using 8-bit weights (`i8`) and 32-bit biases (`i32`).
     - *Activation:* None
-  - **Loss Function:** Custom Mean Squared Error Function where the model output is converted from centipawn to Loss/ Win [0, 1] using the function ($\text{1.0 / (1.0 + tf.math.exp(SF_CONSTANT * centipawn))}$)
+  - **Loss Function:** Custom Mean Squared Error Function where the model output is converted from centipawn to Loss/ Win [0, 1] using the function ($\text{1.0 / (1.0 + tf.math.exp(SF-CONSTANT * centipawn))}$)
 
   SF_CONSTANT = 0.0075
 
@@ -72,7 +72,7 @@
 
 - **Training Process:** The model is trained using 25 Epoch, with 1000 Steps and 4096 FEN training values in each step. 
 
-  The model applies a Sigmoid (with the SF_CONSTANT = 0.0075) to the score output as a win percentage - 1.0 (win), 0.5 (draw), and 0.0 (loss) and uses a Mean-Squared Error Function using an Adam Optimizer with an initial learning rate of 0.001. 
+  The model applies a Sigmoid (with the SF-CONSTANT = 0.0075) to the score output as a win percentage - 1.0 (win), 0.5 (draw), and 0.0 (loss) and uses a Mean-Squared Error Function using an Adam Optimizer with an initial learning rate of 0.001. 
 
 ## 5. Playing Level
 
