@@ -64,7 +64,6 @@ def process_shard_worker(stream_fn, data_queue, stop_event, dataset_name, shards
         # Expand numeric spaces in FEN to empty string dots for alignment
         rows = board_part.split('/')
 
-        # Rank 1 (A1) is 0 -> Remove this later
         rows.reverse()
 
         clean_board = ""
@@ -130,41 +129,39 @@ def process_shard_worker(stream_fn, data_queue, stop_event, dataset_name, shards
 
     def q_search(b, alpha, beta, depth=0, max_depth=12):
         """
-        Quiescence Search that resolves checks by searching all moves, 
-        but uses a strict depth limit to prevent infinite recursion.
+        Corrected Negamax Quiescence Search. 
+        Expects alpha and beta to be passed from the CURRENT player's perspective.
         """
-        # Force a cutoff if the tactics go too deep
+        # 1. Force a cutoff if tactics go too deep to prevent infinite recursion
         if depth >= max_depth:
             return static_evaluate(b)
 
         in_check = b.is_check()
         static_eval = static_evaluate(b)
         
-        # Standing pat is only allowed if we are NOT in check
+        # 2. Standing Pat (Only allowed if our King is safe)
         if not in_check:
             if static_eval >= beta:
-                return beta
+                return static_eval
             if static_eval > alpha:
                 alpha = static_eval
 
-        # Rule: If in check, generate ALL moves. If safe, generate only tactical moves.
+        # 3. Tactical Move Search Loop
         for move in b.generate_pseudo_legal_moves(b.turn):
             is_tactical = b.is_capture(move) or move.promotion
             
-            # If we are in check, we must look at ALL moves to find an evasion.
-            # If we are not in check, we only look at tactical moves.
+            # If in check, evaluate all moves to find an escape. Otherwise, only filter tactical strikes.
             if in_check or is_tactical:
                 
                 if not b.is_legal(move):
                     continue
                     
                 b.push(move)
-                # Pass depth + 1 to keep track of the search depth
                 score = -q_search(b, -beta, -alpha, depth + 1, max_depth)
                 b.pop()
 
                 if score >= beta:
-                    return beta
+                    return score
                 if score > alpha:
                     alpha = score
                     
@@ -172,19 +169,6 @@ def process_shard_worker(stream_fn, data_queue, stop_event, dataset_name, shards
     
     def is_invalid_training_row(depth_str, fen_string: str) -> bool:
         # Split the FEN string into its component fields
-        fen_parts = fen_string.split()
-        
-        # 1. Castling Rights Check: If any active castling flag exists, discard the row
-        castling_field = fen_parts[2]
-        if castling_field != "-":
-            return True 
-        
-        # 2. En Passant Check: If an en passant target square exists, discard the row
-        en_passant_field = fen_parts[3]
-        if en_passant_field != "-":
-            return True
-
-        # 3. Depth & Phase Check
         depth = int(depth_str)
         fen_pieces_count = get_endgame_piece_count(fen_string)
         if fen_pieces_count <= 12:
@@ -230,22 +214,23 @@ def process_shard_worker(stream_fn, data_queue, stop_event, dataset_name, shards
 
             board = chess.Board(fen)
             
-            # Rule 1: Skip if the side to move is currently under check
-            if board.is_check():
+            # Rule 1: Skip for Check / Stalemate / Insufficieng Material
+            if board.is_check() or board.is_stalemate() or board.is_insufficient_material():
                 continue
 
-            # Rule 2: Run a Q-search to calculate tactical resolution
+            # Rule 2: Filter out -/+ 1200 as we detected massive scores assigned to draws / mate sequences
+            score_target = float(raw_score)
+            if abs(score_target) >= 1200:
+                continue
+
+            # Rule 3: Run a Q-search to calculate tactical resolution
             # Both functions output absolute, White-centric scores.
             static_score = static_evaluate(board)
             q_score = q_search(board, -float('inf'), float('inf'))
             
-            # If the score swings by more than 15 centipawns during tactical resolution,
-            # it means there are pending captures/promotions. Skip the position.
-            if abs(static_score - q_score) > 15:
+            if abs(static_score - q_score) > 120:
                 continue
 
-            # 3. Score Normalization & Sigmoid Target Mapping
-            score_target = float(raw_score)
             if is_black_turn:
                 score_target = -score_target
                 
@@ -405,7 +390,8 @@ def train_nnue_on_fens():
     stm_input = layers.Input(shape=(1,), dtype="bool", name="side_to_move")
 
     # 2. Shared Accumulator Layer (HalfK Virtual Weights)
-    accumulator = layers.Dense(256, activation=None, kernel_initializer='random_normal', name="accumulator_layer") 
+    nnue_init = keras.initializers.HeNormal()
+    accumulator = layers.Dense(256, activation=None, kernel_initializer=nnue_init, name="accumulator_layer") 
     w_acc = accumulator(white_input)
     b_acc = accumulator(black_input)
 
@@ -438,23 +424,50 @@ def train_nnue_on_fens():
         outputs=output
     )
 
-    def stockfish_nnue_probability_mse_loss(y_true, y_pred):
-        SF_CONSTANT = 0.575653
+    def stockfish_nnue_pure_loss(y_true, y_pred):
+        """
+        Official Stockfish Style NNUE Loss Function.
+        Calculates Mean Squared Error in WDL (probability) space.
+        """
+        # 1. Scale inputs to centipawns
+        y_true_cp = y_true * 100.0
+        y_pred_cp = y_pred * 100.0
+        
+        SF_SCALE = 0.0075
+        
+        # 3. Pass both target and prediction through a sigmoid to move to WDL space
+        target_wdl = tf.math.sigmoid(y_true_cp * SF_SCALE)
+        pred_wdl = tf.math.sigmoid(y_pred_cp * SF_SCALE)
+        
+        # 4. Standard Mean Squared Error in probability space
+        loss = tf.math.squared_difference(target_wdl, pred_wdl)
+        
+        return tf.reduce_mean(loss)
 
-        # Sigmoid Probability Loss
-        target_prob = 1.0 / (1.0 + tf.math.exp(-SF_CONSTANT * y_true))
-        pred_prob = 1.0 / (1.0 + tf.math.exp(-SF_CONSTANT * y_pred))
-        prob_loss = tf.reduce_mean(tf.square(target_prob - pred_prob))
+    def close_position_error_3(y_true, y_pred):
+        """
+        Tracks micro-accuracy in close, quiet positions. 
+        Caps errors at 3.0 pawns so large material blunders don't ruin the view.
+        """
+        SCALE_THRESHOLD = 3.0
+        raw_error = tf.abs(y_true - y_pred)
+        return tf.reduce_mean(tf.math.tanh(raw_error / SCALE_THRESHOLD) * SCALE_THRESHOLD)
 
-        # Small Pure Linear Score Loss (Prevents close-position blindness)
-        # This acts as a safety net so the network always seeks exact pawn values
-        linear_loss = tf.reduce_mean(tf.abs(y_true - y_pred)) * 0.05 
+    def general_position_error_10(y_true, y_pred):
+        """
+        Tracks macro-accuracy across general play, including material differences.
+        Caps errors at 10.0 pawns to capture full piece values up to a Queen.
+        """
+        SCALE_THRESHOLD = 10.0
+        raw_error = tf.abs(y_true - y_pred)
+        return tf.reduce_mean(tf.math.tanh(raw_error / SCALE_THRESHOLD) * SCALE_THRESHOLD)
 
-        return prob_loss + linear_loss
-    
+
+    # --- Compile the model ---
     model.compile(
         optimizer=keras.optimizers.Adam(learning_rate=0.001),
-        loss=stockfish_nnue_probability_mse_loss
+        loss=stockfish_nnue_pure_loss,
+        metrics=[close_position_error_3, general_position_error_10]
     )
 
     # 90 / 10 Split for Training / Validation Shards
@@ -540,10 +553,10 @@ def train_nnue_on_fens():
 
     model.fit(
         train_dataset, 
-        steps_per_epoch=976,
+        steps_per_epoch=1000,
         epochs=25, 
         validation_data=val_dataset,
-        validation_steps=40,
+        validation_steps=100,
         callbacks=[checkpoint_cb, lr_scheduler_cb, cleanup_cb]
     )
 

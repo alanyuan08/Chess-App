@@ -20,7 +20,10 @@ impl ForwardMove {
         let raw_flag = ((packed >> 12) & 0x0F) as u8;
         
         // Map the raw integer back to your exact enum variants safely
-        let move_type = MoveFlag::try_from(raw_flag).unwrap_or(MoveFlag::NULL);
+        let move_type = match MoveFlag::try_from(raw_flag) {
+            Ok(flag) => flag,
+            Err(_) => MoveFlag::NULL,
+        };
 
         Self {
             start_sq: (packed & 0x3F) as u8,
@@ -200,17 +203,13 @@ pub fn get_feature_index(king_sq: u8, piece: BoardPiece,
     piece_sq: u8, is_black_active: bool) -> usize {
     let piece_type = piece.to_nnue_type();
 
-    // Fen Notation used is training assumes incorrect order
-    let king_sq_flip = king_sq ^ 56;
-    let piece_sq_flip = piece_sq ^ 56;
-
     let (k_sq, p_sq, p_type) = if is_black_active {
         // From Black's perspective, flip the board vertically and invert piece colors
         // In Python layout: White pieces are 0..5, Black pieces are 6..11
         let inverted_type = (piece_type + 6) % 12;
-        (flip_square(king_sq_flip), flip_square(piece_sq_flip), inverted_type)
+        (flip_square(king_sq), flip_square(piece_sq), inverted_type)
     } else {
-        (king_sq_flip, piece_sq_flip, piece_type)
+        (king_sq, piece_sq, piece_type)
     };
 
     // Index Formula: (KingSquare * 768) + (PieceType * 64) + PieceSquare
@@ -236,20 +235,20 @@ pub fn is_none(piece: BoardPiece) -> bool {
 pub fn piece_value(piece_type: BoardPiece) -> i32 {
     match piece_type {
         BoardPiece::WPAWN | BoardPiece::BPAWN => {
-            1
+            100
         },
         BoardPiece::WBISHOP | BoardPiece::BBISHOP |
         BoardPiece::WKNIGHT | BoardPiece::BKNIGHT => {
-            2
+            300
         },
         BoardPiece::WROOK | BoardPiece::BROOK => {
-            3
+            500
         },
         BoardPiece::WQUEEN | BoardPiece::BQUEEN => {
-            4
+            900
         },
         BoardPiece::WKING | BoardPiece::BKING => {
-            5
+            20000
         },
         BoardPiece::NONE => {
             panic!("Passed None");

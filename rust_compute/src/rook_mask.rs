@@ -232,8 +232,13 @@ pub fn compute_rook_magic(sq: usize) -> u64 {
     }
 }
 
-pub fn rook_moves(chess_board: &mut ChessBoard, player_index: usize, opp_index: usize,
-    moves: &mut ArrayVec::<ForwardMove, 256>)  {
+pub fn rook_moves(
+    chess_board: &mut ChessBoard, 
+    player_index: usize, 
+    opp_index: usize,
+    moves: &mut ArrayVec::<ForwardMove, 256>,
+    only_tactical: bool
+)  {
 
     let mut rook_bitboard = chess_board.rooks[player_index];
 
@@ -241,25 +246,33 @@ pub fn rook_moves(chess_board: &mut ChessBoard, player_index: usize, opp_index: 
         let rook = rook_bitboard.trailing_zeros() as u8;
 
         let rook_attack_paths = rook_attack_paths(rook, chess_board.occupied);
-        let mut rook_moves = rook_attack_paths & !chess_board.occupied;
-        let mut rook_captures = rook_attack_paths & chess_board.all_pieces[opp_index];
 
-        while rook_moves != 0 {
-            let target = rook_moves.trailing_zeros() as u8;
-            moves.push(ForwardMove { 
-                start_sq: rook, end_sq: target, move_type: MoveFlag::MOVE, pv_score: 1000 
-            });
-            rook_moves &= rook_moves - 1;
+        if !only_tactical {
+            let mut rook_moves = rook_attack_paths & !chess_board.occupied;
+            while rook_moves != 0 {
+                let target = rook_moves.trailing_zeros() as u8;
+                moves.push(ForwardMove { 
+                    start_sq: rook, 
+                    end_sq: target, 
+                    move_type: MoveFlag::MOVE, 
+                    pv_score: 0 
+                });
+                rook_moves &= rook_moves - 1;
+            }
         }
 
+        let mut rook_captures = rook_attack_paths & chess_board.all_pieces[opp_index];
         while rook_captures != 0 {
             let target = rook_captures.trailing_zeros() as u8;
 
             let captured_piece_val = piece_value(chess_board.mailbox_piece(target));
-            let pv_score = 100 - (captured_piece_val * 10) + 3; 
+            let pv_score = 10_000 + (captured_piece_val * 10) - 500; 
 
             moves.push(ForwardMove { 
-                start_sq: rook, end_sq: target, move_type: MoveFlag::CAPTURE, pv_score 
+                start_sq: rook, 
+                end_sq: target, 
+                move_type: MoveFlag::CAPTURE, 
+                    pv_score 
             });
             rook_captures &= rook_captures - 1;
         }
