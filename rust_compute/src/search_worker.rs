@@ -834,6 +834,6 @@ impl SearchWorker {
             score: best_score, 
             best_move,
             was_aborted: false,
-        };
+        }
     }
 }

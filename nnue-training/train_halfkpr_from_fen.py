@@ -427,33 +427,47 @@ def train_nnue_on_fens():
 
     def stockfish_bce_pawn_loss(y_true, y_pred):
         """
-        Input: y_true and y_pred in raw Pawn Units (e.g., +1.0, -2.5)
-        Process: Scales to centipawns, applies Stockfish constant, calculates Binary Cross Entropy
+        Input: y_true and y_pred in raw human Pawn Units (e.g., +1.0, -2.5)
+        Process: Scales to centipawns, applies standard chess scaling, calculates BCE
         """
-        # 1. Convert raw pawn units to centipawns
         y_true_cp = y_true * 100.0
         y_pred_cp = y_pred * 100.0
         
-        # 2. Official Stockfish constant for centipawns
-        SF_CONSTANT = 0.575653
-        
-        # 3. Scale the raw scores into logits
+        SF_CONSTANT = 0.00368208
         target_logits = y_true_cp * SF_CONSTANT
         pred_logits = y_pred_cp * SF_CONSTANT
         
-        # 4. Turn the target logit into a clean 0 to 1 probability
         target_prob = tf.math.sigmoid(target_logits)
-        
-        # 5. Calculate Cross-Entropy safely using logits to prevent math breakdown
         bce_loss = tf.reduce_mean(
             tf.nn.sigmoid_cross_entropy_with_logits(labels=target_prob, logits=pred_logits)
         )
-    
+
         return bce_loss
 
+    def close_position_error_3(y_true, y_pred):
+        """
+        Tracks micro-accuracy in close, quiet positions. 
+        Caps errors at 3.0 pawns so large material blunders don't ruin the view.
+        """
+        SCALE_THRESHOLD = 3.0
+        raw_error = tf.abs(y_true - y_pred)
+        return tf.reduce_mean(tf.math.tanh(raw_error / SCALE_THRESHOLD) * SCALE_THRESHOLD)
+
+    def general_position_error_10(y_true, y_pred):
+        """
+        Tracks macro-accuracy across general play, including material differences.
+        Caps errors at 10.0 pawns to capture full piece values up to a Queen.
+        """
+        SCALE_THRESHOLD = 10.0
+        raw_error = tf.abs(y_true - y_pred)
+        return tf.reduce_mean(tf.math.tanh(raw_error / SCALE_THRESHOLD) * SCALE_THRESHOLD)
+
+
+    # --- Compile the model ---
     model.compile(
         optimizer=keras.optimizers.Adam(learning_rate=0.001),
         loss=stockfish_bce_pawn_loss,
+        metrics=[close_position_error_3, general_position_error_10]
     )
 
     # 90 / 10 Split for Training / Validation Shards
