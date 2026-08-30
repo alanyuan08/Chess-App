@@ -6,7 +6,6 @@ use crate::rook_mask::*;
 use crate::queen_mask::*;
 use crate::move_command::*;
 use crate::zobrist_hash::*;
-use crate::chess_game::*;
 use crate::board_accumlator::*;
 use crate::nnue_network::*;
 use arrayvec::ArrayVec;
@@ -276,53 +275,54 @@ impl ChessBoard {
     pub fn generate_moves(&mut self, 
         gen_moves: &mut ArrayVec::<ForwardMove, 256>, 
         pv_move_hint: ForwardMove,
-        depth: i32,
-        killer_move_table: &[[ForwardMove; MAX_DEPTH as usize]; 2]
+        ply_idx: i32,
+        killer_move_table: &[[ForwardMove; 2]; 128],
+        only_tactical: bool, 
     ) {        
         let player_index = self.player_index(self.active_player);
         let opp_index = self.player_index(self.opponent_player());
         let _opponent_attack_targets = self.compute_attack_targets(self.opponent_player());
 
         // Generate Moves
-        king_moves(self, player_index, opp_index, _opponent_attack_targets, gen_moves);
+        king_moves(self, player_index, opp_index, _opponent_attack_targets, gen_moves, only_tactical);
 
-        knight_moves(self, player_index, opp_index, gen_moves);
+        knight_moves(self, player_index, opp_index, gen_moves, only_tactical);
 
-        rook_moves(self, player_index, opp_index, gen_moves);
+        rook_moves(self, player_index, opp_index, gen_moves, only_tactical);
 
-        bishop_moves(self, player_index, opp_index, gen_moves);
+        bishop_moves(self, player_index, opp_index, gen_moves, only_tactical);
 
-        queen_moves(self, player_index, opp_index, gen_moves);
+        queen_moves(self, player_index, opp_index, gen_moves, only_tactical);
 
         match self.active_player {
             Side::WHITE => {
-                white_pawn_moves(self, player_index, opp_index, gen_moves);
+                white_pawn_moves(self, player_index, opp_index, gen_moves, only_tactical);
             },
             Side::BLACK => {
-                black_pawn_moves(self, player_index, opp_index, gen_moves);
+                black_pawn_moves(self, player_index, opp_index, gen_moves, only_tactical);
             }
         }
         
-        if depth >= 0 {
+        if ply_idx < 128 {
             let has_valid_pv = pv_move_hint.move_type != MoveFlag::NULL;
-            let k0 = killer_move_table[0][depth as usize];
-            let k1 = killer_move_table[1][depth as usize];
+            let k0 = killer_move_table[ply_idx as usize][0];
+            let k1 = killer_move_table[ply_idx as usize][1];
             
             let has_k0 = k0.move_type != MoveFlag::NULL && (!has_valid_pv || k0 != pv_move_hint);
             let has_k1 = k1.move_type != MoveFlag::NULL && (!has_valid_pv || k1 != pv_move_hint);
 
             for m in gen_moves.iter_mut() {
                 if has_valid_pv && *m == pv_move_hint {
-                    m.pv_score = -2_000_000;
+                    m.pv_score = 10_000_000;
                 } else if has_k0 && *m == k0 {
-                    m.pv_score = 200;
+                    m.pv_score = 500;
                 } else if has_k1 && *m == k1 {
-                    m.pv_score = 210;
+                    m.pv_score = 400;
                 }
             }
         }
 
-        gen_moves.sort_unstable_by_key(|cmd| cmd.pv_score);
+        gen_moves.sort_unstable_by_key(|cmd| -cmd.pv_score);
     }
 
     // helper method for move piece

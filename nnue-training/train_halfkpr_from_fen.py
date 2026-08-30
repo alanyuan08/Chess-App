@@ -129,36 +129,37 @@ def process_shard_worker(stream_fn, data_queue, stop_event, dataset_name, shards
 
     def q_search(b, alpha, beta, depth=0, max_depth=12):
         """
-        Quiescence Search that resolves checks by searching all moves, 
-        but uses a strict depth limit to prevent infinite recursion.
+        Corrected Negamax Quiescence Search. 
+        Expects alpha and beta to be passed from the CURRENT player's perspective.
         """
-        # Force a cutoff if the tactics go too deep
+        # 1. Force a cutoff if tactics go too deep to prevent infinite recursion
         if depth >= max_depth:
             return static_evaluate(b)
 
         in_check = b.is_check()
+        
+        # static_evaluate returns a Side-to-Move centric score. 
+        # Because alpha and beta are now also Side-to-Move centric, this comparison is 100% safe!
         static_eval = static_evaluate(b)
         
-        # Standing pat is only allowed if we are NOT in check
+        # 2. Standing Pat (Only allowed if our King is safe)
         if not in_check:
             if static_eval >= beta:
                 return beta
             if static_eval > alpha:
                 alpha = static_eval
 
-        # Rule: If in check, generate ALL moves. If safe, generate only tactical moves.
+        # 3. Tactical Move Search Loop
         for move in b.generate_pseudo_legal_moves(b.turn):
             is_tactical = b.is_capture(move) or move.promotion
             
-            # If we are in check, we must look at ALL moves to find an evasion.
-            # If we are not in check, we only look at tactical moves.
+            # If in check, evaluate all moves to find an escape. Otherwise, only filter tactical strikes.
             if in_check or is_tactical:
                 
                 if not b.is_legal(move):
                     continue
                     
                 b.push(move)
-                # Pass depth + 1 to keep track of the search depth
                 score = -q_search(b, -beta, -alpha, depth + 1, max_depth)
                 b.pop()
 
@@ -171,19 +172,6 @@ def process_shard_worker(stream_fn, data_queue, stop_event, dataset_name, shards
     
     def is_invalid_training_row(depth_str, fen_string: str) -> bool:
         # Split the FEN string into its component fields
-        fen_parts = fen_string.split()
-        
-        # 1. Castling Rights Check: If any active castling flag exists, discard the row
-        castling_field = fen_parts[2]
-        if castling_field != "-":
-            return True 
-        
-        # 2. En Passant Check: If an en passant target square exists, discard the row
-        en_passant_field = fen_parts[3]
-        if en_passant_field != "-":
-            return True
-
-        # 3. Depth & Phase Check
         depth = int(depth_str)
         fen_pieces_count = get_endgame_piece_count(fen_string)
         if fen_pieces_count <= 12:
@@ -236,11 +224,11 @@ def process_shard_worker(stream_fn, data_queue, stop_event, dataset_name, shards
             # Rule 2: Run a Q-search to calculate tactical resolution
             # Both functions output absolute, White-centric scores.
             static_score = static_evaluate(board)
+
+            # Score is from the player's prespective
             q_score = q_search(board, -float('inf'), float('inf'))
             
-            # If the score swings by more than 15 centipawns during tactical resolution,
-            # it means there are pending captures/promotions. Skip the position.
-            if abs(static_score - q_score) > 15:
+            if abs(static_score - q_score) > 120:
                 continue
 
             # 3. Score Normalization & Sigmoid Target Mapping
@@ -462,25 +450,10 @@ def train_nnue_on_fens():
         )
     
         return bce_loss
-    
-    def centipawn_diff_metric(y_true, y_pred):
-        # 1. Convert pawn units to centipawns
-        y_true_cp = y_true * 100.0
-        y_pred_cp = y_pred * 100.0
-        
-        # 2. Get the raw distance (difference) between them
-        raw_difference = y_true_cp - y_pred_cp
-        
-        # 3. Strip the negative signs so they don't cancel out
-        absolute_difference = tf.abs(raw_difference)
-        
-        # 4. Average them for the batch so you get one clean number
-        return tf.reduce_mean(absolute_difference)
 
     model.compile(
         optimizer=keras.optimizers.Adam(learning_rate=0.001),
         loss=stockfish_bce_pawn_loss,
-        metrics=[centipawn_diff_metric] 
     )
 
     # 90 / 10 Split for Training / Validation Shards
@@ -566,10 +539,10 @@ def train_nnue_on_fens():
 
     model.fit(
         train_dataset, 
-        steps_per_epoch=976,
+        steps_per_epoch=1000,
         epochs=25, 
         validation_data=val_dataset,
-        validation_steps=40,
+        validation_steps=100,
         callbacks=[checkpoint_cb, lr_scheduler_cb, cleanup_cb]
     )
 
