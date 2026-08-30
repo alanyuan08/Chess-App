@@ -830,7 +830,7 @@ impl SearchWorker {
             hash, best_score, ply, best_move, Q_DEPTH_MARKER, final_hash_flag
         );
 
-        return SearchResult { 
+        SearchResult { 
             score: best_score, 
             best_move,
             was_aborted: false,
