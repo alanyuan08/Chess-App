@@ -62,7 +62,7 @@
     - *Activation:* None
   - **Loss Function:** Custom Mean Squared Error Function where the model output is converted from centipawn to Loss/ Win [0, 1] using the function ($\text{1.0 / (1.0 + tf.math.exp(LICHESS-CONSTANT * centipawn))}$)
 
-  LICHESS-CONSTANT = 0.368208
+  LICHESS-CONSTANT = 0.575653
 
 ## 4. NNuE Training
 
