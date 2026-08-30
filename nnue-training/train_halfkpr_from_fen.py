@@ -137,15 +137,12 @@ def process_shard_worker(stream_fn, data_queue, stop_event, dataset_name, shards
             return static_evaluate(b)
 
         in_check = b.is_check()
-        
-        # static_evaluate returns a Side-to-Move centric score. 
-        # Because alpha and beta are now also Side-to-Move centric, this comparison is 100% safe!
         static_eval = static_evaluate(b)
         
         # 2. Standing Pat (Only allowed if our King is safe)
         if not in_check:
             if static_eval >= beta:
-                return beta
+                return static_eval
             if static_eval > alpha:
                 alpha = static_eval
 
@@ -164,7 +161,7 @@ def process_shard_worker(stream_fn, data_queue, stop_event, dataset_name, shards
                 b.pop()
 
                 if score >= beta:
-                    return beta
+                    return score
                 if score > alpha:
                     alpha = score
                     
@@ -217,22 +214,23 @@ def process_shard_worker(stream_fn, data_queue, stop_event, dataset_name, shards
 
             board = chess.Board(fen)
             
-            # Rule 1: Skip if the side to move is currently under check
-            if board.is_check():
+            # Rule 1: Skip for Check / Stalemate / Insufficieng Material
+            if board.is_check() or board.is_stalemate() or board.is_insufficient_material():
                 continue
 
-            # Rule 2: Run a Q-search to calculate tactical resolution
+            # Rule 2: Filter out -/+ 1200 as we detected massive scores assigned to draws / mate sequences
+            score_target = float(raw_score)
+            if abs(score_target) >= 1200:
+                continue
+
+            # Rule 3: Run a Q-search to calculate tactical resolution
             # Both functions output absolute, White-centric scores.
             static_score = static_evaluate(board)
-
-            # Score is from the player's prespective
             q_score = q_search(board, -float('inf'), float('inf'))
             
             if abs(static_score - q_score) > 120:
                 continue
 
-            # 3. Score Normalization & Sigmoid Target Mapping
-            score_target = float(raw_score)
             if is_black_turn:
                 score_target = -score_target
                 
@@ -392,7 +390,8 @@ def train_nnue_on_fens():
     stm_input = layers.Input(shape=(1,), dtype="bool", name="side_to_move")
 
     # 2. Shared Accumulator Layer (HalfK Virtual Weights)
-    accumulator = layers.Dense(256, activation=None, kernel_initializer='random_normal', name="accumulator_layer") 
+    nnue_init = keras.initializers.HeNormal()
+    accumulator = layers.Dense(256, activation=None, kernel_initializer=nnue_init, name="accumulator_layer") 
     w_acc = accumulator(white_input)
     b_acc = accumulator(black_input)
 
@@ -425,24 +424,25 @@ def train_nnue_on_fens():
         outputs=output
     )
 
-    def stockfish_bce_pawn_loss(y_true, y_pred):
+    def stockfish_nnue_pure_loss(y_true, y_pred):
         """
-        Input: y_true and y_pred in raw human Pawn Units (e.g., +1.0, -2.5)
-        Process: Scales to centipawns, applies standard chess scaling, calculates BCE
+        Official Stockfish Style NNUE Loss Function.
+        Calculates Mean Squared Error in WDL (probability) space.
         """
+        # 1. Scale inputs to centipawns
         y_true_cp = y_true * 100.0
         y_pred_cp = y_pred * 100.0
         
-        SF_CONSTANT = 0.00368208
-        target_logits = y_true_cp * SF_CONSTANT
-        pred_logits = y_pred_cp * SF_CONSTANT
+        SF_SCALE = 0.0075
         
-        target_prob = tf.math.sigmoid(target_logits)
-        bce_loss = tf.reduce_mean(
-            tf.nn.sigmoid_cross_entropy_with_logits(labels=target_prob, logits=pred_logits)
-        )
-
-        return bce_loss
+        # 3. Pass both target and prediction through a sigmoid to move to WDL space
+        target_wdl = tf.math.sigmoid(y_true_cp * SF_SCALE)
+        pred_wdl = tf.math.sigmoid(y_pred_cp * SF_SCALE)
+        
+        # 4. Standard Mean Squared Error in probability space
+        loss = tf.math.squared_difference(target_wdl, pred_wdl)
+        
+        return tf.reduce_mean(loss)
 
     def close_position_error_3(y_true, y_pred):
         """
@@ -466,7 +466,7 @@ def train_nnue_on_fens():
     # --- Compile the model ---
     model.compile(
         optimizer=keras.optimizers.Adam(learning_rate=0.001),
-        loss=stockfish_bce_pawn_loss,
+        loss=stockfish_nnue_pure_loss,
         metrics=[close_position_error_3, general_position_error_10]
     )
 
