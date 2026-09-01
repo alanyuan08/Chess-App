@@ -19,5 +19,6 @@ training = [
     "tensorflow",
     "keras",
     "datasets",
-    "chess"
+    "chess",
+    "pandas"
 ]

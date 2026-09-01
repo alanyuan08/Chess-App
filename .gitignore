@@ -8,4 +8,7 @@ build/
 nnue-training/*.csv
 nnue-training/*.bin
 nnue-training/*.keras
+nnue-training/data/*
+nnue-training/clean_binary_shards/*
+nnue-training/clean_binary_production/*
 profile.json.gz

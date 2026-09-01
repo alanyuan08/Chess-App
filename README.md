@@ -60,19 +60,25 @@
     - *Activation:* Clipped/Bounded Linear ReLU ($\text{ReLU1}$) bounded strictly between `0.0` and `1.0`.
   - **Output Layer:** Combines $(32, 1)$ outputs down to a single evaluation scalar using 8-bit weights (`i8`) and 32-bit biases (`i32`).
     - *Activation:* None
-  - **Loss Function:** Custom Mean Squared Error Function where the model output is converted from centipawn to Loss/ Win [0, 1] using the function ($\text{1.0 / (1.0 + tf.math.exp(LICHESS-CONSTANT * centipawn))}$)
+  - **Loss Function:** Custom Mean Squared Error Function where the model output is converted from centipawn to Loss/ Win [0, 1] using the function ($\text{1.0 / (1.0 + tf.math.exp(STOCKFISH-CONSTANT * centipawn))}$)
 
-  LICHESS-CONSTANT = 0.00368208
+  STOCKFISH-CONSTANT = 0.0075
 
 ## 4. NNuE Training
 
 - **Training Data:** The positions are sourced from [Lichess Chess Position Evaluations](https://huggingface.co/datasets/Lichess/chess-position-evaluations), which contains 394,669,566 chess positions evaluated with Stockfish at various depths. The training / validation data use different shards and the training data is shuffled to ensure an even distribution. 
 
+- **PreProcesisng:** 
   The data is preprocessed for [White Prespective] [Black Prespective] for Dual-Perspective HalfKA NNUE and is filtered to only include Quiet Positions - The king isn't in check and Quiescence Search doesn't drop the Standing Pat. 
 
-- **Training Process:** The model is trained using 25 Epoch, with 976 Steps and 4096 FEN training values in each step. The model loss is measured in Mean Squared Error.
+  The data is shuffled acrossed the parquets to ensure an even distrubtion between early-game, mid-game and late game.
+
+- **Training Process:** The model is trained using 25 Epoch, with 1000 Steps and 16384 positions in step. The model loss is measured in Mean Squared Error. It uses a 90% Training / 10% Validation Split for the data.
 
   The model applies a Sigmoid transformation to the score output as a win percentage - 1.0 (win), 0.5 (draw), and 0.0 (loss) to reduce gradients for positions with -/+ 400 Centipawns; The goal is to force the model to focus more on close board positions rather than accomodating for outliers such as -/+ 1500 Centipawns.
+
+- cd nnue-training
+- /train_pipeline.sh
 
 ## 5. Playing Level
 
@@ -80,7 +86,6 @@ The Chess AI has been tested against ELO 3200+ Chess.com bots.
 
 - [WIN - ELO 3200 Bot](https://www.chess.com/analysis/game/computer/1617707258/analysis)
 - [WIN - ELO 3200 Bot](https://www.chess.com/analysis/game/computer/1978599994/analysis)
-- [DRAW - ELO 3200 Bot](https://www.chess.com/analysis/game/computer/1574164820/analysis)
 
 - **Future Roadmap:** This engine has not been officially ratified by Computer Chess Rating Lists
 

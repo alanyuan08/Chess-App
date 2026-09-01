@@ -12,14 +12,23 @@ fi
 # 2. Activate and Install
 source ../.tf_venv/bin/activate
 pip install --upgrade pip
-
-# FIX: Install the current directory package plus the training extras
-pip install --upgrade pip
 pip install "../[training]" 
 
-# 3. Run your main training script
-python train_halfkpr_from_fen.py
+# 3. Download the files
+./download_shards.sh
 
-# 4. Upload Weights to Hugging Face
+# 4. Data Exporter
+python dataset_exporter.py
+
+# 5. Global Mixer 
+python global_mixer.py
+
+# 6. Training / Validation Split
+./training_shuffle.sh
+
+# 7. Run your main training script
+python train_pipeline.py
+
+# 8. Upload Weights to Hugging Face
 hf auth login
 hf upload AlanYuan0408/nnue_weights.bin nnue_weights.bin
