@@ -4,6 +4,7 @@ import sys
 import numpy as np
 import chess
 import pandas as pd
+import hashlib
 
 # --- INITIALIZATION ENGINE CONSTANTS ---
 DATA_SIZE = 2_000_000
@@ -203,22 +204,41 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
 
         # 6. Extract HalfKA indices and enforce uniform padding layout
         w_indices, b_indices = parse_fen_to_features(fen)
+        fen_hash = int(hashlib.md5(fen.encode('utf-8')).hexdigest(), 16) % (10**10)
         
-        # Build strict length containers padded with -1 
-        w_padded = np.full(MAX_PIECES, -1, dtype=np.int32)
-        b_padded = np.full(MAX_PIECES, -1, dtype=np.int32)
+        def pad_indices(w_idx, b_idx):
+            w_pad = np.full(MAX_PIECES, -1, dtype=np.int32)
+            b_pad = np.full(MAX_PIECES, -1, dtype=np.int32)
+            w_pad[:min(len(w_idx), MAX_PIECES)] = w_idx[:min(len(w_idx), MAX_PIECES)]
+            b_pad[:min(len(b_idx), MAX_PIECES)] = b_idx[:min(len(b_idx), MAX_PIECES)]
+            return w_pad.tolist(), b_pad.tolist()
 
-        num_w = min(len(w_indices), MAX_PIECES)
-        num_b = min(len(b_indices), MAX_PIECES)
+        # Scale raw score to a pawn target
+        y_pawn_target = float(raw_score) / 100.0
+        is_black_turn = (board.turn == chess.BLACK)
 
-        w_padded[:num_w] = w_indices[:num_w]
-        b_padded[:num_b] = b_indices[:num_b]
-        
+        # ----------------------------------------------------
+        # PERSPECTIVE A: Original Board Orientation
+        # ----------------------------------------------------
+        w_orig, b_orig = pad_indices(w_indices, b_indices)
         batch_records.append({
-            'white_indices': w_padded.tolist(),
-            'black_indices': b_padded.tolist(),
+            'white_indices': w_orig,
+            'black_indices': b_orig,
             'is_black_turn': 1.0 if is_black_turn else 0.0,
-            'target': float(y_pawn_target)
+            'target': -y_pawn_target if is_black_turn else y_pawn_target,
+            'position_hash': fen_hash
+        })
+
+        # ----------------------------------------------------
+        # PERSPECTIVE B: The Free Doubled/Mirrored Sample
+        # Just swap the arrays, invert the turn, and flip the target score!
+        # ----------------------------------------------------
+        batch_records.append({
+            'white_indices': b_orig, 
+            'black_indices': w_orig, 
+            'is_black_turn': 0.0 if is_black_turn else 1.0,
+            'target': y_pawn_target if is_black_turn else -y_pawn_target,
+            'position_hash': fen_hash
         })
         
         if len(batch_records) >= samples_per_file:

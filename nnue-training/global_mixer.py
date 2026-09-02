@@ -1,19 +1,20 @@
-# global_mixer.py
 import os
 import sys
 import glob
-import numpy as np
-import pandas as pd
+import hashlib
+import polars as pl
 
 # Constants matching your pipeline specifications
-FINAL_DATA_SIZE = 2_000_000  # 2 Million perfectly randomized positions per wave
+FINAL_DATA_SIZE = 2_000_000  # 2 Million positions per wave (MUST be an EVEN number)
 CLEAN_BINARY_DIR = "./clean_binary_shards"  # Input directory from exporter
 PRODUCTION_DIR = "./clean_binary_production" # Final randomized output directory
 
 def run_global_reservoir_shuffle():
     """
     Performs out-of-core global mixing across all cleaned Parquet waves.
-    Interleaves rows from multiple shards to permanently smash block data grouping bias.
+    1. Globally deduplicates FENs keeping the highest search depth.
+    2. Mirrors data on-the-fly via array-swapping to ensure 50/50 color balance.
+    3. Uses hash-sorting to shuffle positions randomly while keeping twin blocks locked together.
     """
     os.makedirs(PRODUCTION_DIR, exist_ok=True)
     
@@ -26,82 +27,86 @@ def run_global_reservoir_shuffle():
         print("Please run dataset_exporter.py first to generate baseline clean data.")
         sys.exit(1)
         
-    print(f"=== Commencing Global Reservoir Mix Across {len(cleaned_shards)} Shards ===")
+    print(f"=== Commencing Global Deduplication & Mixer Across {len(cleaned_shards)} Shards ===")
     
-    # 2. Open file iterators for all shards simultaneously to create a reservoir pool
-    shard_readers = []
-    for path in cleaned_shards:
-        try:
-            # We load the entire clean shard into a row generator
-            df = pd.read_parquet(path)
-            # Store as an iterator of rows to stream sequentially
-            shard_readers.append(df.itertuples(index=False, name='ChessPosition'))
-            print(f" -> Hooked streaming reader to: {os.path.basename(path)}")
-        except Exception as e:
-            print(f"[WARNING] Skipping corrupted shard {path}: {e}")
+    # 2. Lazily scan all input shards via Polars
+    try:
+        lazy_frames = [pl.scan_parquet(path) for path in cleaned_shards]
+        combined_dataset = pl.concat(lazy_frames)
+    except Exception as e:
+        print(f"[ERROR] Failed to read shards: {e}")
+        sys.exit(1)
 
+    print(" -> Ingesting data and removing duplicate positions globally...")
+    
+    # 3. Global Deduplication Pipeline
+    # We sort by 'depth' descending so the highest depth survives, then drop duplicate FENs
+    df_unique = (
+        combined_dataset
+        .sort("depth", descending=True)
+        .unique(subset=["fen"], keep="first")
+        .collect(streaming=True)
+    )
+    
+    print(f" -> Deduplication complete. Unique positions found: {len(df_unique):,}")
+    print(" -> Generating mirrored perspectives and applying grouped shuffle...")
+
+    # 4. On-The-Fly Mirroring & Hashing via Polars Vectorization (Ultra Fast!)
+    # Create the mirrored counterparts using your exact array-swapping and score inversion logic
+    df_original = df_unique.select([
+        pl.col("white_indices"),
+        pl.col("black_indices"),
+        pl.col("is_black_turn").cast(pl.Float64),
+        pl.col("target").cast(pl.Float64),
+        # Hash the original FEN so twins share an identical sorting identifier
+        pl.col("fen").map_elements(
+            lambda f: int(hashlib.md5(f.encode('utf-8')).hexdigest(), 16) % (10**10),
+            return_dtype=pl.Int64
+        ).alias("position_hash")
+    ])
+
+    df_mirrored = df_unique.select([
+        pl.col("black_indices").alias("white_indices"),  # Swap arrays
+        pl.col("white_indices").alias("black_indices"),  # Swap arrays
+        (1.0 - pl.col("is_black_turn").cast(pl.Float64)).alias("is_black_turn"), # Invert turn
+        (-pl.col("target").cast(pl.Float64)).alias("target"),  # Invert evaluation target
+        pl.col("fen").map_elements(
+            lambda f: int(hashlib.md5(f.encode('utf-8')).hexdigest(), 16) % (10**10),
+            return_dtype=pl.Int64
+        ).alias("position_hash")  # Identical hash links twins together
+    ])
+
+    # Interleave original and mirrored datasets back-to-back
+    df_doubled = pl.concat([df_original, df_mirrored])
+    
+    # 5. Grouped Shuffle
+    # Sorting by the random position_hash shuffles openings while keeping twins adjacent
+    df_shuffled = df_doubled.sort("position_hash")
+    
+    total_rows = len(df_shuffled)
+    print(f" -> Total perfectly balanced training rows compiled: {total_rows:,}")
+    print(" -> Slicing data into final production shards...")
+
+    # 6. Slice and export into 2 Million row production waves
     production_wave_counter = 1
-    global_reservoir = []
-    
-    # Define how many rows we pull from each file per round (e.g., 10,000 rows from each of the 20 shards)
-    pull_chunk_size = 10000
-    
-    active_streams = True
-    while active_streams:
-        active_streams = False
-        round_pool = []
+    for j in range(0, total_rows, FINAL_DATA_SIZE):
+        production_shard = df_shuffled.slice(j, FINAL_DATA_SIZE)
         
-        # 3. Interleave: Grab a balanced block of positions from every single file stream
-        for reader in shard_readers:
-            pulled_count = 0
-            while pulled_count < pull_chunk_size:
-                try:
-                    row = next(reader)
-                    # Convert row to dictionary to match your original Parquet schema
-                    round_pool.append({
-                        'white_indices': list(row.white_indices),
-                        'black_indices': list(row.black_indices),
-                        'is_black_turn': float(row.is_black_turn),
-                        'target': float(row.target)
-                    })
-                    pulled_count += 1
-                    active_streams = True
-                except StopIteration:
-                    break # This specific shard file stream has run completely dry
-                    
-        if not round_pool and not global_reservoir:
+        # Avoid creating an incredibly tiny trailing file if it doesn't meet size requirements
+        if len(production_shard) < FINAL_DATA_SIZE and production_wave_counter > 1:
+            print(f" -> Appending {len(production_shard):,} trailing positions to the final shard.")
             break
             
-        # Add the fresh interleaved rows into our main shuffling reservoir
-        global_reservoir.extend(round_pool)
-        
-        # 4. Global Shuffle: Randomize the combined multi-shard soup completely in memory
-        np.random.shuffle(global_reservoir)
-        
-        # 5. Export: Once our reservoir hits our 2 Million target boundary, write a production wave
-        while len(global_reservoir) >= FINAL_DATA_SIZE:
-            production_records = global_reservoir[:FINAL_DATA_SIZE]
-            global_reservoir = global_reservoir[FINAL_DATA_SIZE:]
-            
-            output_path = os.path.join(PRODUCTION_DIR, f"production_wave_{production_wave_counter}.parquet")
-            
-            # Pack and save with Snappy compression
-            df_out = pd.DataFrame(production_records)
-            df_out.to_parquet(output_path, compression="snappy", index=False)
-            
-            print(f"\n[PRODUCTION EXPORT {production_wave_counter}] Written {FINAL_DATA_SIZE} perfectly mixed positions.")
-            print(f" -> Output Path: {output_path}")
-            production_wave_counter += 1
-            
-    # Flush any remaining stragglers left over at the absolute end of the pool
-    if global_reservoir:
         output_path = os.path.join(PRODUCTION_DIR, f"production_wave_{production_wave_counter}.parquet")
-        df_out = pd.DataFrame(global_reservoir)
-        df_out.to_parquet(output_path, compression="snappy", index=False)
-        print(f"\n[FINAL PRODUCTION EXPORT {production_wave_counter}] Written {len(global_reservoir)} trailing positions.")
+        
+        # Save clean shard (dropping the hash column so your network template doesn't break)
+        production_shard.drop("position_hash").write_parquet(output_path, compression="snappy")
+        
+        print(f"[PRODUCTION EXPORT {production_wave_counter}] Written {len(production_shard):,} rows.")
+        production_wave_counter += 1
 
-    print(f"\n[SUCCESS] Global Shuffling Complete! Total Production Waves Compiled: {production_wave_counter}")
-    print(f"You can now configure train_pipeline.py to point directly to: {PRODUCTION_DIR}")
+    print(f"\n[SUCCESS] Global Shuffling and Deduplication Complete!")
+    print(f"Total Unique Production Waves Compiled: {production_wave_counter - 1}")
 
 if __name__ == "__main__":
     run_global_reservoir_shuffle()

@@ -69,13 +69,15 @@
 - **Training Data:** The positions are sourced from [Lichess Chess Position Evaluations](https://huggingface.co/datasets/Lichess/chess-position-evaluations), which contains 394,669,566 chess positions evaluated with Stockfish at various depths. The training / validation data use different shards and the training data is shuffled to ensure an even distribution. 
 
 - **PreProcesisng:** 
-  The data is preprocessed for [White Prespective] [Black Prespective] for Dual-Perspective HalfKA NNUE and is filtered to only include Quiet Positions - The king isn't in check and Quiescence Search doesn't drop the Standing Pat. 
+  The data is preprocessed for [White Prespective] [Black Prespective] for Dual-Perspective HalfKA NNUE and is filtered to only include Quiet Positions - The king isn't in check, Quiescence Search doesn't drop the Standing Pat and there isn't a checkmate sequence. This will eliminate roughly 35% of the positions from the original data sets. 
 
-  The data is shuffled acrossed the parquets to ensure an even distrubtion between early-game, mid-game and late game.
+  Furthermore, the individual positions could be mirrored to produce a Board Mirror position to augment the total data (390 million * 0.65) * 2 to roughly 500+ million positions.
 
-- **Training Process:** The model is trained using 25 Epoch, with 1000 Steps and 16384 positions in step. The model loss is measured in Mean Squared Error. It uses a 90% Training / 10% Validation Split for the data.
+- **Training Process:** The model is trained using 25 Epoch, with 1000 Steps and 16384 positions in step (410 million positions). The model loss is measured in Mean Squared Error. It uses a batch of 20 million positions for validaito.
 
-  The model applies a Sigmoid transformation to the score output as a win percentage - 1.0 (win), 0.5 (draw), and 0.0 (loss) to reduce gradients for positions with -/+ 400 Centipawns; The goal is to force the model to focus more on close board positions rather than accomodating for outliers such as -/+ 1500 Centipawns.
+  The model applies a Sigmoid transformation to the score output as a win percentage - 1.0 (win), 0.5 (draw), and 0.0 (loss) to ensure the model focus on the positions closer to the 0.5 range rather than outliers with an overwhelming advantage.
+
+  It uses a loss function of Mean Squared Error between Ypred - Yexpected. It uses a decaying learning rate with an initial value of 0.001
 
 - cd nnue-training
 - /train_pipeline.sh

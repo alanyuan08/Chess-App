@@ -24,8 +24,8 @@ for i in {1..17}; do
     fi
     
     # 4. Enforce your exact validation split rule: 
-    # Waves 1 and 10 go to /validation, the remaining 14 go to /training
-    if [ "$i" -eq 1 ] || [ "$i" -eq 10 ]; then
+    # Waves 1 go to /validation, the remaining go to /training
+    if [ "$i" -eq 1 ]; then
         echo "Allocating to VALIDATION ──> $FILENAME"
         mv "$SOURCE_PATH" "$VAL_DIR/"
     else
