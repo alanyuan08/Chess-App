@@ -230,8 +230,7 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
         })
 
         # ----------------------------------------------------
-        # PERSPECTIVE B: The Free Doubled/Mirrored Sample
-        # Just swap the arrays, invert the turn, and flip the target score!
+        # PERSPECTIVE B: Mirrored Board.
         # ----------------------------------------------------
         batch_records.append({
             'white_indices': b_orig, 
