@@ -69,9 +69,11 @@
 - **Training Data:** The positions are sourced from [Lichess Chess Position Evaluations](https://huggingface.co/datasets/Lichess/chess-position-evaluations), which contains 394,669,566 chess positions evaluated with Stockfish at various depths. The training / validation data use different shards and the training data is shuffled to ensure an even distribution. 
 
 - **PreProcesisng:** 
-  The data is preprocessed for [White Prespective] [Black Prespective] for Dual-Perspective HalfKA NNUE and is filtered to only include Quiet Positions - The king isn't in check, Quiescence Search doesn't drop the Standing Pat and there isn't a checkmate sequence. This will eliminate roughly 35% of the positions from the original data sets. 
+  The positions from Lichess are deduplicated and randomized into training shards. 
 
-  Furthermore, the individual positions could be mirrored to produce a Board Mirror position to augment the total data (390 million * 0.65) * 2 to roughly 500+ million positions.
+  The data is filtered for quiet positions - The king isn't in check, there is no immediate tactical win that can be gained via captures and there isn't a checkmate sequence. 
+
+  Then the data is parsed into [White Prespective] [Black Prespective] for Dual-Perspective HalfKA NNUE and is mirrored for the non-active player to double the training data to remove unintended color-bias
 
 - **Training Process:** The model is trained using 25 Epoch, with 1000 Steps and 16384 positions in step (410 million positions). The model loss is measured in Mean Squared Error. It uses a batch of 10 million positions for validation
 

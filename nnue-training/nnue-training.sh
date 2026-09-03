@@ -23,6 +23,7 @@ rm -f ./data/*
 
 # 5. Data Mixer -> Input /data_dedup -> Output /data_dedup_mixed
 python global_mixer.py
+rm -f ./temp_mixer_shards/*
 rm -f ./data_dedup/*
 
 # 6. Data Exporter -> Input /data_dedup_mixed -> Output /production_shards

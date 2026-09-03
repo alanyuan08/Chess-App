@@ -9,6 +9,8 @@ nnue-training/*.csv
 nnue-training/*.bin
 nnue-training/*.keras
 nnue-training/data/*
-nnue-training/clean_binary_shards/*
-nnue-training/clean_binary_production/*
+nnue-training/data_dedup/*
+nnue-training/data_dedup_mixed/*
+nnue-training/production_shards/*
+nnue-training/temp_mixer_shards/*
 profile.json.gz
