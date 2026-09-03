@@ -20,5 +20,6 @@ training = [
     "keras",
     "datasets",
     "chess",
-    "pandas"
+    "pandas",
+    "polars"
 ]

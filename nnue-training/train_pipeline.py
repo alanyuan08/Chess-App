@@ -17,8 +17,7 @@ VAL_BATCH_SIZE = 4096          # Validation tracking step batch size
 SHUFFLE_BUFFER = 50000         # Buffer allocation size for secondary tf.data mix
 
 # Mixed Data Sets
-CLEAN_DATASET_DIR = "./clean_binary_production" 
-
+CLEAN_DATASET_DIR = "./production_shards" 
 BIN_SAVE_PATH = "nnue_weights.bin"
 
 # Fallback structures for metric and loop calculations
@@ -34,8 +33,8 @@ def get_local_shard_directories():
     Defines the storage locations for your exported clean Parquet files.
     Modify these strings to point directly to your dataset output directories.
     """
-    train_dir = "./clean_binary_production/training/"
-    val_dir = "./clean_binary_production/validation/"
+    train_dir = "./production_shards/training/"
+    val_dir = "./production_shards/validation/"
     return train_dir, val_dir
 
 # --- Export NNuE Weights for Rust ---
@@ -200,10 +199,10 @@ def train_nnue_on_fens():
 
     # Create the permanent managers ONCE. They spawn background processes that live forever.
     train_manager = PermanentDatasetManager(
-        shard_directory=train_dir, shard_pattern="production_wave_*.parquet", num_workers=4, queue_size=50000
+        shard_directory=train_dir, shard_pattern="production_data_*.parquet", num_workers=4, queue_size=50000
     )
     val_manager = PermanentDatasetManager(
-        shard_directory=val_dir, shard_pattern="production_wave_*.parquet", num_workers=1, queue_size=10000
+        shard_directory=val_dir, shard_pattern="production_data_*.parquet", num_workers=1, queue_size=10000
     )
 
     # --- Train Dataset (Updated to accept dense list tokens signatures) ---

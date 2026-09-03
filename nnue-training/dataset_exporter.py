@@ -28,8 +28,7 @@ PIECE_VALUES = {
 
 # --- DIRECTORY PATH AUTO-RESOLUTION ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__)) if '__file__' in locals() else os.getcwd()
-PARQUET_FILE = os.path.join(SCRIPT_DIR, "data", "data_0000.parquet")
-BINARY_OUTPUT_DIR = os.path.join(SCRIPT_DIR, "clean_binary_shards")
+BINARY_OUTPUT_DIR = os.path.join(SCRIPT_DIR, "production_shards")
 
 # =====================================================================
 # CHESS LOGIC AND FILTERING SYSTEM
@@ -145,7 +144,7 @@ def is_invalid_training_row(depth_str, fen_string: str) -> bool:
 
 def save_parquet_shard(batch_records, output_dir, file_counter):
     """Helper function to build a structured dataframe and write to Parquet format."""
-    prefix = f"clean_wave_{file_counter}"
+    prefix = f"production_data_{file_counter}"
     output_path = os.path.join(output_dir, f"{prefix}.parquet")
     
     df = pd.DataFrame(batch_records)
@@ -264,11 +263,11 @@ def main():
     import glob
     
     # Dynamically discover all downloaded raw parquet files inside your data/ folder
-    raw_parquet_pattern = os.path.join(SCRIPT_DIR, "data", "data_*.parquet")
+    raw_parquet_pattern = os.path.join(SCRIPT_DIR, "data_dedup_mixed", "*.parquet")
     raw_files = sorted(glob.glob(raw_parquet_pattern))
     
     if not raw_files:
-        print(f"[CRITICAL ERROR] No source Parquet files detected matching data_*.parquet")
+        print(f"[CRITICAL ERROR] No source Parquet files detected matching *.parquet")
         print("Please run your shell download script to seed the data/ directory first!")
         sys.exit(1)
         
