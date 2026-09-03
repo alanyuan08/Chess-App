@@ -802,29 +802,23 @@ impl ChessBoard {
 
         // --- LOOP 1: PROCESS WHITE PERSPECTIVE COMPLETELY ---
         // Perfect auto-vectorization! The CPU fills all registers exclusively with White data.
-        for i in 0..256 {
-            let row_weights = &self.nnue_network.l1_weights[i];
-            let mut sum = biases[i] as i16; // Initialize with bias directly to save a loop pass!
+        for &w_idx in white_indices.iter().take(active_piece_count) {
+            let w_row = &self.nnue_network.l1_weights[w_idx][..256];
             
-            for &w_idx in white_indices.iter().take(active_piece_count) {
-                sum = sum.wrapping_add(row_weights[w_idx]);
+            for i in 0..256 {
+                target_white[i] = target_white[i].wrapping_add(w_row[i]);
             }
-            target_white[i] = sum;
         }
-
 
         // --- LOOP 2: PROCESS BLACK PERSPECTIVE COMPLETELY ---
         // Perfect auto-vectorization! The CPU reuses those same registers exclusively for Black data.
-        for i in 0..256 {
-            let row_weights = &self.nnue_network.l1_weights[i];
-            let mut sum = biases[i] as i16; // Initialize with bias directly to save a loop pass!
+        for &b_idx in black_indices.iter().take(active_piece_count) {
+            let b_row = &self.nnue_network.l1_weights[b_idx][..256];
             
-            for &b_idx in black_indices.iter().take(active_piece_count) {
-                sum = sum.wrapping_add(row_weights[b_idx]);
+            for i in 0..256 {
+                target_black[i] = target_black[i].wrapping_add(b_row[i]);
             }
-            target_black[i] = sum;
         }
-
     }
 
     pub fn evaluate(&mut self, buffer: &mut NnueInferenceBuffer) -> i32 {
@@ -955,6 +949,12 @@ impl ChessBoard {
         let w_add = get_feature_index(w_king_sq, added_piece, mv.end_sq, false);
         let b_add = get_feature_index(b_king_sq, added_piece, mv.end_sq, true);
 
+        // Get basic rows
+        let w_rem_row = &self.nnue_network.l1_weights[w_remove][..256];
+        let b_rem_row = &self.nnue_network.l1_weights[b_remove][..256];
+        let w_add_row = &self.nnue_network.l1_weights[w_add][..256];
+        let b_add_row = &self.nnue_network.l1_weights[b_add][..256];
+
         // --- 4. High-Density Auto-Vectorized Parallel Loop Block ---
         let prev_ply = self.ply - 1;
         let (left, right) = self.accumulators.split_at_mut(self.ply);
@@ -973,32 +973,37 @@ impl ChessBoard {
             let w_cap = get_feature_index(w_king_sq, captured_piece, captured_sq, false);
             let b_cap = get_feature_index(b_king_sq, captured_piece, captured_sq, true);
             
+            let w_cap_row = &self.nnue_network.l1_weights[w_cap][..256];
+            let b_cap_row = &self.nnue_network.l1_weights[b_cap][..256];
+
+            // 1. Process White entirely in a clean, isolated memory pipeline
             for i in 0..256 {
-                let row_weights = &self.nnue_network.l1_weights[i];
-                
                 curr_white[i] = prev_white[i]
-                    .wrapping_add(row_weights[w_add])
-                    .wrapping_sub(row_weights[w_remove])
-                    .wrapping_sub(row_weights[w_cap]);
-                    
-                curr_black[i] = prev_black[i]
-                    .wrapping_add(row_weights[b_add])
-                    .wrapping_sub(row_weights[b_remove])
-                    .wrapping_sub(row_weights[b_cap]);
+                    .wrapping_add(w_add_row[i])
+                    .wrapping_sub(w_rem_row[i])
+                    .wrapping_sub(w_cap_row[i]);
             }
 
+            // 2. Process Black entirely in a clean, isolated memory pipeline
+            for i in 0..256 {
+                curr_black[i] = prev_black[i]
+                    .wrapping_add(b_add_row[i])
+                    .wrapping_sub(b_rem_row[i])
+                    .wrapping_sub(b_cap_row[i]);
+            }
         } else {
             // 1. Process White entirely
             for i in 0..256 {
-                let row_weights = &self.nnue_network.l1_weights[i];
-                
                 curr_white[i] = prev_white[i]
-                    .wrapping_add(row_weights[w_add])
-                    .wrapping_sub(row_weights[w_remove]);
-                    
+                    .wrapping_add(w_add_row[i])
+                    .wrapping_sub(w_rem_row[i]);
+            }
+
+            // 2. Process Black entirely
+            for i in 0..256 {
                 curr_black[i] = prev_black[i]
-                    .wrapping_add(row_weights[b_add])
-                    .wrapping_sub(row_weights[b_remove]);
+                    .wrapping_add(b_add_row[i])
+                    .wrapping_sub(b_rem_row[i]);
             }
         }
     }

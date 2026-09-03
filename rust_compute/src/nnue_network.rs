@@ -6,7 +6,7 @@ use std::io::{Read, BufReader};
 #[derive(Clone, Copy, Debug)]
 pub struct NnueNetwork {
     // Layer 1: Accumulator (49152 inputs -> 256 outputs)
-    pub l1_weights: [[i16; 49152]; 256],
+    pub l1_weights: [[i16; 256]; 49152],
     pub l1_biases: [i32; 256],
 
     // Layer 2: Hidden 2 (512 inputs -> 64 outputs)
@@ -51,7 +51,7 @@ impl NnueNetwork {
             };
 
             // 1. Accumulator Layer (l1_weights is i16 = 2 bytes, l1_biases is i32 = 4 bytes)
-            read_field(&mut network_box.l1_weights as *mut _ as *mut u8, 256 * 49152, 2)?;
+            read_field(&mut network_box.l1_weights as *mut _ as *mut u8, 49152 * 256, 2)?;
             read_field(&mut network_box.l1_biases as *mut _ as *mut u8, 256, 4)?;
 
             // 2. Hidden Layer 2

@@ -47,7 +47,7 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
         # Input: Binary (0/1) | Weights: i16 | Bias/Output Accumulator: i32
         acc_layer = model.get_layer("accumulator_layer")
         w1, b1 = acc_layer.get_weights()
-        w1_quant = np.ascontiguousarray(np.round(w1.T * 128.0)).astype(np.int16)
+        w1_quant = np.ascontiguousarray(np.round(w1 * 128.0)).astype(np.int16)
         b1_quant = np.round(b1 * 128.0).astype(np.int32) 
         f.write(w1_quant.tobytes())
         f.write(b1_quant.tobytes())

@@ -73,7 +73,7 @@
 
   Furthermore, the individual positions could be mirrored to produce a Board Mirror position to augment the total data (390 million * 0.65) * 2 to roughly 500+ million positions.
 
-- **Training Process:** The model is trained using 25 Epoch, with 1000 Steps and 16384 positions in step (410 million positions). The model loss is measured in Mean Squared Error. It uses a batch of 20 million positions for validaito.
+- **Training Process:** The model is trained using 25 Epoch, with 1000 Steps and 16384 positions in step (410 million positions). The model loss is measured in Mean Squared Error. It uses a batch of 10 million positions for validation
 
   The model applies a Sigmoid transformation to the score output as a win percentage - 1.0 (win), 0.5 (draw), and 0.0 (loss) to ensure the model focus on the positions closer to the 0.5 range rather than outliers with an overwhelming advantage.
 
