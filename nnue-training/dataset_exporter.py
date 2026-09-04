@@ -132,6 +132,44 @@ def parse_fen_to_features(fen_string):
         
     return active_indices, passive_indices
 
+def mirror_fen(fen_string):
+    """
+    Swaps piece colors (case) and inverts ranks to create a true 
+    mirrored FEN string from Black's perspective.
+    """
+    parts = fen_string.split()
+    board_part = parts[0]
+    
+    # 1. Reverse the ranks (vertical flip)
+    ranks = board_part.split('/')
+    ranks.reverse()
+    mirrored_board = '/'.join(ranks)
+    
+    # 2. Swap the case of characters (color flip)
+    # swapcase() turns 'K' -> 'k', 'p' -> 'P', etc.
+    mirrored_board = mirrored_board.swapcase()
+    
+    # 3. Swap active color indicator in FEN ('w' <-> 'b')
+    active_color = 'b' if parts[1] == 'w' else 'w'
+    
+    # 4. Handle castling rights case swap (e.g., 'KQkq' -> 'kqKQ')
+    castling = parts[2].swapcase() if parts[2] != '-' else '-'
+    
+    # 5. Handle en passant square vertical flip (e.g., 'e3' -> 'e6')
+    ep_square = parts[3]
+    if ep_square != '-':
+        file_char = ep_square[0]
+        rank_char = ep_square[1]
+        # Invert rank: 3 -> 6, 6 -> 3
+        new_rank = str(9 - int(rank_char))
+        ep_square = file_char + new_rank
+
+    # Reassemble FEN with remaining parts if they exist
+    remaining = parts[4:] if len(parts) > 4 else []
+    
+    new_parts = [mirrored_board, active_color, castling, ep_square] + remaining
+    return " ".join(new_parts)  
+
 def get_endgame_piece_count(fen_string: str) -> int:
     board_part = fen_string.split()[0]
     target_pieces = set("pnbrqPNBRQ")
@@ -233,12 +271,16 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
             'position_hash': fen_hash
         })
 
-        # ----------------------------------------------------
-        # PERSPECTIVE B: Mirrored Board.
-        # ----------------------------------------------------
+        # --- PERSPECTIVE B: Mirrored Board ---
+        mirrored_fen_str = mirror_fen(fen)
+
+        # Pass the mirrored FEN through your feature pipeline 
+        w_mirr, b_mirr = parse_fen_to_features(mirrored_fen_str)
+        w_mirr_pad, b_mirr_pad = pad_indices(w_mirr, b_mirr)
+
         batch_records.append({
-            'white_indices': b_orig, 
-            'black_indices': w_orig, 
+            'white_indices': w_mirr_pad,
+            'black_indices': b_mirr_pad,
             'is_black_turn': 0.0 if is_black_turn else 1.0,
             'target': y_pawn_target if is_black_turn else -y_pawn_target,
             'position_hash': fen_hash
