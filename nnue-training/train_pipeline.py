@@ -265,10 +265,10 @@ def train_nnue_on_fens():
     # Train model execution call
     model.fit(
         train_dataset, 
-        steps_per_epoch=1000,
+        steps_per_epoch=1200,
         epochs=25, 
         validation_data=val_dataset,
-        validation_steps=100,
+        validation_steps=120,
         callbacks=[checkpoint_cb, lr_scheduler_cb, cleanup_cb]
     )
 

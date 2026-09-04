@@ -71,11 +71,13 @@
 - **PreProcesisng:** 
   The positions from Lichess are deduplicated and randomized into training shards. 
 
-  The data is filtered for quiet positions - The king isn't in check, there is no immediate tactical win that can be gained via captures and there isn't a checkmate sequence. 
+  The data is filtered for quiet positions - The king isn't in check, there is no immediate tactical win that can be gained via captures and there isn't a checkmate sequence. The removes roughly 35% of the positions.
 
-  Then the data is parsed into [White Prespective] [Black Prespective] for Dual-Perspective HalfKA NNUE and is mirrored for the non-active player to double the training data to remove unintended color-bias
+  Then the data is parsed into [White Prespective] [Black Prespective] for Dual-Perspective HalfKA NNUE and is mirrored for the non-active player to double the training data and to remove unintended color-bias. 
 
-- **Training Process:** The model is trained using 25 Epoch, with 1000 Steps and 16384 positions in step (410 million positions). The model loss is measured in Mean Squared Error. It uses a batch of 10 million positions for validation
+  This generations a total of 512 million positions ->  394 million * (1 - 0.35) * 2.
+
+- **Training Process:** The model is trained using 25 Epoch, with 1200 Steps and 16384 positions in step (492 million positions). The model loss is measured in Mean Squared Error. The model uses the remaining 15 million positions for validation. 
 
   The model applies a Sigmoid transformation to the score output as a win percentage - 1.0 (win), 0.5 (draw), and 0.0 (loss) to ensure the model focus on the positions closer to the 0.5 range rather than outliers with an overwhelming advantage.
 
