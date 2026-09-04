@@ -108,9 +108,6 @@ def run_global_deduplication():
     # Handle any remaining rows after processing the final file
     if leftover_rows is not None and production_wave_counter > 1:
         print(f" -> Appending {len(leftover_rows):,} trailing positions to the final wave.")
-        # Optional: Un-comment the lines below to write out the remainder instead of dropping it
-        # output_path = os.path.join(PRODUCTION_DIR, f"data_dedup_{production_wave_counter}.parquet")
-        # leftover_rows.write_parquet(output_path, compression="snappy")
 
     print(f"\n[SUCCESS] Global Deduplication Complete!")
     print(f"Total Unique Production Waves Compiled: {production_wave_counter - 1}")

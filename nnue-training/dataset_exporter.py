@@ -30,6 +30,10 @@ PIECE_VALUES = {
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__)) if '__file__' in locals() else os.getcwd()
 BINARY_OUTPUT_DIR = os.path.join(SCRIPT_DIR, "production_shards")
 
+# --- GLOBAL TRACKERS ---
+file_counter = 0
+total_processed = 0
+
 # =====================================================================
 # CHESS LOGIC AND FILTERING SYSTEM
 # =====================================================================
@@ -142,8 +146,9 @@ def is_invalid_training_row(depth_str, fen_string: str) -> bool:
     else:
         return depth < 20
 
-def save_parquet_shard(batch_records, output_dir, file_counter):
+def save_parquet_shard(batch_records, output_dir):
     """Helper function to build a structured dataframe and write to Parquet format."""
+    global file_counter
     prefix = f"production_data_{file_counter}"
     output_path = os.path.join(output_dir, f"{prefix}.parquet")
     
@@ -155,8 +160,8 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
     os.makedirs(output_dir, exist_ok=True)
     
     batch_records = []
-    file_counter = 1
-    total_processed = 0
+    global total_processed
+    global file_counter
 
     print(f"\n--- Commencing High-Speed Parquet Scan: {parquet_path} ---")
     
@@ -240,14 +245,14 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
         })
         
         if len(batch_records) >= samples_per_file:
-            save_parquet_shard(batch_records, output_dir, file_counter)
+            save_parquet_shard(batch_records, output_dir)
             total_processed += len(batch_records)
             batch_records = []
             file_counter += 1
 
     # Flush remaining records from memory
     if len(batch_records) > 0:
-        save_parquet_shard(batch_records, output_dir, file_counter)
+        save_parquet_shard(batch_records, output_dir)
         total_processed += len(batch_records)
 
     print(f"\n[SUCCESS] Processing Complete! Total clean positions serialized: {total_processed}")

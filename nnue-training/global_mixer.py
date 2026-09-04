@@ -13,7 +13,7 @@ def run_global_mixer():
     os.makedirs(MIXED_PRODUCTION_DIR, exist_ok=True)
     os.makedirs(TEMP_MIX_DIR, exist_ok=True)
     
-    # 1. Discover all Parquet files produced by your quiet/mirroring script
+    # 1. Discover all Parquet files produced by dedup
     input_pattern = os.path.join(DEDUP_DATA, "*.parquet")
     input_shards = sorted(glob.glob(input_pattern))
     
