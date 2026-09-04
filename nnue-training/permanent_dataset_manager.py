@@ -36,18 +36,17 @@ def _worker_loop(file_list, data_queue, shutdown_event, padding_index_value):
                     if shutdown_event.is_set():
                         break
                         
-                    w_idx = np.array(row['white_indices'], dtype=np.int32)
-                    b_idx = np.array(row['black_indices'], dtype=np.int32)
+                    a_idx = np.array(row['active_indices'], dtype=np.int32)
+                    p_idx = np.array(row['passive_indices'], dtype=np.int32)
                     
                     # Convert negative padding markers (-1) into your safe positive embedding token
-                    w_idx[w_idx == -1] = padding_index_value
-                    b_idx[b_idx == -1] = padding_index_value
+                    a_idx[a_idx == -1] = padding_index_value
+                    p_idx[p_idx == -1] = padding_index_value
                     
                     item = (
                         {
-                            "white_features": w_idx,
-                            "black_features": b_idx,
-                            "side_to_move": [bool(row['is_black_turn'])]
+                            "active_features": a_idx,
+                            "passive_features": p_idx,
                         },
                         [float(row['target'])]
                     )

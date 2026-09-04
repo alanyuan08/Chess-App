@@ -93,9 +93,8 @@ def train_nnue_on_fens():
     PADDING_INDEX_VALUE = INPUT_FEATURES 
 
     # 1. Inputs: Sequences of active feature index tokens matching your Parquet shapes
-    white_input = layers.Input(shape=(MAX_PIECES,), dtype="int32", name="white_features")
-    black_input = layers.Input(shape=(MAX_PIECES,), dtype="int32", name="black_features")
-    stm_input = layers.Input(shape=(1,), dtype="bool", name="side_to_move")
+    active_input = layers.Input(shape=(MAX_PIECES,), dtype="int32", name="active_features")
+    passive_input = layers.Input(shape=(MAX_PIECES,), dtype="int32", name="passive_features")
 
     # 2. Shared Accumulator Layer (Using Embedding Reduction to replace the old sparse matrix bottleneck)
     nnue_accumulator_init = keras.initializers.TruncatedNormal(mean=0.0, stddev=0.005)
@@ -109,46 +108,41 @@ def train_nnue_on_fens():
     )
 
     # 3. Pull dense weights representations for all slots
-    w_embed = embedding_layer(white_input) # Target shape: (Batch, 32, 256)
-    b_embed = embedding_layer(black_input) # Target shape: (Batch, 32, 256)
+    a_embed = embedding_layer(active_input) # Target shape: (Batch, 32, 256)
+    p_embed = embedding_layer(passive_input) # Target shape: (Batch, 32, 256)
 
     # 4. Synthesize masking vectors to isolate and zero-out padding weight contributions
-    w_mask = keras.ops.cast(keras.ops.not_equal(white_input, PADDING_INDEX_VALUE), dtype="float32")
-    b_mask = keras.ops.cast(keras.ops.not_equal(black_input, PADDING_INDEX_VALUE), dtype="float32")
+    a_mask = keras.ops.cast(keras.ops.not_equal(active_input, PADDING_INDEX_VALUE), dtype="float32")
+    p_mask = keras.ops.cast(keras.ops.not_equal(passive_input, PADDING_INDEX_VALUE), dtype="float32")
     
     # Expand to allow broadcasting dimensions across the 256 embedding properties
-    w_mask = keras.ops.expand_dims(w_mask, axis=-1) # Target shape: (Batch, 32, 1)
-    b_mask = keras.ops.expand_dims(b_mask, axis=-1)
+    a_mask = keras.ops.expand_dims(a_mask, axis=-1) # Target shape: (Batch, 32, 1)
+    p_mask = keras.ops.expand_dims(p_mask, axis=-1)
 
     # Execute masked pool aggregation to compile the 256 accumulator vectors
-    w_acc = keras.ops.sum(w_embed * w_mask, axis=1) # Target shape: (Batch, 256)
-    b_acc = keras.ops.sum(b_embed * b_mask, axis=1) # Target shape: (Batch, 256)
+    a_acc = keras.ops.sum(a_embed * a_mask, axis=1) # Target shape: (Batch, 256)
+    p_acc = keras.ops.sum(p_embed * p_mask, axis=1) # Target shape: (Batch, 256)
 
     # 5. Clipped ReLU Activation (ReLU1 / Bounded ReLU)
-    w_act = keras.ops.clip(w_acc, 0.0, SCALE_MAX)
-    b_act = keras.ops.clip(b_acc, 0.0, SCALE_MAX)
-
-    # 6. Cast boolean side-to-move mask to float for branchless evaluations
-    stm_float = keras.ops.cast(stm_input, dtype="float32")
+    a_act = keras.ops.clip(a_acc, 0.0, SCALE_MAX)
+    p_act = keras.ops.clip(p_acc, 0.0, SCALE_MAX)
     
-    # 7. Perspective Multiplexing Layer (Shape: Batch, 512)
-    first_half = stm_float * b_act + (1.0 - stm_float) * w_act
-    second_half = stm_float * w_act + (1.0 - stm_float) * b_act
-    merged = layers.Concatenate(name="perspective_multiplex")([first_half, second_half]) 
+    # 6. Perspective Multiplexing Layer (Shape: Batch, 512)
+    merged = layers.Concatenate(name="perspective_multiplex")([a_act, p_act]) 
     
-    # 8. Hidden Layer 2 with ReLU1 activation
+    # 7. Hidden Layer 2 with ReLU1 activation
     x = layers.Dense(64, activation=None, name="hidden_layer_2")(merged)
     x = keras.ops.clip(x, 0.0, SCALE_MAX)
 
-    # 9. Hidden Layer 3 with ReLU1 activation
+    # 8. Hidden Layer 3 with ReLU1 activation
     x = layers.Dense(32, activation=None, name="hidden_layer_3")(x)
     x = keras.ops.clip(x, 0.0, SCALE_MAX)
     
-    # 10. Output Layer (Linear, Pawn-Scale Evaluation Output)
+    # 9. Output Layer (Linear, Pawn-Scale Evaluation Output)
     output = layers.Dense(1, activation=None, name="chess_eval")(x)
 
     model = Model(
-        inputs=[white_input, black_input, stm_input],
+        inputs=[active_input, passive_input],
         outputs=output
     )
 
@@ -210,9 +204,8 @@ def train_nnue_on_fens():
         train_manager.generator_fn,
         output_signature=(
             {
-                "white_features": tf.TensorSpec(shape=(MAX_PIECES,), dtype=tf.int32),
-                "black_features": tf.TensorSpec(shape=(MAX_PIECES,), dtype=tf.int32),
-                "side_to_move": tf.TensorSpec(shape=(1,), dtype=tf.bool),
+                "active_features": tf.TensorSpec(shape=(MAX_PIECES,), dtype=tf.int32),
+                "passive_features": tf.TensorSpec(shape=(MAX_PIECES,), dtype=tf.int32),
             },
             tf.TensorSpec(shape=(1,), dtype=tf.float32)
         )
@@ -223,9 +216,8 @@ def train_nnue_on_fens():
         val_manager.generator_fn,
         output_signature=(
             {
-                "white_features": tf.TensorSpec(shape=(MAX_PIECES,), dtype=tf.int32),
-                "black_features": tf.TensorSpec(shape=(MAX_PIECES,), dtype=tf.int32),
-                "side_to_move": tf.TensorSpec(shape=(1,), dtype=tf.bool),
+                "active_features": tf.TensorSpec(shape=(MAX_PIECES,), dtype=tf.int32),
+                "passive_features": tf.TensorSpec(shape=(MAX_PIECES,), dtype=tf.int32),
             },
             tf.TensorSpec(shape=(1,), dtype=tf.float32)
         )

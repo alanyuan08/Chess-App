@@ -86,6 +86,9 @@ def parse_fen_to_features(fen_string):
     """
     parts = fen_string.split()
     board_part = parts[0]
+
+    turn_part = parts[1]  # 'w' or 'b'
+    is_black_turn = (turn_part == 'b')
     
     # Expand numeric spaces in FEN to empty string dots for alignment
     rows = board_part.split('/')
@@ -114,13 +117,13 @@ def parse_fen_to_features(fen_string):
         elif char == 'k':
             black_king_sq = sq
 
-    active_indices = []
-    passive_indices = []
+    white_perspective_indices = []
+    black_perspective_indices = []
     
     for p_type, p_sq in pieces:
         # --- WHITE PERSPECTIVE ---
         w_idx = (white_king_sq * 768) + (p_type * 64) + p_sq
-        active_indices.append(w_idx)
+        white_perspective_indices.append(w_idx)
         
         # --- BLACK PERSPECTIVE (Flipped & Rotated) ---
         b_type = (p_type + 6) % 12        
@@ -128,47 +131,13 @@ def parse_fen_to_features(fen_string):
         b_king_sq_rotated = black_king_sq ^ 63
         
         b_idx = (b_king_sq_rotated * 768) + (b_type * 64) + b_sq
-        passive_indices.append(b_idx)
+        black_perspective_indices.append(b_idx)
         
-    return active_indices, passive_indices
-
-def mirror_fen(fen_string):
-    """
-    Swaps piece colors (case) and inverts ranks to create a true 
-    mirrored FEN string from Black's perspective.
-    """
-    parts = fen_string.split()
-    board_part = parts[0]
-    
-    # 1. Reverse the ranks (vertical flip)
-    ranks = board_part.split('/')
-    ranks.reverse()
-    mirrored_board = '/'.join(ranks)
-    
-    # 2. Swap the case of characters (color flip)
-    # swapcase() turns 'K' -> 'k', 'p' -> 'P', etc.
-    mirrored_board = mirrored_board.swapcase()
-    
-    # 3. Swap active color indicator in FEN ('w' <-> 'b')
-    active_color = 'b' if parts[1] == 'w' else 'w'
-    
-    # 4. Handle castling rights case swap (e.g., 'KQkq' -> 'kqKQ')
-    castling = parts[2].swapcase() if parts[2] != '-' else '-'
-    
-    # 5. Handle en passant square vertical flip (e.g., 'e3' -> 'e6')
-    ep_square = parts[3]
-    if ep_square != '-':
-        file_char = ep_square[0]
-        rank_char = ep_square[1]
-        # Invert rank: 3 -> 6, 6 -> 3
-        new_rank = str(9 - int(rank_char))
-        ep_square = file_char + new_rank
-
-    # Reassemble FEN with remaining parts if they exist
-    remaining = parts[4:] if len(parts) > 4 else []
-    
-    new_parts = [mirrored_board, active_color, castling, ep_square] + remaining
-    return " ".join(new_parts)  
+    # Dynamically return based on active player turn context
+    if is_black_turn:
+        return black_perspective_indices, white_perspective_indices
+    else:
+        return white_perspective_indices, black_perspective_indices
 
 def get_endgame_piece_count(fen_string: str) -> int:
     board_part = fen_string.split()[0]
@@ -193,6 +162,14 @@ def save_parquet_shard(batch_records, output_dir):
     df = pd.DataFrame(batch_records)
     df.to_parquet(output_path, compression="snappy", index=False)
     print(f"[Exported Shard {file_counter}] Saved {len(df)} clean positions to {output_path}.")
+
+        
+def pad_indices(a_idx, p_idx):
+    a_pad = np.full(MAX_PIECES, INPUT_FEATURES, dtype=np.int32)
+    p_pad = np.full(MAX_PIECES, INPUT_FEATURES, dtype=np.int32)
+    a_pad[:min(len(a_idx), MAX_PIECES)] = a_idx[:min(len(a_idx), MAX_PIECES)]
+    p_pad[:min(len(p_idx), MAX_PIECES)] = p_idx[:min(len(p_idx), MAX_PIECES)]
+    return a_pad.tolist(), p_pad.tolist()
 
 def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SIZE):
     os.makedirs(output_dir, exist_ok=True)
@@ -238,52 +215,35 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
         if abs(static_score - q_score) > 120:
             continue
 
-        # 5. Standardize target perspective to match your Side-To-Move network design
-        y_pawn_target = score_target / 100.0
-        is_black_turn = (board.turn == chess.BLACK)
-        if is_black_turn:
-            y_pawn_target = -y_pawn_target
-
-        # 6. Extract HalfKA indices and enforce uniform padding layout
-        w_indices, b_indices = parse_fen_to_features(fen)
-        fen_hash = int(hashlib.md5(fen.encode('utf-8')).hexdigest(), 16) % (10**10)
-        
-        def pad_indices(w_idx, b_idx):
-            w_pad = np.full(MAX_PIECES, -1, dtype=np.int32)
-            b_pad = np.full(MAX_PIECES, -1, dtype=np.int32)
-            w_pad[:min(len(w_idx), MAX_PIECES)] = w_idx[:min(len(w_idx), MAX_PIECES)]
-            b_pad[:min(len(b_idx), MAX_PIECES)] = b_idx[:min(len(b_idx), MAX_PIECES)]
-            return w_pad.tolist(), b_pad.tolist()
+        # Extract HalfKA indices and enforce uniform padding layout
+        active_indices, passive_indices = parse_fen_to_features(fen)
 
         # Scale raw score to a pawn target
         y_pawn_target = float(raw_score) / 100.0
         is_black_turn = (board.turn == chess.BLACK)
+        active_player_target = -y_pawn_target if is_black_turn else y_pawn_target
 
         # ----------------------------------------------------
         # PERSPECTIVE A: Original Board Orientation
         # ----------------------------------------------------
-        w_orig, b_orig = pad_indices(w_indices, b_indices)
+        active_orig, passive_orig = pad_indices(active_indices, passive_indices)
         batch_records.append({
-            'white_indices': w_orig,
-            'black_indices': b_orig,
-            'is_black_turn': 1.0 if is_black_turn else 0.0,
-            'target': -y_pawn_target if is_black_turn else y_pawn_target,
-            'position_hash': fen_hash
+            'active_indices': active_orig,
+            'passive_indices': passive_orig,
+            'target': active_player_target,
         })
 
         # --- PERSPECTIVE B: Mirrored Board ---
-        mirrored_fen_str = mirror_fen(fen)
+        rotated_board = board.transform(chess.flip_vertical).transform(chess.flip_horizontal)
+        rotated_fen = rotated_board.fen()
 
-        # Pass the mirrored FEN through your feature pipeline 
-        w_mirr, b_mirr = parse_fen_to_features(mirrored_fen_str)
-        w_mirr_pad, b_mirr_pad = pad_indices(w_mirr, b_mirr)
-
+        active_rot, passive_rot = parse_fen_to_features(rotated_fen)
+        active_rot_pad, passive_rot_pad = pad_indices(active_rot, passive_rot)
+        
         batch_records.append({
-            'white_indices': w_mirr_pad,
-            'black_indices': b_mirr_pad,
-            'is_black_turn': 0.0 if is_black_turn else 1.0,
-            'target': y_pawn_target if is_black_turn else -y_pawn_target,
-            'position_hash': fen_hash
+            'active_indices': active_rot_pad,
+            'passive_indices': passive_rot_pad,
+            'target': active_player_target,
         })
         
         if len(batch_records) >= samples_per_file:
