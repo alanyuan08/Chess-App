@@ -13,8 +13,8 @@ VAL_DIR="$PRODUCTION_DIR/validation"
 mkdir -p "$TRAIN_DIR"
 mkdir -p "$VAL_DIR"
 
-for i in {1..30}; do
-    FILENAME="production_wave_${i}.parquet"
+for i in {0..200}; do
+    FILENAME="production_data_${i}.parquet"
     SOURCE_PATH="$PRODUCTION_DIR/$FILENAME"
     
     # Verify the file actually exists before attempting to move it

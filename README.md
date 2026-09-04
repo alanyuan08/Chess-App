@@ -75,7 +75,7 @@
 
   Then the data is parsed into [White Prespective] [Black Prespective] for Dual-Perspective HalfKA NNUE and is mirrored for the non-active player to double the training data and to remove unintended color-bias. 
 
-  This generations a total of 512 million positions ->  394 million * (1 - 0.35) * 2.
+  This generations a total of 521,289,008 million unique positions
 
 - **Training Process:** The model is trained using 25 Epoch, with 1200 Steps and 16384 positions in step (492 million positions). The model loss is measured in Mean Squared Error. The model uses the remaining 15 million positions for validation. 
 

@@ -71,7 +71,7 @@ class PermanentDatasetManager:
     Multiprocessing data stream manager that leverages background processes 
     to concurrently read, parse, and pre-buffer Parquet training shards.
     """
-    def __init__(self, shard_directory, shard_pattern="production_wave_*.parquet", num_workers=4, queue_size=50000):
+    def __init__(self, shard_directory, shard_pattern="production_data_*.parquet", num_workers=4, queue_size=50000):
         self.shard_directory = shard_directory
         self.num_workers = num_workers
         self.queue_size = queue_size
