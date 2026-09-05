@@ -87,7 +87,6 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
 
     print(f"\n[SUCCESS] Safe NNUE file successfully compiled and written to: {file_path}")
 
-
 def train_nnue_on_fens():
     # Value token allocated to safely represent masking rows in the weights matrix
     PADDING_INDEX_VALUE = INPUT_FEATURES 
@@ -204,8 +203,8 @@ def train_nnue_on_fens():
         train_manager.generator_fn,
         output_signature=(
             {
-                "active_features": tf.TensorSpec(shape=(MAX_PIECES,), dtype=tf.int32),
-                "passive_features": tf.TensorSpec(shape=(MAX_PIECES,), dtype=tf.int32),
+                "active_features": tf.TensorSpec(shape=(None, MAX_PIECES), dtype=tf.int32),
+                "passive_features": tf.TensorSpec(shape=(None, MAX_PIECES), dtype=tf.int32),
             },
             tf.TensorSpec(shape=(1,), dtype=tf.float32)
         )
@@ -216,17 +215,16 @@ def train_nnue_on_fens():
         val_manager.generator_fn,
         output_signature=(
             {
-                "active_features": tf.TensorSpec(shape=(MAX_PIECES,), dtype=tf.int32),
-                "passive_features": tf.TensorSpec(shape=(MAX_PIECES,), dtype=tf.int32),
+                "active_features": tf.TensorSpec(shape=(None, MAX_PIECES), dtype=tf.int32),
+                "passive_features": tf.TensorSpec(shape=(None, MAX_PIECES), dtype=tf.int32),
             },
             tf.TensorSpec(shape=(1,), dtype=tf.float32)
         )
     )
 
     # Apply standard streaming shuffles and dynamic background caching buffers
-    train_dataset = train_dataset.shuffle(buffer_size=SHUFFLE_BUFFER, reshuffle_each_iteration=True)
-    train_dataset = train_dataset.batch(BATCH_SIZE).prefetch(2)
-    val_dataset = val_dataset.batch(VAL_BATCH_SIZE).prefetch(2)
+    train_dataset = train_dataset.prefetch(tf.data.AUTOTUNE)
+    val_dataset = val_dataset.prefetch(tf.data.AUTOTUNE)
 
     print("\n--- Model compilation complete. Commencing Training Step ---")
     checkpoint_path = "best_chess_nnue.keras"

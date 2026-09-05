@@ -17,7 +17,6 @@ def _worker_loop(file_list, data_queue, shutdown_event, padding_index_value):
     np.random.seed(int(time.time() * 1000) % 2**32 ^ mp.current_process().pid)
     
     while not shutdown_event.is_set():
-        # Local copy to shuffle shard file visitation orders each pass
         shuffled_files = list(file_list)
         np.random.shuffle(shuffled_files)
         
@@ -26,35 +25,46 @@ def _worker_loop(file_list, data_queue, shutdown_event, padding_index_value):
                 break
                 
             try:
-                # Load the compact parquet file directly into RAM
+                # 1. Load the compact parquet file directly into RAM
                 df = pd.read_parquet(file_path)
                 
-                # Perform an in-memory row shuffle within this shard to maximize randomness
+                # 2. Perform an in-memory row shuffle within this shard
                 df = df.sample(frac=1.0).reset_index(drop=True)
                 
-                for _, row in df.iterrows():
+                total_rows = len(df)
+                if total_rows == 0:
+                    continue
+
+                # 3. Fast Vector Conversion: Stack everything into large 2D/2D/1D matrices instantly
+                # This bypasses the slow df.iterrows() loop completely
+                a_matrix = np.stack(df['active_indices'].values).astype(np.int32)
+                p_matrix = np.stack(df['passive_indices'].values).astype(np.int32)
+                targets = np.stack(df['target'].values).astype(np.float32).reshape(-1, 1)
+
+                # 4. Apply your safe padding replacement across the entire matrix at once
+                a_matrix[a_matrix == -1] = padding_index_value
+                p_matrix[p_matrix == -1] = padding_index_value
+
+                # 5. Chunk and Stream via the Queue
+                for i in range(0, total_rows, chunk_size):
                     if shutdown_event.is_set():
                         break
-                        
-                    a_idx = np.array(row['active_indices'], dtype=np.int32)
-                    p_idx = np.array(row['passive_indices'], dtype=np.int32)
+
+                    end_idx = min(i + chunk_size, total_rows)
                     
-                    # Convert negative padding markers (-1) into your safe positive embedding token
-                    a_idx[a_idx == -1] = padding_index_value
-                    p_idx[p_idx == -1] = padding_index_value
-                    
-                    item = (
+                    # Slice out a micro-batch chunk
+                    chunk_item = (
                         {
-                            "active_features": a_idx,
-                            "passive_features": p_idx,
+                            "active_features": a_matrix[i:end_idx],
+                            "passive_features": p_matrix[i:end_idx],
                         },
-                        [float(row['target'])]
+                        targets[i:end_idx]
                     )
                     
                     # Block if the queue is full; continuously poll shutdown event status
                     while not shutdown_event.is_set():
                         try:
-                            data_queue.put(item, timeout=0.1)
+                            data_queue.put(chunk_item, timeout=0.1)
                             break
                         except queue.Full:
                             continue

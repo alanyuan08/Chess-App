@@ -214,18 +214,16 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
         q_score = q_search(board, -float('inf'), float('inf'))
         if abs(static_score - q_score) > 120:
             continue
+        
+        active_pawn_score = float(raw_score) / 100.0
 
-        # Extract HalfKA indices and enforce uniform padding layout
+        # --- PERSPECTIVE A: Original Board Orientation ---
         active_indices, passive_indices = parse_fen_to_features(fen)
 
         # Scale raw score to a pawn target
-        y_pawn_target = float(raw_score) / 100.0
         is_black_turn = (board.turn == chess.BLACK)
-        active_player_target = -y_pawn_target if is_black_turn else y_pawn_target
+        active_player_target = -active_pawn_score if is_black_turn else active_pawn_score
 
-        # ----------------------------------------------------
-        # PERSPECTIVE A: Original Board Orientation
-        # ----------------------------------------------------
         active_orig, passive_orig = pad_indices(active_indices, passive_indices)
         batch_records.append({
             'active_indices': active_orig,
@@ -234,16 +232,19 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
         })
 
         # --- PERSPECTIVE B: Mirrored Board ---
-        rotated_board = board.transform(chess.flip_vertical).transform(chess.flip_horizontal)
+        rotated_board = board.mirror().transform(chess.flip_horizontal)
         rotated_fen = rotated_board.fen()
 
         active_rot, passive_rot = parse_fen_to_features(rotated_fen)
         active_rot_pad, passive_rot_pad = pad_indices(active_rot, passive_rot)
+
+        is_black_turn_rot = (rotated_board.turn == chess.BLACK)
+        target_rot = -active_pawn_score if is_black_turn_rot else active_pawn_score
         
         batch_records.append({
             'active_indices': active_rot_pad,
             'passive_indices': passive_rot_pad,
-            'target': active_player_target,
+            'target': target_rot,
         })
         
         if len(batch_records) >= samples_per_file:
