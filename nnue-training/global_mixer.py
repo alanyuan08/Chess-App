@@ -4,8 +4,8 @@ import glob
 import polars as pl
 
 # Configure your incoming quiet/mirrored paths here
-DEDUP_DATA = "./data_dedup"
-MIXED_PRODUCTION_DIR = "./data_dedup_mixed" 
+DEDUP_DATA = "./data_mirrored"
+MIXED_PRODUCTION_DIR = "./production_shards" 
 TEMP_MIX_DIR = "./temp_mixer_shards" 
 FINAL_DATA_SIZE = 2_000_000
 
@@ -66,7 +66,7 @@ def run_global_mixer():
     production_wave_counter = 1
     leftover_rows = None
     
-    bucket_files = glob.glob(os.path.join(TEMP_MIX_DIR, "bucket_*.parquet"))
+    bucket_files = glob.glob(os.path.join(TEMP_MIX_DIR, "data_*.parquet"))
     
     for i, b_path in enumerate(bucket_files, 1):
         print(f"    [{i}/{len(bucket_files)}] Final Mixing Bucket {os.path.basename(b_path)}...")
@@ -87,7 +87,7 @@ def run_global_mixer():
         j = 0
         while j + FINAL_DATA_SIZE <= total_available:
             production_shard = df_shuffled.slice(j, FINAL_DATA_SIZE)
-            output_path = os.path.join(MIXED_PRODUCTION_DIR, f"production_wave_{production_wave_counter}.parquet")
+            output_path = os.path.join(MIXED_PRODUCTION_DIR, f"data_{production_wave_counter}.parquet")
             production_shard.write_parquet(output_path, compression="snappy")
             print(f"       [MIX EXPORT {production_wave_counter}] Written {FINAL_DATA_SIZE:,} randomized rows.")
             
@@ -101,7 +101,7 @@ def run_global_mixer():
     # Save absolute remainder into final wave file if valid
     if leftover_rows is not None and production_wave_counter > 1:
         print(f" -> Appending final trailing {len(leftover_rows):,} records to complete the pipeline.")
-        output_path = os.path.join(MIXED_PRODUCTION_DIR, f"data_dedup_mixed_{production_wave_counter}.parquet")
+        output_path = os.path.join(MIXED_PRODUCTION_DIR, f"data_{production_wave_counter}.parquet")
         leftover_rows.write_parquet(output_path, compression="snappy")
         production_wave_counter += 1
 

@@ -94,7 +94,7 @@ def run_global_deduplication():
         j = 0
         while j + FINAL_DATA_SIZE <= total_available:
             production_shard = df_filtered.slice(j, FINAL_DATA_SIZE)
-            output_path = os.path.join(PRODUCTION_DIR, f"data_dedup_{production_wave_counter}.parquet")
+            output_path = os.path.join(PRODUCTION_DIR, f"data_{production_wave_counter}.parquet")
             production_shard.write_parquet(output_path, compression="snappy")
             print(f"       [PRODUCTION EXPORT {production_wave_counter}] Written {FINAL_DATA_SIZE:,} rows.")
             

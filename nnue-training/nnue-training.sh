@@ -21,20 +21,20 @@ pip install "../[training]"
 python global_dedup.py
 rm -f ./data/*
 
-# 5. Data Mixer -> Input /data_dedup -> Output /data_dedup_mixed
-python global_mixer.py
+# 5. Data Parse + Mirror -> Input /data_dedup -> Output /data_mirrored
+python dataset_exporter.py
 rm -f ./data_dedup/*
 
-# 6. Data Exporter -> Input /data_dedup_mixed -> Output /production_shards
-python dataset_exporter.py
-rm -f ./data_dedup_mixed/*
+# 6. Data Mixer -> Input /data_mirrored -> Output /production_shards
+python global_mixer.py
+rm -f ./data_mirrored/*
 
-# 6. Training / Validation Split -> Input /production_shards
+# 7. Training / Validation Split -> Input /production_shards
 ./training_shuffle.sh
 
-# 7. Run your main training script -> Input /production_shards
+# 8. Run your main training script -> Input /production_shards
 python train_pipeline.py
 
-# 8. Upload Weights to Hugging Face
+# 9. Upload Weights to Hugging Face
 hf auth login
-hf upload AlanYuan0408/nnue_weights.bin nnue_weights.bin
+# hf upload AlanYuan0408/nnue_weights.bin nnue_weights.bin

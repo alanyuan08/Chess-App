@@ -4,7 +4,6 @@ import sys
 import numpy as np
 import chess
 import pandas as pd
-import hashlib
 
 # --- INITIALIZATION ENGINE CONSTANTS ---
 DATA_SIZE = 2_000_000
@@ -28,7 +27,7 @@ PIECE_VALUES = {
 
 # --- DIRECTORY PATH AUTO-RESOLUTION ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__)) if '__file__' in locals() else os.getcwd()
-BINARY_OUTPUT_DIR = os.path.join(SCRIPT_DIR, "production_shards")
+BINARY_OUTPUT_DIR = os.path.join(SCRIPT_DIR, "data_mirrored")
 
 # --- GLOBAL TRACKERS ---
 file_counter = 0
@@ -156,7 +155,7 @@ def is_invalid_training_row(depth_str, fen_string: str) -> bool:
 def save_parquet_shard(batch_records, output_dir):
     """Helper function to build a structured dataframe and write to Parquet format."""
     global file_counter
-    prefix = f"production_data_{file_counter}"
+    prefix = f"data_{file_counter}"
     output_path = os.path.join(output_dir, f"{prefix}.parquet")
     
     df = pd.DataFrame(batch_records)
@@ -212,14 +211,12 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
         # 4. Filter out highly volatile tactical configurations via Q-Search
         static_score = static_evaluate(board)
         q_score = q_search(board, -float('inf'), float('inf'))
-        if abs(static_score - q_score) > 120:
+        if abs(static_score - q_score) > 40:
             continue
         
         active_pawn_score = float(raw_score) / 100.0
 
         # --- PERSPECTIVE A: Original Board Orientation ---
-
-        # Scale raw score to a pawn target
         is_black_turn = (board.turn == chess.BLACK)
         active_player_target = -active_pawn_score if is_black_turn else active_pawn_score
 
@@ -229,6 +226,7 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
             'active_indices': active_orig,
             'passive_indices': passive_orig,
             'target': active_player_target,
+            'fen': fen
         })
 
         # --- PERSPECTIVE B: Mirrored Board ---
@@ -242,6 +240,7 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
             'active_indices': active_rot_pad,
             'passive_indices': passive_rot_pad,
             'target': active_player_target,
+            'fen': rotated_fen
         })
         
         if len(batch_records) >= samples_per_file:
@@ -268,7 +267,7 @@ def main():
     import glob
     
     # Dynamically discover all downloaded raw parquet files inside your data/ folder
-    raw_parquet_pattern = os.path.join(SCRIPT_DIR, "data_dedup_mixed", "*.parquet")
+    raw_parquet_pattern = os.path.join(SCRIPT_DIR, "data_dedup", "data_*.parquet")
     raw_files = sorted(glob.glob(raw_parquet_pattern))
     
     if not raw_files:

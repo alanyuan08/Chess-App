@@ -12,7 +12,7 @@ from permanent_dataset_manager import PermanentDatasetManager
 INPUT_FEATURES = 64 * 64 * 12  # Dual-Perspective HalfKA Dimension (24,576)
 MAX_PIECES = 32                # Uniform layout array padding bound
 SCALE_MAX = 1.0                # Bounded Clipped ReLU limit
-BATCH_SIZE = 16384             # Standard massive NNUE training batch size
+BATCH_SIZE = 8192             # Standard massive NNUE training batch size
 VAL_BATCH_SIZE = 4096          # Validation tracking step batch size
 SHUFFLE_BUFFER = 50000         # Buffer allocation size for secondary tf.data mix
 
@@ -45,12 +45,14 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
         # 1. Accumulator Layer (49152 -> 256)
         # Input: Binary (0/1) | Weights: i16 | Bias/Output Accumulator: i32
         acc_layer = model.get_layer("accumulator_layer")
-        w1, b1 = acc_layer.get_weights()
-        w1_quant = np.ascontiguousarray(np.round(w1 * 128.0)).astype(np.int16)
-        b1_quant = np.round(b1 * 128.0).astype(np.int32) 
+        embedding_weights = acc_layer.get_weights()[0]
+        w1_real = embedding_weights[:49152, :]
+        w1_quant = np.ascontiguousarray(np.round(w1_real * 128.0)).astype(np.int16)
+        b1_quant = np.zeros(256, dtype=np.int32)
+        # Write exactly the same bytes structure as before
         f.write(w1_quant.tobytes())
         f.write(b1_quant.tobytes())
-        print(f"-> Accumulator Layer serialized. Shape: {w1.shape} (Weights: i16 / Bias: i32)")
+        print(f"-> Accumulator Layer serialized. Shape: {w1_real.shape} (Weights: i16 / Synthetic Bias: i32)")
 
         # 2. Hidden Layer 2 (512 -> 64)
         # Input: i16 (Clipped from Accumulator) | Weights: i8 | Bias/Output: i32
@@ -103,7 +105,7 @@ def train_nnue_on_fens():
         input_dim=INPUT_FEATURES + 1,
         output_dim=256,
         embeddings_initializer=nnue_accumulator_init,
-        name="shared_accumulator_embedding"
+        name="accumulator_layer"
     )
 
     # 3. Pull dense weights representations for all slots
@@ -150,11 +152,11 @@ def train_nnue_on_fens():
         Official Stockfish Style NNUE Loss Function.
         Calculates Mean Squared Error in WDL (probability) space.
         """
-        SF_SCALE = 0.5
+        MULTIPLIER = 0.55
         
         # Pass both target and prediction through a sigmoid to map to WDL space
-        target_wdl = tf.math.sigmoid(y_true * SF_SCALE)
-        pred_wdl = tf.math.sigmoid(y_pred * SF_SCALE)
+        target_wdl = tf.math.sigmoid(y_true * MULTIPLIER)
+        pred_wdl = tf.math.sigmoid(y_pred * MULTIPLIER)
         
         loss = tf.math.squared_difference(target_wdl, pred_wdl)
         return tf.reduce_mean(loss)
@@ -189,10 +191,10 @@ def train_nnue_on_fens():
 
     # Create the permanent managers ONCE. They spawn background processes that live forever.
     train_manager = PermanentDatasetManager(
-        shard_directory=train_dir, shard_pattern="production_data_*.parquet", num_workers=4, queue_size=50000
+        shard_directory=train_dir, shard_pattern="data_*.parquet", num_workers=4, queue_size=50000
     )
     val_manager = PermanentDatasetManager(
-        shard_directory=val_dir, shard_pattern="production_data_*.parquet", num_workers=1, queue_size=10000
+        shard_directory=val_dir, shard_pattern="data_*.parquet", num_workers=1, queue_size=10000
     )
 
     # --- Train Dataset (Updated to accept dense list tokens signatures) ---
@@ -237,7 +239,7 @@ def train_nnue_on_fens():
         """Smooth Cosine Decay learning rate schedule for NNUE training."""
         initial_lr = 0.001
         min_lr = 0.00001      
-        total_epochs = 25     
+        total_epochs = 100     
         
         if epoch >= total_epochs:
             return min_lr
@@ -252,8 +254,8 @@ def train_nnue_on_fens():
     # Train model execution call
     model.fit(
         train_dataset, 
-        steps_per_epoch=1200,
-        epochs=25, 
+        steps_per_epoch=8192,
+        epochs=100, 
         validation_data=val_dataset,
         validation_steps=120,
         callbacks=[checkpoint_cb, lr_scheduler_cb, cleanup_cb]
