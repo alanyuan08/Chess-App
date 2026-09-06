@@ -150,14 +150,11 @@ def train_nnue_on_fens():
         Official Stockfish Style NNUE Loss Function.
         Calculates Mean Squared Error in WDL (probability) space.
         """
-        y_true_cp = y_true * 100.0
-        y_pred_cp = y_pred * 100.0
-        
-        SF_SCALE = 0.0075
+        SF_SCALE = 0.5
         
         # Pass both target and prediction through a sigmoid to map to WDL space
-        target_wdl = tf.math.sigmoid(y_true_cp * SF_SCALE)
-        pred_wdl = tf.math.sigmoid(y_pred_cp * SF_SCALE)
+        target_wdl = tf.math.sigmoid(y_true * SF_SCALE)
+        pred_wdl = tf.math.sigmoid(y_pred * SF_SCALE)
         
         loss = tf.math.squared_difference(target_wdl, pred_wdl)
         return tf.reduce_mean(loss)
@@ -206,7 +203,7 @@ def train_nnue_on_fens():
                 "active_features": tf.TensorSpec(shape=(None, MAX_PIECES), dtype=tf.int32),
                 "passive_features": tf.TensorSpec(shape=(None, MAX_PIECES), dtype=tf.int32),
             },
-            tf.TensorSpec(shape=(1,), dtype=tf.float32)
+            tf.TensorSpec(shape=(None, 1), dtype=tf.float32)
         )
     )
 
@@ -218,7 +215,7 @@ def train_nnue_on_fens():
                 "active_features": tf.TensorSpec(shape=(None, MAX_PIECES), dtype=tf.int32),
                 "passive_features": tf.TensorSpec(shape=(None, MAX_PIECES), dtype=tf.int32),
             },
-            tf.TensorSpec(shape=(1,), dtype=tf.float32)
+            tf.TensorSpec(shape=(None, 1), dtype=tf.float32)
         )
     )
 

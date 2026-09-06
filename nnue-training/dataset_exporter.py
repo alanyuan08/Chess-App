@@ -218,12 +218,12 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
         active_pawn_score = float(raw_score) / 100.0
 
         # --- PERSPECTIVE A: Original Board Orientation ---
-        active_indices, passive_indices = parse_fen_to_features(fen)
 
         # Scale raw score to a pawn target
         is_black_turn = (board.turn == chess.BLACK)
         active_player_target = -active_pawn_score if is_black_turn else active_pawn_score
 
+        active_indices, passive_indices = parse_fen_to_features(fen)
         active_orig, passive_orig = pad_indices(active_indices, passive_indices)
         batch_records.append({
             'active_indices': active_orig,
@@ -237,14 +237,11 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
 
         active_rot, passive_rot = parse_fen_to_features(rotated_fen)
         active_rot_pad, passive_rot_pad = pad_indices(active_rot, passive_rot)
-
-        is_black_turn_rot = (rotated_board.turn == chess.BLACK)
-        target_rot = -active_pawn_score if is_black_turn_rot else active_pawn_score
         
         batch_records.append({
             'active_indices': active_rot_pad,
             'passive_indices': passive_rot_pad,
-            'target': target_rot,
+            'target': active_player_target,
         })
         
         if len(batch_records) >= samples_per_file:

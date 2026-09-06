@@ -8,7 +8,7 @@ import multiprocessing as mp
 import numpy as np
 import pandas as pd
 
-def _worker_loop(file_list, data_queue, shutdown_event, padding_index_value):
+def _worker_loop(file_list, data_queue, shutdown_event, padding_index_value, chunk_size=512):
     """
     Isolated background process worker loop.
     Sequentially loads Parquet shards, shuffles rows locally, and feeds the queue.
@@ -80,10 +80,11 @@ class PermanentDatasetManager:
     Multiprocessing data stream manager that leverages background processes 
     to concurrently read, parse, and pre-buffer Parquet training shards.
     """
-    def __init__(self, shard_directory, shard_pattern="production_data_*.parquet", num_workers=4, queue_size=50000):
+    def __init__(self, shard_directory, shard_pattern="production_data_*.parquet", num_workers=4, queue_size=50000, batch_size=512):
         self.shard_directory = shard_directory
         self.num_workers = num_workers
         self.queue_size = queue_size
+        self.batch_size = batch_size
         
         # Determine the total list of exported shards matching your file pattern
         self.all_files = glob.glob(os.path.join(shard_directory, shard_pattern))
@@ -115,7 +116,7 @@ class PermanentDatasetManager:
                 
             process = mp.Process(
                 target=_worker_loop,
-                args=(worker_files, self.data_queue, self.shutdown_event, self.PADDING_INDEX_VALUE),
+                args=(worker_files, self.data_queue, self.shutdown_event, self.PADDING_INDEX_VALUE, self.batch_size),
                 daemon=True # Ensures tasks get forcefully culled if parent script terminates abruptly
             )
             self.workers.append(process)
