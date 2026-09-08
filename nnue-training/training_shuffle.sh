@@ -4,7 +4,7 @@
 set -e
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE}" )" && pwd )"
-PRODUCTION_DIR="$SCRIPT_DIR/production_shards"
+PRODUCTION_DIR="$SCRIPT_DIR/balanced_shards"
 
 TRAIN_DIR="$PRODUCTION_DIR/training"
 VAL_DIR="$PRODUCTION_DIR/validation"
@@ -13,7 +13,7 @@ VAL_DIR="$PRODUCTION_DIR/validation"
 mkdir -p "$TRAIN_DIR"
 mkdir -p "$VAL_DIR"
 
-for i in {0..200}; do
+for i in {0..500}; do
     FILENAME="data_${i}.parquet"
     SOURCE_PATH="$PRODUCTION_DIR/$FILENAME"
     
@@ -24,8 +24,8 @@ for i in {0..200}; do
     fi
     
     # 4. Enforce your exact validation split rule: 
-    # Waves 0 to 4 go to validation, the remaining go to training
-    if [ "$i" -le 4 ]; then
+    # Waves 0 to 5 go to validation, the remaining go to training
+    if [ "$i" -le 5 ]; then
         echo "Allocating to VALIDATION ──> $FILENAME"
         mv "$SOURCE_PATH" "$VAL_DIR/"
     else

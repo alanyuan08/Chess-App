@@ -69,19 +69,17 @@
 - **Training Data:** The positions are sourced from [Lichess Chess Position Evaluations](https://huggingface.co/datasets/Lichess/chess-position-evaluations), which contains 394,669,566 chess positions evaluated with Stockfish at various depths. The training / validation data use different shards and the training data is shuffled to ensure an even distribution. 
 
 - **PreProcesisng:** 
-  The positions from Lichess are deduplicated and randomized into training shards. 
+  - **Data Processing:** The data is filtered for quiet positions - The king isn't in check, there is no immediate tactical win that can be gained via captures and there isn't a checkmate sequence. The removes roughly 35% of the positions.
 
-  The data is filtered for quiet positions - The king isn't in check, there is no immediate tactical win that can be gained via captures and there isn't a checkmate sequence. The removes roughly 35% of the positions.
+  Furthermore, the data is Augmented by rotating each position by 180 degrees to provide a second data set. This generations a total of 521,289,008 million unique positions,
 
-  Then the data is parsed into [White Prespective] [Black Prespective] for Dual-Perspective HalfKA NNUE and is mirrored for the non-active player to double the training data and to remove unintended color-bias. 
+  - **Deduplication and Shard Balancing:** The data is deduplicated and randomized. Furthermore, the data is group in buckets of 2 million data sets with 45% between 0 to 150 centipawn, 35% between 150 to 400 centipawns, 15% between 400 to 800 centipawns, and 5% between 800 to 1000 centipawns.
 
-  This generations a total of 521,289,008 million unique positions
+- **Training Process:** The model applies a Sigmoid transformation to the score output as a win percentage - 1.0 (win), 0.5 (draw), and 0.0 (loss) to ensure the model focus on the positions closer to the 0.5 range rather than outliers with an overwhelming advantage.
 
-- **Training Process:** The model is trained using 25 Epoch, with 1200 Steps and 16384 positions in step (492 million positions). The model loss is measured in Mean Squared Error. The model uses the remaining 15 million positions for validation. 
+  The model is trained using 2000 Epoch, with 4000 Steps per epoch and 8192 positions in step.
 
-  The model applies a Sigmoid transformation to the score output as a win percentage - 1.0 (win), 0.5 (draw), and 0.0 (loss) to ensure the model focus on the positions closer to the 0.5 range rather than outliers with an overwhelming advantage.
-
-  It uses a loss function of Mean Squared Error between Ypred - Yexpected. It uses a decaying learning rate with an initial value of 0.001
+  It uses a loss function of Mean Squared Error between Ypred - Yexpected. It uses a an learning rate with an initial value of 0.001 for Epoch 0 to 139, 0.0001 for Epoch 140 to 175 and 0.00001 for the remaining Epochs
 
 - cd nnue-training
 - /train_pipeline.sh

@@ -24,7 +24,7 @@ TOTAL_TRAINING_STEPS = STEPS_PER_EPOCH * TOTAL_EPOCHS # 2,000,000 steps total
 WARMUP_STEPS = STEPS_PER_EPOCH * 5                    # 100,000 step warmup
 
 # Mixed Data Sets
-CLEAN_DATASET_DIR = "./production_shards" 
+CLEAN_DATASET_DIR = "./balanced_shards" 
 BIN_SAVE_PATH = "nnue_weights.bin"
 
 # Fallback structures for metric and loop calculations
@@ -40,8 +40,8 @@ def get_local_shard_directories():
     Defines the storage locations for your exported clean Parquet files.
     Modify these strings to point directly to your dataset output directories.
     """
-    train_dir = "./production_shards/training/"
-    val_dir = "./production_shards/validation/"
+    train_dir = "./balanced_shards/training/"
+    val_dir = "./balanced_shards/validation/"
     return train_dir, val_dir
 
 # --- Export NNuE Weights for Rust ---
