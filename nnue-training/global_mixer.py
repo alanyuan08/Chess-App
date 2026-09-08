@@ -1,9 +1,10 @@
 import os
 import sys
 import glob
+import numpy as np
 import polars as pl
 
-# Configure your incoming quiet/mirrored paths here
+# Configure your incoming paths here
 DEDUP_DATA = "./data_mirrored"
 MIXED_PRODUCTION_DIR = "./production_shards" 
 TEMP_MIX_DIR = "./temp_mixer_shards" 
@@ -13,7 +14,6 @@ def run_global_mixer():
     os.makedirs(MIXED_PRODUCTION_DIR, exist_ok=True)
     os.makedirs(TEMP_MIX_DIR, exist_ok=True)
     
-    # 1. Discover all Parquet files produced by dedup
     input_pattern = os.path.join(DEDUP_DATA, "*.parquet")
     input_shards = sorted(glob.glob(input_pattern))
     
@@ -21,61 +21,60 @@ def run_global_mixer():
         print(f"[ERROR] No parquet shards found in {DEDUP_DATA}!")
         sys.exit(1)
         
-    print(f"=== Commencing Global Mixer Across {len(input_shards)} Clean Shards ===")
+    print(f"=== Commencing True Global Mixer Across {len(input_shards)} Clean Shards ===")
+    
+    # 64 buckets splits 550M rows into ~8.5M row blocks, which are hyper-fast to sort in RAM
+    NUM_BUCKETS = 64
     
     # =========================================================================
-    # PASS 1: Assign Pseudo-Random Keys & Distribute into Temp Buckets
+    # PASS 1: Assign Global Hashing IDs & Distribute into Temp Buckets
     # =========================================================================
     print(" -> Pass 1: Assigning randomized keys and partitioning shards...")
-    
-    # We will split data randomly across 16 bucket files to keep subsequent sorting chunks small
-    NUM_BUCKETS = 16
     
     for i, path in enumerate(input_shards, 1):
         print(f"    [{i}/{len(input_shards)}] Partitioning {os.path.basename(path)}...")
         
-        # Read the shard
         df_shard = pl.read_parquet(path)
         
-        # Generate an incredibly fast deterministic pseudo-random key by mapping a hash to a bucket index.
-        # This breaks up chronological game biases while using zero extra memory.
+        # Generate a cryptographic-strength hash of the FEN to serve as a sorting index.
+        # This completely untethers a position from its original game structure.
         df_partitioned = df_shard.with_columns(
             pl.col("fen").hash().alias("mix_hash")
         ).with_columns(
-            (pl.col("mix_hash") % NUM_BUCKETS).alias("bucket_id")
+            (pl.col("mix_hash").abs() % NUM_BUCKETS).alias("bucket_id")
         )
         
         # Append partition chunks to our local temp buckets
         for bucket_id in range(NUM_BUCKETS):
-            chunk = df_partitioned.filter(pl.col("bucket_id") == bucket_id).drop(["mix_hash", "bucket_id"])
+            chunk = df_partitioned.filter(pl.col("bucket_id") == bucket_id).drop(["bucket_id"])
             if len(chunk) > 0:
                 bucket_path = os.path.join(TEMP_MIX_DIR, f"bucket_{bucket_id}.parquet")
                 
-                # If bucket file already exists, read and append, otherwise write new
                 if os.path.exists(bucket_path):
+                    # We write directly using append structures if possible, or read-concat
                     existing = pl.read_parquet(bucket_path)
                     pl.concat([existing, chunk]).write_parquet(bucket_path, compression="snappy")
                 else:
                     chunk.write_parquet(bucket_path, compression="snappy")
                     
     # =========================================================================
-    # PASS 2: Locally Shuffle Buckets & Slice into 2M Row Production Waves
+    # PASS 2: Explicit Sort on Mix Hash & Slice into 2M Row Waves
     # =========================================================================
-    print("\n -> Pass 2: Executing local shuffles and writing production waves...")
+    print("\n -> Pass 2: Executing global sort interleaving and writing production waves...")
     
     production_wave_counter = 1
     leftover_rows = None
     
-    bucket_files = glob.glob(os.path.join(TEMP_MIX_DIR, "data_*.parquet"))
+    bucket_files = glob.glob(os.path.join(TEMP_MIX_DIR, "bucket_*.parquet"))
     
     for i, b_path in enumerate(bucket_files, 1):
         print(f"    [{i}/{len(bucket_files)}] Final Mixing Bucket {os.path.basename(b_path)}...")
         
         df_bucket = pl.read_parquet(b_path)
         
-        # Execute an in-memory shuffle on the scaled bucket using a fast random sampler fraction
-        # This completely randomizes the position sequence.
-        df_shuffled = df_bucket.sample(fraction=1.0, shuffle=True, seed=42)
+        # Because positions are sorted by their hash values rather than their original file sequence,
+        # positions from File 1, File 50, and File 200 interleave perfectly in memory!
+        df_shuffled = df_bucket.sort("mix_hash").drop("mix_hash")
         
         # Combine with trailing records from the previous bucket if applicable
         if leftover_rows is not None:
@@ -94,7 +93,6 @@ def run_global_mixer():
             production_wave_counter += 1
             j += FINAL_DATA_SIZE
             
-        # Retain trailing components for the next block iteration
         if j < total_available:
             leftover_rows = df_shuffled.slice(j, total_available - j)
             

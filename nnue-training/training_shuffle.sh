@@ -14,7 +14,7 @@ mkdir -p "$TRAIN_DIR"
 mkdir -p "$VAL_DIR"
 
 for i in {0..200}; do
-    FILENAME="production_data_${i}.parquet"
+    FILENAME="data_${i}.parquet"
     SOURCE_PATH="$PRODUCTION_DIR/$FILENAME"
     
     # Verify the file actually exists before attempting to move it

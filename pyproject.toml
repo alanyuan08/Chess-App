@@ -16,10 +16,11 @@ manifest-path = "rust_compute/Cargo.toml"
 [project.optional-dependencies]
 training = [
     "numpy",
-    "tensorflow",
-    "keras",
+    "tensorflow>=2.16.0",
+    "keras>=3.0.0",
     "datasets",
     "chess",
     "pandas",
-    "polars"
+    "polars",
+    "pyarrow"
 ]

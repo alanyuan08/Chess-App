@@ -1,20 +1,27 @@
-import os
-import math
-import tensorflow as tf
-import keras
-from keras import layers, Model
 import numpy as np
+import tensorflow as tf
+
+# Standardized Keras 3 public modules
+import keras
+from keras import Model
+from keras import layers
 
 # Import your newly written modular classes
 from permanent_dataset_manager import PermanentDatasetManager
 
 # --- Global Configurations ---
-INPUT_FEATURES = 64 * 64 * 12  # Dual-Perspective HalfKA Dimension (24,576)
+INPUT_FEATURES = 64 * 64 * 12  # Dual-Perspective HalfKA Dimension (49152)
 MAX_PIECES = 32                # Uniform layout array padding bound
 SCALE_MAX = 1.0                # Bounded Clipped ReLU limit
 BATCH_SIZE = 8192             # Standard massive NNUE training batch size
 VAL_BATCH_SIZE = 4096          # Validation tracking step batch size
 SHUFFLE_BUFFER = 50000         # Buffer allocation size for secondary tf.data mix
+
+# --- Step-Based Architecture Configuration ---
+STEPS_PER_EPOCH = 4000
+TOTAL_EPOCHS = 200  
+TOTAL_TRAINING_STEPS = STEPS_PER_EPOCH * TOTAL_EPOCHS # 2,000,000 steps total
+WARMUP_STEPS = STEPS_PER_EPOCH * 5                    # 100,000 step warmup
 
 # Mixed Data Sets
 CLEAN_DATASET_DIR = "./production_shards" 
@@ -42,19 +49,19 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
     with open(file_path, "wb") as f:
         print("--- Commencing Weight Quantization & Serialization for Rust ---")
         
-        # 1. Accumulator Layer (49152 -> 256)
+        # 1. Accumulator Layer (49152 -> 512)
         # Input: Binary (0/1) | Weights: i16 | Bias/Output Accumulator: i32
         acc_layer = model.get_layer("accumulator_layer")
         embedding_weights = acc_layer.get_weights()[0]
         w1_real = embedding_weights[:49152, :]
         w1_quant = np.ascontiguousarray(np.round(w1_real * 128.0)).astype(np.int16)
-        b1_quant = np.zeros(256, dtype=np.int32)
+        b1_quant = np.zeros(512, dtype=np.int32)
         # Write exactly the same bytes structure as before
         f.write(w1_quant.tobytes())
         f.write(b1_quant.tobytes())
         print(f"-> Accumulator Layer serialized. Shape: {w1_real.shape} (Weights: i16 / Synthetic Bias: i32)")
 
-        # 2. Hidden Layer 2 (512 -> 64)
+        # 2. Hidden Layer 2 (512*2 -> 32)
         # Input: i16 (Clipped from Accumulator) | Weights: i8 | Bias/Output: i32
         # Shift Right by 7 (>> 7) before clipping to next input scale.
         layer2 = model.get_layer("hidden_layer_2") 
@@ -65,7 +72,7 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
         f.write(b2_quant.tobytes())
         print(f"-> Hidden Layer 2 serialized. Shape: {w2.shape} (Weights: i8 / Bias: i32) [Rust -> Shift >> 7]")
 
-        # 3. Hidden Layer 3 (64 -> 32)
+        # 3. Hidden Layer 3 (32 -> 32)
         # Input: i16 | Weights: i8 | Bias/Output: i32 
         # Shift Right by 5 (>> 5) before clipping to next input scale.
         layer3 = model.get_layer("hidden_layer_3")
@@ -94,8 +101,8 @@ def train_nnue_on_fens():
     PADDING_INDEX_VALUE = INPUT_FEATURES 
 
     # 1. Inputs: Sequences of active feature index tokens matching your Parquet shapes
-    active_input = layers.Input(shape=(MAX_PIECES,), dtype="int32", name="active_features")
-    passive_input = layers.Input(shape=(MAX_PIECES,), dtype="int32", name="passive_features")
+    active_input = keras.Input(shape=(MAX_PIECES,), dtype="int32", name="active_features")
+    passive_input = keras.Input(shape=(MAX_PIECES,), dtype="int32", name="passive_features")
 
     # 2. Shared Accumulator Layer (Using Embedding Reduction to replace the old sparse matrix bottleneck)
     nnue_accumulator_init = keras.initializers.TruncatedNormal(mean=0.0, stddev=0.005)
@@ -103,36 +110,37 @@ def train_nnue_on_fens():
     # We dimension the lookup array to INPUT_FEATURES + 1 to house the positive padding index row
     embedding_layer = layers.Embedding(
         input_dim=INPUT_FEATURES + 1,
-        output_dim=256,
+        output_dim=512,
         embeddings_initializer=nnue_accumulator_init,
+        mask_zero=False,
         name="accumulator_layer"
     )
 
     # 3. Pull dense weights representations for all slots
-    a_embed = embedding_layer(active_input) # Target shape: (Batch, 32, 256)
-    p_embed = embedding_layer(passive_input) # Target shape: (Batch, 32, 256)
+    a_embed = embedding_layer(active_input) # Target shape: (Batch, 16, 512)
+    p_embed = embedding_layer(passive_input) # Target shape: (Batch, 16, 512)
 
     # 4. Synthesize masking vectors to isolate and zero-out padding weight contributions
     a_mask = keras.ops.cast(keras.ops.not_equal(active_input, PADDING_INDEX_VALUE), dtype="float32")
     p_mask = keras.ops.cast(keras.ops.not_equal(passive_input, PADDING_INDEX_VALUE), dtype="float32")
     
-    # Expand to allow broadcasting dimensions across the 256 embedding properties
+    # Expand to allow broadcasting dimensions across the 512 embedding properties
     a_mask = keras.ops.expand_dims(a_mask, axis=-1) # Target shape: (Batch, 32, 1)
     p_mask = keras.ops.expand_dims(p_mask, axis=-1)
 
-    # Execute masked pool aggregation to compile the 256 accumulator vectors
-    a_acc = keras.ops.sum(a_embed * a_mask, axis=1) # Target shape: (Batch, 256)
-    p_acc = keras.ops.sum(p_embed * p_mask, axis=1) # Target shape: (Batch, 256)
+    # Execute masked pool aggregation to compile the 512 accumulator vectors
+    a_acc = keras.ops.sum(a_embed * a_mask, axis=1) # Target shape: (Batch, 512)
+    p_acc = keras.ops.sum(p_embed * p_mask, axis=1) # Target shape: (Batch, 512)
 
     # 5. Clipped ReLU Activation (ReLU1 / Bounded ReLU)
     a_act = keras.ops.clip(a_acc, 0.0, SCALE_MAX)
     p_act = keras.ops.clip(p_acc, 0.0, SCALE_MAX)
     
-    # 6. Perspective Multiplexing Layer (Shape: Batch, 512)
+    # 6. Perspective Multiplexing Layer (Shape: Batch, 1024)
     merged = layers.Concatenate(name="perspective_multiplex")([a_act, p_act]) 
     
     # 7. Hidden Layer 2 with ReLU1 activation
-    x = layers.Dense(64, activation=None, name="hidden_layer_2")(merged)
+    x = layers.Dense(32, activation=None, name="hidden_layer_2")(merged)
     x = keras.ops.clip(x, 0.0, SCALE_MAX)
 
     # 8. Hidden Layer 3 with ReLU1 activation
@@ -152,7 +160,7 @@ def train_nnue_on_fens():
         Official Stockfish Style NNUE Loss Function.
         Calculates Mean Squared Error in WDL (probability) space.
         """
-        MULTIPLIER = 0.55
+        MULTIPLIER = 0.244
         
         # Pass both target and prediction through a sigmoid to map to WDL space
         target_wdl = tf.math.sigmoid(y_true * MULTIPLIER)
@@ -179,9 +187,37 @@ def train_nnue_on_fens():
         raw_error = tf.abs(y_true - y_pred)
         return tf.reduce_mean(tf.math.tanh(raw_error / SCALE_THRESHOLD) * SCALE_THRESHOLD)
 
+    def stockfish_lr_schedule(epoch):
+        """
+        Official Stockfish 'Flat-then-Drop' Step Schedule.
+        Maintains max momentum early, drops off a cliff to freeze quantized arrays.
+        """
+        initial_lr = 0.001  # Stockfish standard starting rate
+        
+        # Phase 1: Keep it completely flat at peak for 70% of training (Epochs 0 to 140)
+        if epoch < 140:
+            return initial_lr   
+            
+        # Phase 2: First sudden cliff drop (Epochs 140 to 175)
+        # Staggers the step size down by a factor of 10 to compress loose parameters
+        elif epoch < 175:
+            return initial_lr * 0.1  # 0.0001
+            
+        # Phase 3: Final Precision Floor Lock (Epochs 175 to 200)
+        else:
+            return initial_lr * 0.01 # 0.00001
+        
+    # --- 3. OPTIMIZER SPECIFICATION (RANGER INTERACTIVE ENGINE) ---
+    # Ranger handles the early warm-up naturally via RAdam and absorbs jumps via Lookahead
+    stockfish_optimizer = keras.optimizers.AdamW(
+        learning_rate=0.001,
+        epsilon=1e-7,       # Stockfish relies on a tuned low epsilon to prevent dead NNUE neurons
+        weight_decay=1e-4   # Helps decouple the structural i8 weights seamlessly
+    )
+
     # --- Compile the model ---
     model.compile(
-        optimizer=keras.optimizers.Adam(learning_rate=0.001),
+        optimizer=stockfish_optimizer,
         loss=stockfish_nnue_pure_loss,
         metrics=[close_position_error_3, general_position_error_10]
     )
@@ -191,10 +227,10 @@ def train_nnue_on_fens():
 
     # Create the permanent managers ONCE. They spawn background processes that live forever.
     train_manager = PermanentDatasetManager(
-        shard_directory=train_dir, shard_pattern="data_*.parquet", num_workers=4, queue_size=50000
+        shard_directory=train_dir, shard_pattern="data_*.parquet", num_workers=4, queue_size=5000
     )
     val_manager = PermanentDatasetManager(
-        shard_directory=val_dir, shard_pattern="data_*.parquet", num_workers=1, queue_size=10000
+        shard_directory=val_dir, shard_pattern="data_*.parquet", num_workers=1, queue_size=5000
     )
 
     # --- Train Dataset (Updated to accept dense list tokens signatures) ---
@@ -235,30 +271,17 @@ def train_nnue_on_fens():
         verbose=1
     )
 
-    def lr_schedule(epoch):
-        """Smooth Cosine Decay learning rate schedule for NNUE training."""
-        initial_lr = 0.001
-        min_lr = 0.00001      
-        total_epochs = 100     
-        
-        if epoch >= total_epochs:
-            return min_lr
-            
-        progress = epoch / total_epochs
-        cosine_decay = 0.5 * (1.0 + math.cos(math.pi * progress))
-        return min_lr + (initial_lr - min_lr) * cosine_decay
-
-    lr_scheduler_cb = tf.keras.callbacks.LearningRateScheduler(lr_schedule, verbose=1)
+    lr_scheduler_cb = tf.keras.callbacks.LearningRateScheduler(stockfish_lr_schedule, verbose=1)
     cleanup_cb = AggressiveMemoryCleanup()
 
     # Train model execution call
     model.fit(
         train_dataset, 
-        steps_per_epoch=8192,
-        epochs=100, 
+        steps_per_epoch=STEPS_PER_EPOCH,
+        epochs=TOTAL_EPOCHS, 
         validation_data=val_dataset,
         validation_steps=120,
-        callbacks=[checkpoint_cb, lr_scheduler_cb, cleanup_cb]
+        callbacks=[checkpoint_cb, cleanup_cb, lr_scheduler_cb]
     )
 
     print("\nTraining complete. Terminating background workers cleanly...")
@@ -266,7 +289,6 @@ def train_nnue_on_fens():
     val_manager.shutdown()
 
     return model
-
 
 if __name__ == "__main__":
     # Ensure system multiprocessing primitives initialize cleanly across Windows/Linux architectures

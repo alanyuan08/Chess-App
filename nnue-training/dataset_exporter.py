@@ -203,9 +203,9 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
         if board.is_check() or board.is_stalemate() or board.is_insufficient_material():
             continue
 
-        # 3. Apply the 1200 Guardrail to eliminate deep glitched engine values
+        # 3. Apply the 1000 Guardrail to eliminate deep glitched engine values
         score_target = float(raw_score)
-        if abs(score_target) >= 1200:
+        if abs(score_target) >= 1000:
             continue
 
         # 4. Filter out highly volatile tactical configurations via Q-Search

@@ -1,14 +1,13 @@
-# permanent_dataset_manager.py
 import os
 import glob
+import math
 import time
 import queue
-import math
-import multiprocessing as mp
 import numpy as np
 import pandas as pd
+import multiprocessing as mp
 
-def _worker_loop(file_list, data_queue, shutdown_event, padding_index_value, chunk_size=512):
+def _worker_loop(file_list, data_queue, shutdown_event, padding_index_value, chunk_size):
     """
     Isolated background process worker loop.
     Sequentially loads Parquet shards, shuffles rows locally, and feeds the queue.
@@ -35,8 +34,7 @@ def _worker_loop(file_list, data_queue, shutdown_event, padding_index_value, chu
                 if total_rows == 0:
                     continue
 
-                # 3. Fast Vector Conversion: Stack everything into large 2D/2D/1D matrices instantly
-                # This bypasses the slow df.iterrows() loop completely
+                # 3. Fast Vector Conversion: Stack everything into large matrices instantly
                 a_matrix = np.stack(df['active_indices'].values).astype(np.int32)
                 p_matrix = np.stack(df['passive_indices'].values).astype(np.int32)
                 targets = np.stack(df['target'].values).astype(np.float32).reshape(-1, 1)
@@ -52,18 +50,19 @@ def _worker_loop(file_list, data_queue, shutdown_event, padding_index_value, chu
 
                     end_idx = min(i + chunk_size, total_rows)
                     
-                    # Slice out a micro-batch chunk
+                    # Force evaluation to guarantee full batch sizes match training arrays
                     chunk_item = (
                         {
-                            "active_features": a_matrix[i:end_idx],
-                            "passive_features": p_matrix[i:end_idx],
+                            "active_features": a_matrix[i:end_idx].copy(),
+                            "passive_features": p_matrix[i:end_idx].copy(),
                         },
-                        targets[i:end_idx]
+                        targets[i:end_idx].copy()
                     )
                     
                     # Block if the queue is full; continuously poll shutdown event status
                     while not shutdown_event.is_set():
                         try:
+                            # Using a brief timeout ensures the process can see the shutdown flag
                             data_queue.put(chunk_item, timeout=0.1)
                             break
                         except queue.Full:
@@ -80,9 +79,11 @@ class PermanentDatasetManager:
     Multiprocessing data stream manager that leverages background processes 
     to concurrently read, parse, and pre-buffer Parquet training shards.
     """
-    def __init__(self, shard_directory, shard_pattern="data_*.parquet", num_workers=4, queue_size=50000, batch_size=512):
+    def __init__(self, shard_directory, shard_pattern="data_*.parquet", num_workers=4, queue_size=300, batch_size=8000):
         self.shard_directory = shard_directory
         self.num_workers = num_workers
+        
+        # Lowered queue size to 300 to store 300 *batches* instead of millions of positions.
         self.queue_size = queue_size
         self.batch_size = batch_size
         
@@ -93,7 +94,7 @@ class PermanentDatasetManager:
             
         print(f"[PermanentDatasetManager] Initializing stream across {len(self.all_files)} Parquet shards with {num_workers} background workers.")
         
-        # Constants matching your dual-perspective HalfKA input embedding specifications
+        # Constants matching your dual-perspective HalfKA input embedding specifications (49,152)
         self.PADDING_INDEX_VALUE = 64 * 64 * 12 
         
         # Inter-process communication infrastructure setup
@@ -110,14 +111,13 @@ class PermanentDatasetManager:
             end_idx = min(start_idx + files_per_worker, len(self.all_files))
             worker_files = self.all_files[start_idx:end_idx]
             
-            # Skip initialization loops if there are more processes configured than matching files
             if not worker_files:
                 continue
                 
             process = mp.Process(
                 target=_worker_loop,
                 args=(worker_files, self.data_queue, self.shutdown_event, self.PADDING_INDEX_VALUE, self.batch_size),
-                daemon=True # Ensures tasks get forcefully culled if parent script terminates abruptly
+                daemon=True 
             )
             self.workers.append(process)
             process.start()
@@ -138,24 +138,19 @@ class PermanentDatasetManager:
                 continue
 
     def shutdown(self):
-        """
-        Safely signals background processes to stop and completely drains outstanding elements.
-        """
-        print("\n[PermanentDatasetManager] Initiating clean background worker pool shutdown...")
+        """Cleanly terminates all active worker processes."""
+        print("[PermanentDatasetManager] Shutting down background data threads...")
         self.shutdown_event.set()
         
-        # Aggressively empty queue content to prevent background worker lockups during joins
+        # Drain the remaining queue items to unblock any worker threads trapped in a .put() call
         while not self.data_queue.empty():
             try:
                 self.data_queue.get_nowait()
-            except Exception:
+            except:
                 break
                 
-        # Join worker instances back to parent thread loops safely
         for process in self.workers:
             if process.is_alive():
-                process.join(timeout=2.0)
-                if process.is_alive():
-                    process.terminate() # Fallback kill instruction if a thread remains stubborn
-                    
-        print("[PermanentDatasetManager] All background dataset processes successfully terminated.")
+                process.join(timeout=1.0)
+                process.terminate()
+        print("[PermanentDatasetManager] All data streaming workers safely terminated.")

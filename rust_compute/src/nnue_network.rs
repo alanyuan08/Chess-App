@@ -5,13 +5,13 @@ use std::io::{Read, BufReader};
 #[repr(C, align(64))]
 #[derive(Clone, Copy, Debug)]
 pub struct NnueNetwork {
-    // Layer 1: Accumulator (49152 inputs -> 256 outputs)
-    pub l1_weights: [[i16; 256]; 49152],
-    pub l1_biases: [i32; 256],
+    // Layer 1: Accumulator (49152 inputs -> 512 outputs)
+    pub l1_weights: [[i16; 512]; 49152],
+    pub l1_biases: [i32; 512],
 
-    // Layer 2: Hidden 2 (512 inputs -> 64 outputs)
-    pub l2_weights: [[i8; 512]; 64],
-    pub l2_biases: [i32; 64],
+    // Layer 2: Hidden 2 (1024 inputs -> 32 outputs)
+    pub l2_weights: [[i8; 1024]; 32],
+    pub l2_biases: [i32; 32],
 
     // Layer 3: Hidden 3 (64 inputs -> 32 outputs)
     pub l3_weights: [[i8; 64]; 32],
@@ -51,15 +51,15 @@ impl NnueNetwork {
             };
 
             // 1. Accumulator Layer (l1_weights is i16 = 2 bytes, l1_biases is i32 = 4 bytes)
-            read_field(&mut network_box.l1_weights as *mut _ as *mut u8, 49152 * 256, 2)?;
-            read_field(&mut network_box.l1_biases as *mut _ as *mut u8, 256, 4)?;
+            read_field(&mut network_box.l1_weights as *mut _ as *mut u8, 49152 * 512, 2)?;
+            read_field(&mut network_box.l1_biases as *mut _ as *mut u8, 512, 4)?;
 
             // 2. Hidden Layer 2
-            read_field(&mut network_box.l2_weights as *mut _ as *mut u8, 64 * 512, 1)?;
-            read_field(&mut network_box.l2_biases as *mut _ as *mut u8, 64, 4)?;
+            read_field(&mut network_box.l2_weights as *mut _ as *mut u8, 32 * 1024, 1)?;
+            read_field(&mut network_box.l2_biases as *mut _ as *mut u8, 32, 4)?;
 
             // 3. Hidden Layer 3
-            read_field(&mut network_box.l3_weights as *mut _ as *mut u8, 32 * 64, 1)?;
+            read_field(&mut network_box.l3_weights as *mut _ as *mut u8, 32 * 32, 1)?;
             read_field(&mut network_box.l3_biases as *mut _ as *mut u8, 32, 4)?;
 
             // 4. Output Layer
@@ -76,8 +76,8 @@ impl NnueNetwork {
 #[repr(C, align(64))]
 #[derive(Clone, Debug)]
 pub struct NnueInferenceBuffer {
-    pub l2_inputs: [i8; 512],
-    pub l3_inputs: [i8; 64],
+    pub l2_inputs: [i8; 1024],
+    pub l3_inputs: [i8; 32],
     pub l4_inputs: [i8; 32],
 }
 
@@ -95,8 +95,8 @@ impl NnueInferenceBuffer {
 impl Default for NnueInferenceBuffer {
     fn default() -> Self {
         Self {
-            l2_inputs: [0i8; 512],
-            l3_inputs: [0i8; 64],
+            l2_inputs: [0i8; 1024],
+            l3_inputs: [0i8; 32],
             l4_inputs: [0i8; 32],
         }
     }
