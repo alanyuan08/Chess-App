@@ -5,7 +5,7 @@ import numpy as np
 import polars as pl
 
 # Configure your incoming paths here
-DEDUP_DATA = "./data_mirrored"
+DEDUP_DATA = "./data_dedup"
 MIXED_PRODUCTION_DIR = "./production_shards" 
 TEMP_MIX_DIR = "./temp_mixer_shards" 
 FINAL_DATA_SIZE = 2_000_000
@@ -27,10 +27,16 @@ def run_global_mixer():
     NUM_BUCKETS = 64
     
     # =========================================================================
-    # PASS 1: Assign Global Hashing IDs & Distribute into Temp Buckets
+    # PASS 1: Buffered Global Hashing & Partitioning into Temp Buckets
     # =========================================================================
     print(" -> Pass 1: Assigning randomized keys and partitioning shards...")
     
+    # Initialize an in-memory buffer pool to cache rows before hitting storage
+    bucket_buffers = {b_id: [] for b_id in range(NUM_BUCKETS)}
+    
+    # Flush data down to disk every 20 shards to keep RAM usage lean and safe
+    FLUSH_INTERVAL = 20 
+
     for i, path in enumerate(input_shards, 1):
         print(f"    [{i}/{len(input_shards)}] Partitioning {os.path.basename(path)}...")
         
@@ -44,18 +50,34 @@ def run_global_mixer():
             (pl.col("mix_hash").abs() % NUM_BUCKETS).alias("bucket_id")
         )
         
-        # Append partition chunks to our local temp buckets
+        # Append data chunks into the in-memory RAM buffers instead of rewriting files immediately
         for bucket_id in range(NUM_BUCKETS):
             chunk = df_partitioned.filter(pl.col("bucket_id") == bucket_id).drop(["bucket_id"])
             if len(chunk) > 0:
+                bucket_buffers[bucket_id].append(chunk)
+                
+        # --- BATCH FLUSH LOGIC ---
+        # Every 20 shards, or on the absolute final shard, we drop the RAM cache down to disk
+        if i % FLUSH_INTERVAL == 0 or i == len(input_shards):
+            print(f"       [DISK I/O] Flushing accumulated memory cache into bucket files...")
+            for bucket_id in range(NUM_BUCKETS):
+                chunks_list = bucket_buffers[bucket_id]
+                if not chunks_list:
+                    continue
+                
+                # Merge everything collected over the batch cycle in a single operation
+                merged_chunk = pl.concat(chunks_list)
                 bucket_path = os.path.join(TEMP_MIX_DIR, f"bucket_{bucket_id}.parquet")
                 
                 if os.path.exists(bucket_path):
-                    # We write directly using append structures if possible, or read-concat
+                    # Combine existing bucket file with new data block
                     existing = pl.read_parquet(bucket_path)
-                    pl.concat([existing, chunk]).write_parquet(bucket_path, compression="snappy")
+                    pl.concat([existing, merged_chunk]).write_parquet(bucket_path, compression="snappy")
                 else:
-                    chunk.write_parquet(bucket_path, compression="snappy")
+                    merged_chunk.write_parquet(bucket_path, compression="snappy")
+            
+            # Flush memory allocations clean to prevent RAM leaks
+            bucket_buffers = {b_id: [] for b_id in range(NUM_BUCKETS)}
                     
     # =========================================================================
     # PASS 2: Explicit Sort on Mix Hash & Slice into 2M Row Waves
@@ -65,7 +87,7 @@ def run_global_mixer():
     production_wave_counter = 1
     leftover_rows = None
     
-    bucket_files = glob.glob(os.path.join(TEMP_MIX_DIR, "bucket_*.parquet"))
+    bucket_files = sorted(glob.glob(os.path.join(TEMP_MIX_DIR, "bucket_*.parquet")))
     
     for i, b_path in enumerate(bucket_files, 1):
         print(f"    [{i}/{len(bucket_files)}] Final Mixing Bucket {os.path.basename(b_path)}...")

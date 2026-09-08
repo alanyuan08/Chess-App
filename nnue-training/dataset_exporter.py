@@ -161,7 +161,6 @@ def save_parquet_shard(batch_records, output_dir):
     df = pd.DataFrame(batch_records)
     df.to_parquet(output_path, compression="snappy", index=False)
     print(f"[Exported Shard {file_counter}] Saved {len(df)} clean positions to {output_path}.")
-
         
 def pad_indices(a_idx, p_idx):
     a_pad = np.full(MAX_PIECES, INPUT_FEATURES, dtype=np.int32)
@@ -267,7 +266,7 @@ def main():
     import glob
     
     # Dynamically discover all downloaded raw parquet files inside your data/ folder
-    raw_parquet_pattern = os.path.join(SCRIPT_DIR, "data_dedup", "data_*.parquet")
+    raw_parquet_pattern = os.path.join(SCRIPT_DIR, "data", "data_*.parquet")
     raw_files = sorted(glob.glob(raw_parquet_pattern))
     
     if not raw_files:

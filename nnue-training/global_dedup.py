@@ -4,7 +4,7 @@ import glob
 import polars as pl
 
 # Updated configuration variables
-CLEAN_BINARY_DIR = "./data"
+CLEAN_BINARY_DIR = "./data_mirrored"
 PRODUCTION_DIR = "./data_dedup"
 FINAL_DATA_SIZE = 2_000_000 
 

@@ -17,15 +17,15 @@ pip install "../[training]"
 # 3. Download the files -> Output /data
 ./download_shards.sh
 
-# 4. Deduplicate and Mix -> Input /data -> Output /data_dedup
-python global_dedup.py
-rm -f ./data/*
-
-# 5. Data Parse + Mirror -> Input /data_dedup -> Output /data_mirrored
+# 4. Data Parse + Mirror -> Input /data -> Output /data_mirrored
 python dataset_exporter.py
 rm -f ./data_dedup/*
 
-# 6. Data Mixer -> Input /data_mirrored -> Output /production_shards
+# 4. Deduplicate and Mix -> Input /data_mirrored -> Output /data_dedup
+python global_dedup.py
+rm -f ./data/*
+
+# 6. Data Mixer -> Input /data_dedup -> Output /production_shards
 python global_mixer.py
 rm -f ./data_mirrored/*
 
