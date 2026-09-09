@@ -7,6 +7,22 @@ INPUT_SHARDS_DIR = "./production_shards"
 BALANCED_OUTPUT_DIR = "./balanced_shards"
 FINAL_DATA_SIZE = 2_000_000
 
+def get_cyclic_slice(df: pl.DataFrame, shard_idx: int, quota: int, pool_count: int) -> pl.DataFrame:
+    """Safely extracts a fixed-length quota from a dataframe, wrapping around to the beginning if necessary."""
+    start_idx = (shard_idx * quota) % pool_count
+    
+    # If the requested quota extends past the end of the dataframe
+    if start_idx + quota > pool_count:
+        first_part_len = pool_count - start_idx
+        second_part_len = quota - first_part_len
+        
+        # Slice the tail end, then slice the remaining quota from the head
+        tail_slice = df.slice(start_idx, first_part_len)
+        head_slice = df.slice(0, second_part_len)
+        return pl.concat([tail_slice, head_slice])
+        
+    return df.slice(start_idx, quota)
+
 def run_cyclic_distribution_rebalancer():
     os.makedirs(BALANCED_OUTPUT_DIR, exist_ok=True)
     
@@ -29,7 +45,7 @@ def run_cyclic_distribution_rebalancer():
         .when(pl.col("abs_cp") <= 400).then(pl.lit("B"))
         .when(pl.col("abs_cp") <= 800).then(pl.lit("C"))
         .when(pl.col("abs_cp") <= 1000).then(pl.lit("D"))
-        .else_(pl.lit("OUT"))
+        .otherwise(pl.lit("OUT"))
         .alias("bracket")
     ]).filter(pl.col("bracket") != "OUT")
 
@@ -44,12 +60,10 @@ def run_cyclic_distribution_rebalancer():
     print(f"    Available unique reservoir rows: {pool_counts}")
     
     # 3. Calculate exact row quotas required per 2,000,000-row wave file
-    # Ratios: A=45%, B=35%, C=15%, D=5%
     ratios = {"A": 0.45, "B": 0.35, "C": 0.15, "D": 0.05}
     quota = {b: int(FINAL_DATA_SIZE * ratio) for b, ratio in ratios.items()}
     
     # 4. We let the largest category (Bracket A) dictate the total number of shards
-    # This guarantees we use 100% of your unique draw/opening positions.
     total_exportable_shards = pool_counts["A"] // quota["A"]
     print(f" -> Maximize Mode: Utilizing all Bracket A rows across {total_exportable_shards} perfect files.\n")
     
@@ -61,15 +75,13 @@ def run_cyclic_distribution_rebalancer():
     wave_counter = 1
     
     for shard_idx in range(total_exportable_shards):
-        # Calculate cursor offsets for this specific file wave.
-        # Brackets B, C, and D will safely wrap around (% count) if they run out of unique rows!
-        start_a = shard_idx * quota["A"]
+        # Bracket A does not wrap because total_exportable_shards bounds it perfectly
+        slice_a = df_a.slice(shard_idx * quota["A"], quota["A"])
         
-        # Safe cyclic slicing math
-        slice_a = df_a.slice(start_a, quota["A"])
-        slice_b = df_b.slice((shard_idx * quota["B"]) % pool_counts["B"], quota["B"])
-        slice_c = df_c.slice((shard_idx * quota["C"]) % pool_counts["C"], quota["C"])
-        slice_d = df_d.slice((shard_idx * quota["D"]) % pool_counts["D"], quota["D"])
+        # Use our safe cyclic slicing wrapper for oversampled brackets
+        slice_b = get_cyclic_slice(df_b, shard_idx, quota["B"], pool_counts["B"])
+        slice_c = get_cyclic_slice(df_c, shard_idx, quota["C"], pool_counts["C"])
+        slice_d = get_cyclic_slice(df_d, shard_idx, quota["D"], pool_counts["D"])
         
         # Interleave blend them together into a unified frame
         blended_shard = pl.concat([slice_a, slice_b, slice_c, slice_d])

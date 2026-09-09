@@ -56,29 +56,36 @@ def run_global_mixer():
             if len(chunk) > 0:
                 bucket_buffers[bucket_id].append(chunk)
                 
-        # --- BATCH FLUSH LOGIC ---
+        # --- BATCH FLUSH LOGIC --- #
         # Every 20 shards, or on the absolute final shard, we drop the RAM cache down to disk
-        if i % FLUSH_INTERVAL == 0 or i == len(input_shards):
-            print(f"       [DISK I/O] Flushing accumulated memory cache into bucket files...")
+        if (i + 1) % FLUSH_INTERVAL == 0 or i == len(input_shards) - 1:
+            print(f"[DISK I/O] Flushing accumulated memory cache into bucket files...")
             for bucket_id in range(NUM_BUCKETS):
                 chunks_list = bucket_buffers[bucket_id]
                 if not chunks_list:
                     continue
-                
+                    
                 # Merge everything collected over the batch cycle in a single operation
                 merged_chunk = pl.concat(chunks_list)
                 bucket_path = os.path.join(TEMP_MIX_DIR, f"bucket_{bucket_id}.parquet")
                 
-                if os.path.exists(bucket_path):
-                    # Combine existing bucket file with new data block
-                    existing = pl.read_parquet(bucket_path)
-                    pl.concat([existing, merged_chunk]).write_parquet(bucket_path, compression="snappy")
+                # Verify the file exists AND is not empty (greater than 0 bytes)
+                if os.path.exists(bucket_path) and os.path.getsize(bucket_path) > 0:
+                    try:
+                        # Combine existing bucket file with new data block
+                        existing = pl.read_parquet(bucket_path)
+                        pl.concat([existing, merged_chunk]).write_parquet(bucket_path, compression="snappy")
+                    except pl.exceptions.ComputeError:
+                        # Fallback if the file exists but is corrupted/truncated
+                        print(f"[WARNING] Corrupted parquet file detected at {bucket_path}. Overwriting.")
+                        merged_chunk.write_parquet(bucket_path, compression="snappy")
                 else:
+                    # File doesn't exist or is a 0-byte ghost file
                     merged_chunk.write_parquet(bucket_path, compression="snappy")
-            
+                    
             # Flush memory allocations clean to prevent RAM leaks
             bucket_buffers = {b_id: [] for b_id in range(NUM_BUCKETS)}
-                    
+
     # =========================================================================
     # PASS 2: Explicit Sort on Mix Hash & Slice into 2M Row Waves
     # =========================================================================
