@@ -15,7 +15,7 @@ pip install --upgrade pip
 pip install "../[training]" 
 
 # 3. Download the files -> Output /data
-# ./download_shards.sh
+./download_shards.sh
 
 # 4. Deduplicate and Mix -> Input /data -> Output /data_dedup
 python global_dedup.py
