@@ -266,7 +266,7 @@ def main():
     import glob
     
     # Dynamically discover all downloaded raw parquet files inside your data/ folder
-    raw_parquet_pattern = os.path.join(SCRIPT_DIR, "data", "data_*.parquet")
+    raw_parquet_pattern = os.path.join(SCRIPT_DIR, "data_dedup", "data_*.parquet")
     raw_files = sorted(glob.glob(raw_parquet_pattern))
     
     if not raw_files:

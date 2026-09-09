@@ -13,7 +13,7 @@ VAL_DIR="$PRODUCTION_DIR/validation"
 mkdir -p "$TRAIN_DIR"
 mkdir -p "$VAL_DIR"
 
-for i in {0..500}; do
+for i in {0..1000}; do
     FILENAME="data_${i}.parquet"
     SOURCE_PATH="$PRODUCTION_DIR/$FILENAME"
     
