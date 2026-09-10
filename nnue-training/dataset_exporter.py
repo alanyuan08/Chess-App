@@ -27,7 +27,7 @@ PIECE_VALUES = {
 
 # --- DIRECTORY PATH AUTO-RESOLUTION ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__)) if '__file__' in locals() else os.getcwd()
-BINARY_OUTPUT_DIR = os.path.join(SCRIPT_DIR, "data_mirrored")
+BINARY_OUTPUT_DIR = os.path.join(SCRIPT_DIR, "data")
 
 # --- GLOBAL TRACKERS ---
 file_counter = 0
@@ -225,6 +225,7 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
             'active_indices': active_orig,
             'passive_indices': passive_orig,
             'target': active_player_target,
+            'depth': depth_val,
             'fen': fen
         })
 
@@ -239,6 +240,7 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
             'active_indices': active_rot_pad,
             'passive_indices': passive_rot_pad,
             'target': active_player_target,
+            'depth': depth_val,
             'fen': rotated_fen
         })
         

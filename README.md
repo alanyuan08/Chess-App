@@ -73,7 +73,11 @@
 
   Furthermore, the data is Augmented by rotating each position by 180 degrees to provide a second data set. This generations a total of 521,289,008 million unique positions,
 
-  - **Deduplication and Shard Balancing:** The data is deduplicated and randomized. Furthermore, the data is group in buckets of 2 million data sets with 45% between 0 to 150 centipawn, 35% between 150 to 400 centipawns, 15% between 400 to 800 centipawns, and 5% between 800 to 1000 centipawns.
+  - **Deduplication and Shard Balancing:** The data is deduplicated and randomized in training sets following the natural distrubtion of:
+  - 0 to 150 Centipawns | 67.62% 
+  - 150 to 400 Centipawns | 19.55%
+  - 400 to 800 Centipawns | 12.07%
+  - 800 to 1000 Centipawns | 0.76%
 
 - **Training Process:** The model applies a Sigmoid transformation to the score output as a win percentage - 1.0 (win), 0.5 (draw), and 0.0 (loss) to ensure the model focus on the positions closer to the 0.5 range rather than outliers with an overwhelming advantage.
 

@@ -5,7 +5,7 @@ import numpy as np
 import polars as pl
 
 # Configure your incoming paths here
-DEDUP_DATA = "./data_mirrored"
+DEDUP_DATA = "./data_dedup"
 MIXED_PRODUCTION_DIR = "./production_shards" 
 TEMP_MIX_DIR = "./temp_mixer_shards" 
 FINAL_DATA_SIZE = 2_000_000
