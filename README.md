@@ -26,7 +26,7 @@
 
 ## 2. Rust Compute Engine
 
-- **Bitboard Move Generation:**  Uses 64-bit integers with fast AND / XOR logic to compute board occupancy. It also uses BitBoard Magic Number to instant compute sliding pieces moves and attacks.
+- **Bitboard Move Generation:** Uses 64-bit integers with fast AND / XOR logic to compute board occupancy. It also uses BitBoard Magic Number to instant compute sliding pieces moves and attacks.
 
 - **Adversarial Search:** Implements Minimax (Negemax) adversarial search and uses Quiescence Search to extend the search for non-quiet positions to mitigate the horizon effect.
 
@@ -64,26 +64,28 @@
 
   STOCKFISH-CONSTANT = 0.244
 
-## 4. NNuE Training
+## 4. NNUE Training
 
-- **Training Data:** The positions are sourced from [Lichess Chess Position Evaluations](https://huggingface.co/datasets/Lichess/chess-position-evaluations), which contains 394,669,566 chess positions evaluated with Stockfish at various depths. The training / validation data use different shards and the training data is shuffled to ensure an even distribution. 
+- **Training Data:** The model is trained on **394,669,566 chess positions** sourced from the *Lichess Chess Position Evaluations* dataset, which features evaluations calculated by Stockfish at various depths. To ensure an even and unbiased distribution, the training and validation sets utilize separate shards, and the training data is thoroughly shuffled.
 
-- **PreProcesisng:** 
-  - **Data Processing:** The data is filtered for quiet positions - The king isn't in check, there is no immediate tactical win that can be gained via captures and there isn't a checkmate sequence. The removes roughly 35% of the positions.
+- **Preprocessing & Data Preparation:**
+  - **Quiet Position Filtering:** The dataset is filtered to include only "quiet" positions. Board states are excluded if the king is in check, an immediate tactical win is available via captures, or a forced checkmate sequence exists.
+  - **Data Augmentation:** The filtered positions are augmented by rotating each board state 180 degrees. This process yields a total of **394,357,440 unique positions**.
+  - **Deduplication & Balancing:** After deduplication, the data is randomized within the training sets to preserve its natural valuation distribution:
+    - 0 to 150 Centipawns: 67.62%
+    - 150 to 400 Centipawns: 19.55%
+    - 400 to 800 Centipawns: 12.07%
+    - 800 to 1000 Centipawns: 0.76%
 
-  Furthermore, the data is Augmented by rotating each position by 180 degrees to provide a second data set. This generations a total of 521,289,008 million unique positions,
-
-  - **Deduplication and Shard Balancing:** The data is deduplicated and randomized in training sets following the natural distrubtion of:
-  - 0 to 150 Centipawns | 67.62% 
-  - 150 to 400 Centipawns | 19.55%
-  - 400 to 800 Centipawns | 12.07%
-  - 800 to 1000 Centipawns | 0.76%
-
-- **Training Process:** The model applies a Sigmoid transformation to the score output as a win percentage - 1.0 (win), 0.5 (draw), and 0.0 (loss) to ensure the model focus on the positions closer to the 0.5 range rather than outliers with an overwhelming advantage.
-
-  The model is trained using 2000 Epoch, with 4000 Steps per epoch and 8192 positions in step.
-
-  It uses a loss function of Mean Squared Error between Ypred - Yexpected. It uses a an learning rate with an initial value of 0.001 for Epoch 0 to 139, 0.0001 for Epoch 140 to 175 and 0.00001 for the remaining Epochs
+- **Training Configuration:**
+  - **Target Optimization:** The model applies a Sigmoid transformation to convert raw evaluation scores into a win probability scale where 1.0 represents a win, 0.5 a draw, and 0.0 a loss. This bounds the output and forces the model to focus on highly competitive positions rather than overwhelming outliers.
+  - **Architecture & Schedule:** Training runs for **2,000 epochs**, featuring **4,000 steps per epoch** with a batch size of **8,192 positions per step**.
+  - **Loss Function:** Performance is calculated using Mean Squared Error (MSE) between the predicted and expected win probabilities: 
+    $$\text{MSE} = (Y_{\text{pred}} - Y_{\text{expected}})^2$$
+  - **Learning Rate Schedule:** The optimization uses a stepped learning rate decay to fine-tune weights over time:
+    - Epochs 0 to 139: 0.001
+    - Epochs 140 to 175: 0.0001
+    - Epochs 176 to 2000: 0.00001
 
 - cd nnue-training
 - /train_pipeline.sh
