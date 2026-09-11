@@ -70,7 +70,9 @@
 
 - **Preprocessing & Data Preparation:**
   - **Quiet Position Filtering:** The dataset is filtered to include only "quiet" positions. Board states are excluded if the king is in check, an immediate tactical win is available via captures, or a forced checkmate sequence exists.
+
   - **Data Augmentation:** The filtered positions are augmented by rotating each board state 180 degrees. This process yields a total of **394,357,440 unique positions**.
+
   - **Deduplication & Balancing:** After deduplication, the data is randomized within the training sets to preserve its natural valuation distribution:
     - 0 to 150 Centipawns: 67.62%
     - 150 to 400 Centipawns: 19.55%
@@ -79,9 +81,12 @@
 
 - **Training Configuration:**
   - **Target Optimization:** The model applies a Sigmoid transformation to convert raw evaluation scores into a win probability scale where 1.0 represents a win, 0.5 a draw, and 0.0 a loss. This bounds the output and forces the model to focus on highly competitive positions rather than overwhelming outliers.
+
   - **Architecture & Schedule:** Training runs for **2,000 epochs**, featuring **4,000 steps per epoch** with a batch size of **8,192 positions per step**.
+
   - **Loss Function:** Performance is calculated using Mean Squared Error (MSE) between the predicted and expected win probabilities: 
     $$\text{MSE} = (Y_{\text{pred}} - Y_{\text{expected}})^2$$
+    
   - **Learning Rate Schedule:** The optimization uses a stepped learning rate decay to fine-tune weights over time:
     - Epochs 0 to 139: 0.001
     - Epochs 140 to 175: 0.0001
