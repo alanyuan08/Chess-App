@@ -83,16 +83,16 @@
   | **Blunder** | 0.5% | 2.0% | 2.5% | 5% |
   | **Total By Phase** | **20%** | **50%** | **30%** | **100%** |
 
-  - **Quiet:** 0 - 50 Centipawn Diff
-  - **Advantage:** 150 - 400 Centipawn Diff 
-  - **Decisive:** 400 - 800 Centipawn Diff 
-  - **Blunder:** 800+ Centipawn Diff 
+    - **Quiet:** 0 - 50 Centipawn Diff
+    - **Advantage:** 150 - 400 Centipawn Diff 
+    - **Decisive:** 400 - 800 Centipawn Diff 
+    - **Blunder:** 800+ Centipawn Diff 
 
-  - **Early:** >= 26 Piece Count
-  - **Mid:** 14-26 Piece Count
-  - **Late:** <= 14 Piece Count
+    - **Early:** >= 26 Piece Count
+    - **Mid:** 14-26 Piece Count
+    - **Late:** <= 14 Piece Count
 
-  This yields a total of **237,692,263 unique positions**.
+    This yields a total of **237,692,263 unique positions**.
 
   - **Shard Balancing:** The data is batched into shards maintaining this ratio for training.
 
