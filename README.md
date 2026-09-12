@@ -73,9 +73,7 @@
 
   - **Data Augmentation:** The filtered positions are augmented by rotating each board state 180 degrees. This process yields a total of **392,386,524 unique positions**.
 
-  - **Deduplication & Balancing:** After deduplication, the data is randomized within the training sets and downscaled to 237,692,263 positions based on this ratio 
-
-  ### Recommended Target Matrix (% of Total Training Set)
+  - **Deduplication & Balancing:** After deduplication, the data is randomized within the training sets and downscaled to 237,692,263 positions based on this setup:
 
   | Score / Phase | Early | Mid | Late | Total By Type |
   | :--- | :--- | :--- | :--- | :--- |
@@ -103,9 +101,9 @@
     $$\text{MSE} = (Y_{\text{pred}} - Y_{\text{expected}})^2$$
     
   - **Learning Rate Schedule:** The optimization uses a stepped learning rate decay to fine-tune weights over time:
-    - Epochs 0 to 139: 0.001
-    - Epochs 140 to 175: 0.0001
-    - Epochs 176 to 2000: 0.00001
+    - Epochs 0 to 25: 0.001
+    - Epochs 25 to 50: 0.0001
+    - Epochs 50 to 100: 0.00001
 
 - cd nnue-training
 - /train_pipeline.sh
