@@ -83,14 +83,14 @@
   | **Blunder** | 0.5% | 2.0% | 2.5% | 5% |
   | **Total By Phase** | **20%** | **50%** | **30%** | **100%** |
 
-  - **Quiet** 0 - 50 Centipawn Diff
-  - **Advantage** 150 - 400 Centipawn Diff 
-  - **Decisive** 400 - 800 Centipawn Diff 
-  - **Blunder** 800+ Centipawn Diff 
+  - **Quiet:** 0 - 50 Centipawn Diff
+  - **Advantage:** 150 - 400 Centipawn Diff 
+  - **Decisive:** 400 - 800 Centipawn Diff 
+  - **Blunder:** 800+ Centipawn Diff 
 
-  - **Early** >= 26 Piece Count
-  - **Mid** 14-26 Piece Count
-  - **Late** <= 14 Piece Count
+  - **Early:** >= 26 Piece Count
+  - **Mid:** 14-26 Piece Count
+  - **Late:** <= 14 Piece Count
 
 - **Training Configuration:**
   - **Target Optimization:** The model applies a Sigmoid transformation to convert raw evaluation scores into a win probability scale where 1.0 represents a win, 0.5 a draw, and 0.0 a loss. This bounds the output and forces the model to focus on highly competitive positions rather than overwhelming outliers.
