@@ -19,7 +19,7 @@ SHUFFLE_BUFFER = 50000         # Buffer allocation size for secondary tf.data mi
 
 # --- Step-Based Architecture Configuration ---
 STEPS_PER_EPOCH = 4000
-TOTAL_EPOCHS = 200  
+TOTAL_EPOCHS = 100  
 TOTAL_TRAINING_STEPS = STEPS_PER_EPOCH * TOTAL_EPOCHS # 2,000,000 steps total
 WARMUP_STEPS = STEPS_PER_EPOCH * 5                    # 100,000 step warmup
 
@@ -187,25 +187,34 @@ def train_nnue_on_fens():
         raw_error = tf.abs(y_true - y_pred)
         return tf.reduce_mean(tf.math.tanh(raw_error / SCALE_THRESHOLD) * SCALE_THRESHOLD)
 
-    def stockfish_lr_schedule(epoch):
+    # --- 1. OPTIMIZED FLAT-THEN-DROP SCHEDULE ---
+    def stockfish_lr_schedule_tuned(epoch):
         """
-        Official Stockfish 'Flat-then-Drop' Step Schedule.
-        Maintains max momentum early, drops off a cliff to freeze quantized arrays.
+        Tuned Stockfish Schedule for stable 8k batch training.
+        Uses an early 1-epoch warmup and drops early to lock in sub-70 centipawn precision.
         """
-        initial_lr = 0.001  # Stockfish standard starting rate
+        initial_lr = 0.001
         
-        # Phase 1: Keep it completely flat at peak for 70% of training (Epochs 0 to 140)
-        if epoch < 140:
+        # Phase 0: 1-Epoch Linear Warmup (Epoch 0)
+        # Prevents gradient explosion on step zero with random weight initializations
+        if epoch == 0:
+            return 0.0001
+            
+        # Phase 1: Flat Peak Phase (Epochs 1 to 24)
+        # Sweeps up macro strategy patterns until the 70-centipawn plateau is reached
+        elif epoch < 25: 
             return initial_lr   
             
-        # Phase 2: First sudden cliff drop (Epochs 140 to 175)
-        # Staggers the step size down by a factor of 10 to compress loose parameters
-        elif epoch < 175:
+        # Phase 2: First Sudden Cliff Drop (Epochs 25 to 49)
+        # Shrinks the step size down by 10x to let the model learn micro tactical nuances
+        elif epoch < 50:
             return initial_lr * 0.1  # 0.0001
             
-        # Phase 3: Final Precision Floor Lock (Epochs 175 to 200)
+        # Phase 3: Final Precision Floor Lock (Epochs 50 to 100+)
+        # Freezes the network structure, allowing weights to settle perfectly
         else:
             return initial_lr * 0.01 # 0.00001
+
         
     # --- 3. OPTIMIZER SPECIFICATION (RANGER INTERACTIVE ENGINE) ---
     # Ranger handles the early warm-up naturally via RAdam and absorbs jumps via Lookahead
@@ -271,7 +280,7 @@ def train_nnue_on_fens():
         verbose=1
     )
 
-    lr_scheduler_cb = tf.keras.callbacks.LearningRateScheduler(stockfish_lr_schedule, verbose=1)
+    lr_scheduler_cb = tf.keras.callbacks.LearningRateScheduler(stockfish_lr_schedule_tuned, verbose=1)
     cleanup_cb = AggressiveMemoryCleanup()
 
     # Train model execution call

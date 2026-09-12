@@ -13,5 +13,5 @@ nnue-training/data_dedup/*
 nnue-training/data_mirrored/*
 nnue-training/data_dedup_mixed/*
 nnue-training/production_shards/*
-nnue-training/temp_mixer_shards/*
+nnue-training/temp_*/*
 profile.json.gz

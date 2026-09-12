@@ -144,13 +144,8 @@ def get_endgame_piece_count(fen_string: str) -> int:
     total_pieces = sum(1 for char in board_part if char in target_pieces)
     return total_pieces
 
-def is_invalid_training_row(depth_str, fen_string: str) -> bool:
-    depth = int(depth_str)
-    fen_pieces_count = get_endgame_piece_count(fen_string)
-    if fen_pieces_count <= 12:
-        return depth < 32
-    else:
-        return depth < 20
+def is_invalid_training_row(depth_str) -> bool:
+    return int(depth_str) < 20
 
 def save_parquet_shard(batch_records, output_dir):
     """Helper function to build a structured dataframe and write to Parquet format."""
@@ -191,7 +186,7 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
         # 1. Skip explicit text mates or shallow searches
         if mate_val is not None and not pd.isna(mate_val):
             continue
-        if depth_val is not None and is_invalid_training_row(depth_val, fen):
+        if depth_val is not None and is_invalid_training_row(depth_val):
             continue
         if raw_score is None or pd.isna(raw_score):
             continue

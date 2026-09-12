@@ -71,13 +71,28 @@
 - **Preprocessing & Data Preparation:**
   - **Quiet Position Filtering:** The dataset is filtered to include only "quiet" positions. Board states are excluded if the king is in check, an immediate tactical win is available via captures, or a forced checkmate sequence exists.
 
-  - **Data Augmentation:** The filtered positions are augmented by rotating each board state 180 degrees. This process yields a total of **394,357,440 unique positions**.
+  - **Data Augmentation:** The filtered positions are augmented by rotating each board state 180 degrees. This process yields a total of **392,386,524 unique positions**.
 
-  - **Deduplication & Balancing:** After deduplication, the data is randomized within the training sets to preserve its natural valuation distribution:
-    - 0 to 150 Centipawns: 67.62%
-    - 150 to 400 Centipawns: 19.55%
-    - 400 to 800 Centipawns: 12.07%
-    - 800 to 1000 Centipawns: 0.76%
+  - **Deduplication & Balancing:** After deduplication, the data is randomized within the training sets and downscaled to 237,692,263 positions based on this ratio 
+
+  ### Recommended Target Matrix (% of Total Training Set)
+
+  | Score / Phase | Early | Mid | Late | Total By Type |
+  | :--- | :--- | :--- | :--- | :--- |
+  | **Quiet** | 10.0% | 20.0% | 10.0% | 40% |
+  | **Advantage** | 7.0% | 18.0% | 10.0% | 35% |
+  | **Decisive** | 2.5% | 10.0% | 7.5% | 20% |
+  | **Blunder** | 0.5% | 2.0% | 2.5% | 5% |
+  | **Total By Phase** | **20%** | **50%** | **30%** | **100%** |
+
+  - **Quiet** -> 0 to 150 Centipawn Difference 
+  - **Advantage** -> 150 to 400 Centipawn Difference 
+  - **Decisive** -> 400 to 800 Centipawn Difference 
+  - **Blunder** -> 800+ Centipawn Difference 
+
+  - **Early** -> 26+ Piece Count
+  - **Mid** -> 14-26 Piece Count
+  - **Late** -> 14< Piece Count
 
 - **Training Configuration:**
   - **Target Optimization:** The model applies a Sigmoid transformation to convert raw evaluation scores into a win probability scale where 1.0 represents a win, 0.5 a draw, and 0.0 a loss. This bounds the output and forces the model to focus on highly competitive positions rather than overwhelming outliers.
