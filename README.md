@@ -75,22 +75,24 @@
 
   - **Down-Sampling:** The positions are downscaled to this ratio:
 
-    | Score / Phase | Early | Mid | Late | Total By Type |
-    | :--- | :--- | :--- | :--- | :--- |
-    | **Quiet** | 10.0% | 20.0% | 10.0% | 40% |
-    | **Advantage** | 7.0% | 18.0% | 10.0% | 35% |
-    | **Decisive** | 2.5% | 10.0% | 7.5% | 20% |
-    | **Blunder** | 0.5% | 2.0% | 2.5% | 5% |
-    | **Total By Phase** | **20%** | **50%** | **30%** | **100%** |
+    | Score Phase | Early | Mid | Late | Total By Type |
+    | :--- | :---: | :---: | :---: | :---: |
+    | **Quiet** | 10.0 | 20.0 | 10.0 | **40** |
+    | **Advantage** | 7.0 | 18.0 | 10.0 | **35** |
+    | **Decisive** | 2.5 | 10.0 | 7.5 | **20** |
+    | **Blunder** | 0.5 | 2.0 | 2.5 | **5** |
+    | **Total By Phase** | **20** | **50** | **30** | **100** |
 
-    **Quiet:** 0 - 50 Centipawn Diff
-    **Advantage:** 150 - 400 Centipawn Diff 
-    **Decisive:** 400 - 800 Centipawn Diff 
-    **Blunder:** 800+ Centipawn Diff 
+    ### **Centipawn Differential Thresholds**
+    * **Quiet:** 0 – 50
+    * **Advantage:** 150 – 400
+    * **Decisive:** 400 – 800
+    * **Blunder:** 800+
 
-    **Early:** >= 26 Piece Count
-    **Mid:** 14-26 Piece Count
-    **Late:** <= 14 Piece Count
+    ### **Piece Count by Phase**
+    * **Early:** 26+
+    * **Mid:** 14 – 26
+    * **Late:** < 14
 
     This yields a total of **237,692,263 unique positions**.
 
