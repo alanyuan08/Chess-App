@@ -71,9 +71,9 @@
 - **Preprocessing & Data Preparation:**
   - **Quiet Position Filtering:** The dataset is filtered to include only "quiet" positions. Board states are excluded if the king is in check, an immediate tactical win is available via captures, or a forced checkmate sequence exists.
 
-  - **Data Augmentation:** The filtered positions are augmented by rotating each board state 180 degrees. This process yields a total of **392,386,524 unique positions**.
+  - **Data Augmentation & DeDuplication:** The filtered positions are augmented by rotating each board state 180 degrees. The positions are then deduplicationed. This yields a total of **392,386,524 unique positions**.
 
-  - **Deduplication & Balancing:** After deduplication, the data is randomized within the training sets and downscaled to 237,692,263 positions based on this setup:
+  - **Down-Sampling:** The positions are downscaled to this ratio:
 
   | Score / Phase | Early | Mid | Late | Total By Type |
   | :--- | :--- | :--- | :--- | :--- |
@@ -91,6 +91,10 @@
   - **Early:** >= 26 Piece Count
   - **Mid:** 14-26 Piece Count
   - **Late:** <= 14 Piece Count
+
+  This yields a total of **237,692,263 unique positions**.
+
+  - **Shard Balancing:** The data is batched into shards maintaining this ratio for training.
 
 - **Training Configuration:**
   - **Target Optimization:** The model applies a Sigmoid transformation to convert raw evaluation scores into a win probability scale where 1.0 represents a win, 0.5 a draw, and 0.0 a loss. This bounds the output and forces the model to focus on highly competitive positions rather than overwhelming outliers.
