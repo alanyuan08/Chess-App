@@ -5,16 +5,16 @@ use std::io::{Read, BufReader};
 #[repr(C, align(64))]
 #[derive(Clone, Copy, Debug)]
 pub struct NnueNetwork {
-    // Layer 1: Accumulator (49152 inputs -> 512 outputs)
-    pub l1_weights: [[i16; 512]; 49152],
-    pub l1_biases: [i32; 512],
+    // Layer 1: Accumulator (49152 inputs -> 256 outputs)
+    pub l1_weights: [[i16; 256]; 49152],
+    pub l1_biases: [i32; 256],
 
-    // Layer 2: Hidden 2 (512 inputs -> 64 outputs)
-    pub l2_weights: [[i8; 512]; 64],
-    pub l2_biases: [i32; 64],
+    // Layer 2: Hidden 2 (256 inputs -> 128 outputs)
+    pub l2_weights: [[i8; 256]; 128],
+    pub l2_biases: [i32; 128],
 
-    // Layer 3: Hidden 3 (64 inputs -> 32 outputs)
-    pub l3_weights: [[i8; 64]; 32],
+    // Layer 3: Hidden 3 (128 inputs -> 32 outputs)
+    pub l3_weights: [[i8; 128]; 32],
     pub l3_biases: [i32; 32],
 
     // Layer 4: Output Layer (32 inputs -> 1 output)
@@ -55,8 +55,8 @@ impl NnueNetwork {
             read_field(&mut network_box.l1_biases as *mut _ as *mut u8, 512, 4)?;
 
             // 2. Hidden Layer 2
-            read_field(&mut network_box.l2_weights as *mut _ as *mut u8, 64 * 512, 1)?;
-            read_field(&mut network_box.l2_biases as *mut _ as *mut u8, 64, 4)?;
+            read_field(&mut network_box.l2_weights as *mut _ as *mut u8, 128 * 512, 1)?;
+            read_field(&mut network_box.l2_biases as *mut _ as *mut u8, 128, 4)?;
 
             // 3. Hidden Layer 3
             read_field(&mut network_box.l3_weights as *mut _ as *mut u8, 32 * 32, 1)?;

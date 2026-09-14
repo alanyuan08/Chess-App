@@ -61,7 +61,7 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
         f.write(b1_quant.tobytes())
         print(f"-> Accumulator Layer serialized. Shape: {w1_real.shape} (Weights: i16 / Synthetic Bias: i32)")
 
-        # 2. Hidden Layer 2 (512*2 -> 64)
+        # 2. Hidden Layer 2 (512*2 -> 128)
         # Input: i16 (Clipped from Accumulator) | Weights: i8 | Bias/Output: i32
         # Shift Right by 7 (>> 7) before clipping to next input scale.
         layer2 = model.get_layer("hidden_layer_2") 
@@ -72,7 +72,7 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
         f.write(b2_quant.tobytes())
         print(f"-> Hidden Layer 2 serialized. Shape: {w2.shape} (Weights: i8 / Bias: i32) [Rust -> Shift >> 7]")
 
-        # 3. Hidden Layer 3 (64 -> 32)
+        # 3. Hidden Layer 3 (128 -> 32)
         # Input: i16 | Weights: i8 | Bias/Output: i32 
         # Shift Right by 5 (>> 5) before clipping to next input scale.
         layer3 = model.get_layer("hidden_layer_3")
@@ -110,37 +110,37 @@ def train_nnue_on_fens():
     # We dimension the lookup array to INPUT_FEATURES + 1 to house the positive padding index row
     embedding_layer = layers.Embedding(
         input_dim=INPUT_FEATURES + 1,
-        output_dim=512,
+        output_dim=256,
         embeddings_initializer=nnue_accumulator_init,
         mask_zero=False,
         name="accumulator_layer"
     )
 
     # 3. Pull dense weights representations for all slots
-    a_embed = embedding_layer(active_input) # Target shape: (Batch, 16, 512)
-    p_embed = embedding_layer(passive_input) # Target shape: (Batch, 16, 512)
+    a_embed = embedding_layer(active_input) # Target shape: (Batch, 16, 256)
+    p_embed = embedding_layer(passive_input) # Target shape: (Batch, 16, 256)
 
     # 4. Synthesize masking vectors to isolate and zero-out padding weight contributions
     a_mask = keras.ops.cast(keras.ops.not_equal(active_input, PADDING_INDEX_VALUE), dtype="float32")
     p_mask = keras.ops.cast(keras.ops.not_equal(passive_input, PADDING_INDEX_VALUE), dtype="float32")
     
-    # Expand to allow broadcasting dimensions across the 512 embedding properties
+    # Expand to allow broadcasting dimensions across the 256 embedding properties
     a_mask = keras.ops.expand_dims(a_mask, axis=-1) # Target shape: (Batch, 32, 1)
     p_mask = keras.ops.expand_dims(p_mask, axis=-1)
 
-    # Execute masked pool aggregation to compile the 512 accumulator vectors
-    a_acc = keras.ops.sum(a_embed * a_mask, axis=1) # Target shape: (Batch, 512)
-    p_acc = keras.ops.sum(p_embed * p_mask, axis=1) # Target shape: (Batch, 512)
+    # Execute masked pool aggregation to compile the 256 accumulator vectors
+    a_acc = keras.ops.sum(a_embed * a_mask, axis=1) # Target shape: (Batch, 256)
+    p_acc = keras.ops.sum(p_embed * p_mask, axis=1) # Target shape: (Batch, 256)
 
     # 5. Clipped ReLU Activation (ReLU1 / Bounded ReLU)
     a_act = keras.ops.clip(a_acc, 0.0, SCALE_MAX)
     p_act = keras.ops.clip(p_acc, 0.0, SCALE_MAX)
     
-    # 6. Perspective Multiplexing Layer (Shape: Batch, 1024)
+    # 6. Perspective Multiplexing Layer (Shape: Batch, 512)
     merged = layers.Concatenate(name="perspective_multiplex")([a_act, p_act]) 
     
     # 7. Hidden Layer 2 with ReLU1 activation
-    x = layers.Dense(64, activation=None, name="hidden_layer_2")(merged)
+    x = layers.Dense(128, activation=None, name="hidden_layer_2")(merged)
     x = keras.ops.clip(x, 0.0, SCALE_MAX)
 
     # 8. Hidden Layer 3 with ReLU1 activation
