@@ -950,10 +950,10 @@ impl ChessBoard {
         let b_add = get_feature_index(b_king_sq, added_piece, mv.end_sq, true);
 
         // Get basic rows
-        let w_rem_row = &self.nnue_network.l1_weights[w_remove][..512];
-        let b_rem_row = &self.nnue_network.l1_weights[b_remove][..512];
-        let w_add_row = &self.nnue_network.l1_weights[w_add][..512];
-        let b_add_row = &self.nnue_network.l1_weights[b_add][..512];
+        let w_rem_row = &self.nnue_network.l1_weights[w_remove][..256];
+        let b_rem_row = &self.nnue_network.l1_weights[b_remove][..256];
+        let w_add_row = &self.nnue_network.l1_weights[w_add][..256];
+        let b_add_row = &self.nnue_network.l1_weights[b_add][..256];
 
         // --- 4. High-Density Auto-Vectorized Parallel Loop Block ---
         let prev_ply = self.ply - 1;
