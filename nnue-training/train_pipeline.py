@@ -49,19 +49,19 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
     with open(file_path, "wb") as f:
         print("--- Commencing Weight Quantization & Serialization for Rust ---")
         
-        # 1. Accumulator Layer (49152 -> 512)
+        # 1. Accumulator Layer (49152 -> 256)
         # Input: Binary (0/1) | Weights: i16 | Bias/Output Accumulator: i32
         acc_layer = model.get_layer("accumulator_layer")
         embedding_weights = acc_layer.get_weights()[0]
         w1_real = embedding_weights[:49152, :]
         w1_quant = np.ascontiguousarray(np.round(w1_real * 128.0)).astype(np.int16)
-        b1_quant = np.zeros(512, dtype=np.int32)
+        b1_quant = np.zeros(256, dtype=np.int32)
         # Write exactly the same bytes structure as before
         f.write(w1_quant.tobytes())
         f.write(b1_quant.tobytes())
         print(f"-> Accumulator Layer serialized. Shape: {w1_real.shape} (Weights: i16 / Synthetic Bias: i32)")
 
-        # 2. Hidden Layer 2 (512*2 -> 128)
+        # 2. Hidden Layer 2 (256*2 -> 128)
         # Input: i16 (Clipped from Accumulator) | Weights: i8 | Bias/Output: i32
         # Shift Right by 7 (>> 7) before clipping to next input scale.
         layer2 = model.get_layer("hidden_layer_2") 
@@ -125,7 +125,7 @@ def train_nnue_on_fens():
     p_mask = keras.ops.cast(keras.ops.not_equal(passive_input, PADDING_INDEX_VALUE), dtype="float32")
     
     # Expand to allow broadcasting dimensions across the 256 embedding properties
-    a_mask = keras.ops.expand_dims(a_mask, axis=-1) # Target shape: (Batch, 32, 1)
+    a_mask = keras.ops.expand_dims(a_mask, axis=-1) 
     p_mask = keras.ops.expand_dims(p_mask, axis=-1)
 
     # Execute masked pool aggregation to compile the 256 accumulator vectors
@@ -136,7 +136,7 @@ def train_nnue_on_fens():
     a_act = keras.ops.clip(a_acc, 0.0, SCALE_MAX)
     p_act = keras.ops.clip(p_acc, 0.0, SCALE_MAX)
     
-    # 6. Perspective Multiplexing Layer (Shape: Batch, 512)
+    # 6. Perspective Multiplexing Layer (Shape: Batch, 256*2)
     merged = layers.Concatenate(name="perspective_multiplex")([a_act, p_act]) 
     
     # 7. Hidden Layer 2 with ReLU1 activation
