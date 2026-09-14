@@ -2,7 +2,7 @@
 #[repr(C, align(64))]
 #[derive(Debug, Clone, Copy)]
 pub struct Accumulator {
-    pub vals: [i16; 256],
+    pub vals: [i16; 512],
 }
 
 #[repr(C, align(64))]
@@ -15,8 +15,8 @@ pub struct BoardAccumulators {
 impl Default for BoardAccumulators {
     fn default() -> Self {
         Self {
-            white: Accumulator { vals: [0i16; 256] },
-            black: Accumulator { vals: [0i16; 256] },
+            white: Accumulator { vals: [0i16; 512] },
+            black: Accumulator { vals: [0i16; 512] },
         }
     }
 }

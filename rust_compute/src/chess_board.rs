@@ -846,18 +846,18 @@ impl ChessBoard {
             buffer.l2_inputs[i + 512] = opp_acc.vals[i].clamp(0, 127) as i8;
         }
 
-        // --- STEP 2: HIDDEN LAYER 2 (512 -> 32) ---
+        // --- STEP 2: HIDDEN LAYER 2 (512*2 -> 64) ---
         // Input Scale (128) * Weight Scale (32) = Sum Scale (4096).
         // Shift Down by >> 7 to Scale (32)
         // Clamp at 32 to match Python's ReLU1 (1.0).
-        for neuron in 0..32 {
+        for neuron in 0..64 {
             let bias = self.nnue_network.l2_biases[neuron];
             let mut sum: i32 = bias;
 
-            let row = &self.nnue_network.l2_weights[neuron][..1024];
-            let inputs = &buffer.l2_inputs[..1024];
+            let row = &self.nnue_network.l2_weights[neuron][..512];
+            let inputs = &buffer.l2_inputs[..512];
 
-            for i in 0..1024 {
+            for i in 0..512 {
                 sum += (inputs[i] as i32) * (row[i] as i32);
             }
 
@@ -866,7 +866,7 @@ impl ChessBoard {
         }
 
         // --- STEP 3: HIDDEN LAYER 3 (64 -> 32) ---
-        // Input Scale (32) * Weight Scale (32) = Sum Scale (1024).
+        // Input Scale (32) * Weight Scale (32) = Sum Scale (512).
         // Shift Down by 5 to Scale (32)
         // Clamp at 32 to match Python's ReLU1 (1.0).
         for neuron in 0..32 {

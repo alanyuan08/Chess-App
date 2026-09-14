@@ -36,11 +36,11 @@ pip install "../[training]"
 # rm -f ./data_dedup/*
 
 # 8. Shard Balancer -> Input /production_shards -> Output /balanced_shards
-python shard_balancer.py
+# python shard_balancer.py
 # rm -f ./production_shards/*
 
 # 9. Training / Validation Split -> Input /balanced_shards
-./training_shuffle.sh
+# ./training_shuffle.sh
 
 # 10. Run your main training script -> Input /balanced_shards
 python train_pipeline.py

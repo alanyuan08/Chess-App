@@ -18,12 +18,12 @@ pub struct SearchWorker  {
     transposition_table: Arc<TranspositionTable>,
     nodes_processed: usize,
 
-    history: [UndoMove; 1024],
+    history: [UndoMove; 512],
     history_index: usize,
 
     chess_board: ChessBoard,
 
-    traversed_positions: [u64; 1024],
+    traversed_positions: [u64; 512],
     position_stack_len: usize,
 
     killer_move_table: [[ForwardMove; 2]; 128],
@@ -41,7 +41,7 @@ impl SearchWorker {
         thread_id: usize
     ) -> Self {
         Self {
-            history: [UndoMove::NULL_UNDO_MOVE; 1024],
+            history: [UndoMove::NULL_UNDO_MOVE; 512],
             history_index: 0,
 
             chess_board: {
@@ -53,7 +53,7 @@ impl SearchWorker {
             },
 
             traversed_positions: {
-                [0; 1024]
+                [0; 512]
             },
             position_stack_len: 0, 
             
@@ -148,7 +148,7 @@ impl SearchWorker {
     }
 
     pub fn process_move(&mut self, uci_move: String) {
-        if self.history_index >= 1024 { 
+        if self.history_index >= 512 { 
             eprintln!("History Index too long");
             return;
          } 

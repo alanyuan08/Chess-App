@@ -9,9 +9,9 @@ pub struct NnueNetwork {
     pub l1_weights: [[i16; 512]; 49152],
     pub l1_biases: [i32; 512],
 
-    // Layer 2: Hidden 2 (1024 inputs -> 32 outputs)
-    pub l2_weights: [[i8; 1024]; 32],
-    pub l2_biases: [i32; 32],
+    // Layer 2: Hidden 2 (512 inputs -> 64 outputs)
+    pub l2_weights: [[i8; 512]; 64],
+    pub l2_biases: [i32; 64],
 
     // Layer 3: Hidden 3 (64 inputs -> 32 outputs)
     pub l3_weights: [[i8; 64]; 32],
@@ -55,8 +55,8 @@ impl NnueNetwork {
             read_field(&mut network_box.l1_biases as *mut _ as *mut u8, 512, 4)?;
 
             // 2. Hidden Layer 2
-            read_field(&mut network_box.l2_weights as *mut _ as *mut u8, 32 * 1024, 1)?;
-            read_field(&mut network_box.l2_biases as *mut _ as *mut u8, 32, 4)?;
+            read_field(&mut network_box.l2_weights as *mut _ as *mut u8, 64 * 512, 1)?;
+            read_field(&mut network_box.l2_biases as *mut _ as *mut u8, 64, 4)?;
 
             // 3. Hidden Layer 3
             read_field(&mut network_box.l3_weights as *mut _ as *mut u8, 32 * 32, 1)?;
@@ -76,7 +76,7 @@ impl NnueNetwork {
 #[repr(C, align(64))]
 #[derive(Clone, Debug)]
 pub struct NnueInferenceBuffer {
-    pub l2_inputs: [i8; 1024],
+    pub l2_inputs: [i8; 512],
     pub l3_inputs: [i8; 32],
     pub l4_inputs: [i8; 32],
 }
@@ -95,7 +95,7 @@ impl NnueInferenceBuffer {
 impl Default for NnueInferenceBuffer {
     fn default() -> Self {
         Self {
-            l2_inputs: [0i8; 1024],
+            l2_inputs: [0i8; 512],
             l3_inputs: [0i8; 32],
             l4_inputs: [0i8; 32],
         }

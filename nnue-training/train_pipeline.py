@@ -19,7 +19,7 @@ SHUFFLE_BUFFER = 50000         # Buffer allocation size for secondary tf.data mi
 
 # --- Step-Based Architecture Configuration ---
 STEPS_PER_EPOCH = 4000
-TOTAL_EPOCHS = 100  
+TOTAL_EPOCHS = 200  
 TOTAL_TRAINING_STEPS = STEPS_PER_EPOCH * TOTAL_EPOCHS # 2,000,000 steps total
 WARMUP_STEPS = STEPS_PER_EPOCH * 5                    # 100,000 step warmup
 
@@ -61,7 +61,7 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
         f.write(b1_quant.tobytes())
         print(f"-> Accumulator Layer serialized. Shape: {w1_real.shape} (Weights: i16 / Synthetic Bias: i32)")
 
-        # 2. Hidden Layer 2 (512*2 -> 32)
+        # 2. Hidden Layer 2 (512*2 -> 64)
         # Input: i16 (Clipped from Accumulator) | Weights: i8 | Bias/Output: i32
         # Shift Right by 7 (>> 7) before clipping to next input scale.
         layer2 = model.get_layer("hidden_layer_2") 
@@ -72,7 +72,7 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
         f.write(b2_quant.tobytes())
         print(f"-> Hidden Layer 2 serialized. Shape: {w2.shape} (Weights: i8 / Bias: i32) [Rust -> Shift >> 7]")
 
-        # 3. Hidden Layer 3 (32 -> 32)
+        # 3. Hidden Layer 3 (64 -> 32)
         # Input: i16 | Weights: i8 | Bias/Output: i32 
         # Shift Right by 5 (>> 5) before clipping to next input scale.
         layer3 = model.get_layer("hidden_layer_3")
@@ -140,7 +140,7 @@ def train_nnue_on_fens():
     merged = layers.Concatenate(name="perspective_multiplex")([a_act, p_act]) 
     
     # 7. Hidden Layer 2 with ReLU1 activation
-    x = layers.Dense(32, activation=None, name="hidden_layer_2")(merged)
+    x = layers.Dense(64, activation=None, name="hidden_layer_2")(merged)
     x = keras.ops.clip(x, 0.0, SCALE_MAX)
 
     # 8. Hidden Layer 3 with ReLU1 activation
@@ -190,31 +190,34 @@ def train_nnue_on_fens():
     # --- 1. OPTIMIZED FLAT-THEN-DROP SCHEDULE ---
     def stockfish_lr_schedule_tuned(epoch):
         """
-        Tuned Stockfish Schedule for stable 8k batch training.
-        Uses an early 1-epoch warmup and drops early to lock in sub-70 centipawn precision.
+        Tuned Stockfish Schedule scaled for a 200-epoch run.
+        Uses progressive step-downs to maintain a steady 1-centipawn drop.
         """
         initial_lr = 0.001
         
         # Phase 0: 1-Epoch Linear Warmup (Epoch 0)
-        # Prevents gradient explosion on step zero with random weight initializations
         if epoch == 0:
             return 0.0001
             
-        # Phase 1: Flat Peak Phase (Epochs 1 to 24)
-        # Sweeps up macro strategy patterns until the 70-centipawn plateau is reached
-        elif epoch < 25: 
+        # Phase 1: Flat Peak Phase (Epochs 1 to 39)
+        # Extended slightly to let it aggressively shave macro features from the larger band
+        elif epoch < 40: 
             return initial_lr   
             
-        # Phase 2: First Sudden Cliff Drop (Epochs 25 to 49)
-        # Shrinks the step size down by 10x to let the model learn micro tactical nuances
-        elif epoch < 50:
+        # Phase 2: First Tactical Drop (Epochs 40 to 89)
+        # Shifting to 1e-4 to let the close position error build its momentum
+        elif epoch < 90:
             return initial_lr * 0.1  # 0.0001
             
-        # Phase 3: Final Precision Floor Lock (Epochs 50 to 100+)
-        # Freezes the network structure, allowing weights to settle perfectly
-        else:
+        # Phase 3: Fine-Tuning Grind (Epochs 90 to 149)
+        # The 1e-5 floor where it locks in the sub-70 centipawn precision
+        elif epoch < 150:
             return initial_lr * 0.01 # 0.00001
-
+            
+        # Phase 4: Final Asymptotic Lock (Epochs 150 to 200)
+        # Micro-adjustments (1e-6) to settle the weights completely without overfitting
+        else:
+            return initial_lr * 0.001 # 0.000001
         
     # --- 3. OPTIMIZER SPECIFICATION (RANGER INTERACTIVE ENGINE) ---
     # Ranger handles the early warm-up naturally via RAdam and absorbs jumps via Lookahead

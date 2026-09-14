@@ -43,7 +43,7 @@ pub struct TranspositionTable {
 impl TranspositionTable {
     /// Creates a flat table matching the nearest power-of-two megabytes
     pub fn new(mb: usize) -> Self {
-        let size_bytes = mb * 1024 * 1024;
+        let size_bytes = mb * 512 * 512;
         let count = size_bytes / std::mem::size_of::<TtBucket>();
         
         // Round down to power of two for fast bitwise indexing
