@@ -866,7 +866,7 @@ impl ChessBoard {
         }
 
         // --- STEP 3: HIDDEN LAYER 3 (128 -> 32) ---
-        // Input Scale (32) * Weight Scale (32) = Sum Scale (512).
+        // Input Scale (32) * Weight Scale (32) = Sum Scale (1024).
         // Shift Down by 5 to Scale (32)
         // Clamp at 32 to match Python's ReLU1 (1.0).
         for neuron in 0..32 {

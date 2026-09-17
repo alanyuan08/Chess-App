@@ -11,8 +11,8 @@ def _worker_loop(file_list, data_queue, shutdown_event, padding_index_value, chu
     """
     Isolated background process worker loop.
     Sequentially loads Parquet shards, shuffles rows locally, and feeds the queue.
+    Strictly forces full uniform batch sizes to safeguard optimization gradients.
     """
-    # Seed the random number generator uniquely per background worker process
     np.random.seed(int(time.time() * 1000) % 2**32 ^ mp.current_process().pid)
     
     while not shutdown_event.is_set():
@@ -31,26 +31,28 @@ def _worker_loop(file_list, data_queue, shutdown_event, padding_index_value, chu
                 df = df.sample(frac=1.0).reset_index(drop=True)
                 
                 total_rows = len(df)
-                if total_rows == 0:
+                if total_rows < chunk_size: # Skip completely if smaller than a single batch
                     continue
 
-                # 3. Fast Vector Conversion: Stack everything into large matrices instantly
+                # 3. Fast Vector Conversion
                 a_matrix = np.stack(df['active_indices'].values).astype(np.int32)
                 p_matrix = np.stack(df['passive_indices'].values).astype(np.int32)
                 targets = np.stack(df['target'].values).astype(np.float32).reshape(-1, 1)
 
-                # 4. Apply your safe padding replacement across the entire matrix at once
+                # 4. Apply safe padding replacement across the entire matrix at once
                 a_matrix[a_matrix == -1] = padding_index_value
                 p_matrix[p_matrix == -1] = padding_index_value
 
-                # 5. Chunk and Stream via the Queue
-                for i in range(0, total_rows, chunk_size):
+                # This explicitly discards the messy remainder tail at the end of the file
+                full_batch_cutoff = total_rows - (total_rows % chunk_size)
+
+                # 5. Chunk and Stream via the Queue (Stopping cleanly at the cutoff)
+                for i in range(0, full_batch_cutoff, chunk_size):
                     if shutdown_event.is_set():
                         break
 
-                    end_idx = min(i + chunk_size, total_rows)
+                    end_idx = i + chunk_size # Guaranteed to be exactly a full batch
                     
-                    # Force evaluation to guarantee full batch sizes match training arrays
                     chunk_item = (
                         {
                             "active_features": a_matrix[i:end_idx].copy(),
@@ -62,7 +64,6 @@ def _worker_loop(file_list, data_queue, shutdown_event, padding_index_value, chu
                     # Block if the queue is full; continuously poll shutdown event status
                     while not shutdown_event.is_set():
                         try:
-                            # Using a brief timeout ensures the process can see the shutdown flag
                             data_queue.put(chunk_item, timeout=0.1)
                             break
                         except queue.Full:

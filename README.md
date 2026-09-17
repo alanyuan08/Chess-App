@@ -73,28 +73,37 @@
 
   - **Data Augmentation & DeDuplication:** The filtered positions are augmented by rotating each board state 180 degrees. The positions are then deduplicationed. This yields a total of **392,386,524 unique positions**.
 
-  - **Down-Sampling:** The positions are downscaled to this ratio:
+  - **Down-Sampling:** The positions are downscaled to this ratio with a priority on deeper evaluations.
+
+    #### **Target Distribution Matrix (%)**
 
     | Score Phase | Early | Mid | Late | Total By Type |
     | :--- | :---: | :---: | :---: | :---: |
-    | **Quiet** | 10.0 | 20.0 | 10.0 | **40** |
-    | **Advantage** | 7.0 | 18.0 | 10.0 | **35** |
-    | **Decisive** | 2.5 | 10.0 | 7.5 | **20** |
-    | **Blunder** | 0.5 | 2.0 | 2.5 | **5** |
-    | **Total By Phase** | **20** | **50** | **30** | **100** |
+    | **Dead Equal** | 4.5% | 6.0% | 4.5% | **15.0%** |
+    | **Slight Pull** | 9.0% | 12.0% | 9.0% | **30.0%** |
+    | **Solid Edge** | 7.5% | 10.0% | 7.5% | **25.0%** |
+    | **Clear Dominance** | 5.4% | 7.2% | 5.4% | **18.0%** |
+    | **Decisive Minor** | 2.4% | 3.2% | 2.4% | **8.0%** |
+    | **Decisive Major** | 1.2% | 1.6% | 1.2% | **4.0%** |
+    | **Total By Phase** | **30.0%** | **40.0%** | **30.0%** | **100.0%** |
 
-    ### **Centipawn Differential Thresholds**
-    * **Quiet:** 0 – 150
-    * **Advantage:** 150 – 400
-    * **Decisive:** 400 – 800
-    * **Blunder:** 800+
+    ---
 
-    ### **Piece Count by Phase**
-    * **Early:** 26+
-    * **Mid:** 14 – 26
-    * **Late:** < 14
+    #### **Centipawn (cp) Differential Thresholds**
+    * **Dead Equal:** 0 – 40 cp
+    * **Slight Pull:** 40 – 120 cp
+    * **Solid Edge:** 120 – 220 cp
+    * **Clear Dominance:** 220 – 400 cp
+    * **Decisive Minor:** 400 – 600 cp
+    * **Decisive Major:** 600 – 1000 cp
+    * *(Note: Positions with structural blunders or engine evaluations exceeding 1000+ cp are completely excluded from the dataset).*
 
-    This yields a total of **237,692,263 unique positions**.
+    #### **Piece Count by Phase**
+    * **Early (Opening):** 26+ pieces remaining on the board
+    * **Mid (Midgame):** 14 – 25 pieces remaining on the board
+    * **Late (Endgame):** < 14 pieces remaining on the board
+
+    This yields a total of **81,555,624 unique positions**.
 
   - **Shard Balancing:** The data is batched into shards maintaining this ratio for training.
 

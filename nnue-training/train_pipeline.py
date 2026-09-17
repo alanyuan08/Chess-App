@@ -14,14 +14,10 @@ INPUT_FEATURES = 64 * 64 * 12  # Dual-Perspective HalfKA Dimension (49152)
 MAX_PIECES = 32                # Uniform layout array padding bound
 SCALE_MAX = 1.0                # Bounded Clipped ReLU limit
 BATCH_SIZE = 8192             # Standard massive NNUE training batch size
-VAL_BATCH_SIZE = 4096          # Validation tracking step batch size
-SHUFFLE_BUFFER = 50000         # Buffer allocation size for secondary tf.data mix
 
 # --- Step-Based Architecture Configuration ---
-STEPS_PER_EPOCH = 4000
-TOTAL_EPOCHS = 200  
-TOTAL_TRAINING_STEPS = STEPS_PER_EPOCH * TOTAL_EPOCHS # 2,000,000 steps total
-WARMUP_STEPS = STEPS_PER_EPOCH * 5                    # 100,000 step warmup
+STEPS_PER_EPOCH = 5000
+TOTAL_EPOCHS = 50  
 
 # Mixed Data Sets
 CLEAN_DATASET_DIR = "./balanced_shards" 
@@ -186,38 +182,6 @@ def train_nnue_on_fens():
         SCALE_THRESHOLD = 10.0
         raw_error = tf.abs(y_true - y_pred)
         return tf.reduce_mean(tf.math.tanh(raw_error / SCALE_THRESHOLD) * SCALE_THRESHOLD)
-
-    # --- 1. OPTIMIZED FLAT-THEN-DROP SCHEDULE ---
-    def stockfish_lr_schedule_tuned(epoch):
-        """
-        Tuned Stockfish Schedule scaled for a 200-epoch run.
-        Uses progressive step-downs to maintain a steady 1-centipawn drop.
-        """
-        initial_lr = 0.001
-        
-        # Phase 0: 1-Epoch Linear Warmup (Epoch 0)
-        if epoch == 0:
-            return 0.0001
-            
-        # Phase 1: Flat Peak Phase (Epochs 1 to 39)
-        # Extended slightly to let it aggressively shave macro features from the larger band
-        elif epoch < 40: 
-            return initial_lr   
-            
-        # Phase 2: First Tactical Drop (Epochs 40 to 89)
-        # Shifting to 1e-4 to let the close position error build its momentum
-        elif epoch < 90:
-            return initial_lr * 0.1  # 0.0001
-            
-        # Phase 3: Fine-Tuning Grind (Epochs 90 to 149)
-        # The 1e-5 floor where it locks in the sub-70 centipawn precision
-        elif epoch < 150:
-            return initial_lr * 0.01 # 0.00001
-            
-        # Phase 4: Final Asymptotic Lock (Epochs 150 to 200)
-        # Micro-adjustments (1e-6) to settle the weights completely without overfitting
-        else:
-            return initial_lr * 0.001 # 0.000001
         
     # --- 3. OPTIMIZER SPECIFICATION (RANGER INTERACTIVE ENGINE) ---
     # Ranger handles the early warm-up naturally via RAdam and absorbs jumps via Lookahead
@@ -239,10 +203,12 @@ def train_nnue_on_fens():
 
     # Create the permanent managers ONCE. They spawn background processes that live forever.
     train_manager = PermanentDatasetManager(
-        shard_directory=train_dir, shard_pattern="data_*.parquet", num_workers=4, queue_size=5000
+        shard_directory=train_dir, shard_pattern="data_*.parquet", num_workers=4, 
+        queue_size=5000, batch_size=BATCH_SIZE
     )
     val_manager = PermanentDatasetManager(
-        shard_directory=val_dir, shard_pattern="data_*.parquet", num_workers=1, queue_size=5000
+        shard_directory=val_dir, shard_pattern="data_*.parquet", num_workers=1,
+        queue_size=5000, batch_size=BATCH_SIZE
     )
 
     # --- Train Dataset (Updated to accept dense list tokens signatures) ---
@@ -250,10 +216,10 @@ def train_nnue_on_fens():
         train_manager.generator_fn,
         output_signature=(
             {
-                "active_features": tf.TensorSpec(shape=(None, MAX_PIECES), dtype=tf.int32),
-                "passive_features": tf.TensorSpec(shape=(None, MAX_PIECES), dtype=tf.int32),
+                "active_features": tf.TensorSpec(shape=(BATCH_SIZE, MAX_PIECES), dtype=tf.int32),
+                "passive_features": tf.TensorSpec(shape=(BATCH_SIZE, MAX_PIECES), dtype=tf.int32),
             },
-            tf.TensorSpec(shape=(None, 1), dtype=tf.float32)
+            tf.TensorSpec(shape=(BATCH_SIZE, 1), dtype=tf.float32)
         )
     )
 
@@ -262,10 +228,10 @@ def train_nnue_on_fens():
         val_manager.generator_fn,
         output_signature=(
             {
-                "active_features": tf.TensorSpec(shape=(None, MAX_PIECES), dtype=tf.int32),
-                "passive_features": tf.TensorSpec(shape=(None, MAX_PIECES), dtype=tf.int32),
+                "active_features": tf.TensorSpec(shape=(BATCH_SIZE, MAX_PIECES), dtype=tf.int32),
+                "passive_features": tf.TensorSpec(shape=(BATCH_SIZE, MAX_PIECES), dtype=tf.int32),
             },
-            tf.TensorSpec(shape=(None, 1), dtype=tf.float32)
+            tf.TensorSpec(shape=(BATCH_SIZE, 1), dtype=tf.float32)
         )
     )
 
@@ -282,8 +248,15 @@ def train_nnue_on_fens():
         mode='min',
         verbose=1
     )
-
-    lr_scheduler_cb = tf.keras.callbacks.LearningRateScheduler(stockfish_lr_schedule_tuned, verbose=1)
+    
+    adaptive_lr_cb = tf.keras.callbacks.ReduceLROnPlateau(
+        monitor='val_loss', 
+        factor=0.2, 
+        patience=2, 
+        min_lr=2e-7,
+        verbose=1 
+    )
+    
     cleanup_cb = AggressiveMemoryCleanup()
 
     # Train model execution call
@@ -292,8 +265,8 @@ def train_nnue_on_fens():
         steps_per_epoch=STEPS_PER_EPOCH,
         epochs=TOTAL_EPOCHS, 
         validation_data=val_dataset,
-        validation_steps=120,
-        callbacks=[checkpoint_cb, cleanup_cb, lr_scheduler_cb]
+        validation_steps=120,      # Preserved your validation steps mapping
+        callbacks=[checkpoint_cb, cleanup_cb, adaptive_lr_cb]
     )
 
     print("\nTraining complete. Terminating background workers cleanly...")

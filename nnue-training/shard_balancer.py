@@ -10,9 +10,10 @@ NUM_OUTPUT_SHARDS = 200
 
 def get_strata_and_filter_expressions():
     """
-    Translates the bucketing rules natively into Polars expressions.
-    Defines the original 3x4 matrix layout (12 buckets).
+    Translates the updated centipawn stratification rules natively into Polars expressions.
+    Filters out extreme blunders (>1000 cp) and scales categories appropriately.
     """
+    # Optimized string parsing expression for piece counts
     piece_count_expr = (
         pl.col("fen")
         .str.split(" ")
@@ -22,7 +23,8 @@ def get_strata_and_filter_expressions():
     )
     abs_score_expr = pl.col("target").abs()
     
-    is_valid_depth = pl.lit(True)
+    # Establish a high-fidelity depth floor to completely filter out shallow engine noise
+    is_valid_depth = pl.col("depth") >= 24
     
     phase_expr = (
         pl.when(piece_count_expr >= 26).then(pl.lit("early"))
@@ -31,12 +33,15 @@ def get_strata_and_filter_expressions():
     )
     
     score_expr = (
-        pl.when(abs_score_expr <= 1.5).then(pl.lit("quiet"))
-        .when(abs_score_expr <= 4).then(pl.lit("advantage"))
-        .when(abs_score_expr <= 8).then(pl.lit("decisive"))
-        .otherwise(pl.lit("blunder"))
+        pl.when(abs_score_expr <= 0.4).then(pl.lit("dead_equal"))
+        .when(abs_score_expr <= 1.2).then(pl.lit("slight_pull"))
+        .when(abs_score_expr <= 2.2).then(pl.lit("solid_edge"))
+        .when(abs_score_expr <= 4.0).then(pl.lit("clear_dominance"))
+        .when(abs_score_expr <= 6.0).then(pl.lit("decisive_minor"))
+        .when(abs_score_expr <= 10.0).then(pl.lit("decisive_major"))
+        .otherwise(pl.lit("dropped"))
     )
-    
+
     strata_key_expr = (phase_expr + "_" + score_expr).alias("strata_key")
     
     return is_valid_depth, strata_key_expr
@@ -51,7 +56,7 @@ def run_precision_matrix_shuffler_low_mem():
         print("[ERROR] No input shards discovered!")
         return
 
-    print("=== Commencing Depth-Prioritized Stratified Target Ratio Router ===")
+    print("=== Commencing Depth-Saturated Stability Stratification Router ===")
     
     TEMP_BUFFER_DIR = "./temp_shard_buffers"
     shutil.rmtree(TEMP_BUFFER_DIR, ignore_errors=True)
@@ -66,15 +71,14 @@ def run_precision_matrix_shuffler_low_mem():
     # STEP 1: INCREMENTAL METADATA ANALYSIS (TRACK BUCKET + DEPTH)
     # =========================================================================
     print("-> Analyzing dataset bucket and depth distributions incrementally...")
-    global_depth_counts = {} # Key: strata_key, Value: {depth: count}
+    global_depth_counts = {}  # Key: strata_key, Value: {depth: count}
     
     for file_path in input_files:
         chunk_counts = (
             pl.scan_parquet(file_path)
             .filter((pl.col("target").abs() <= 1000) & is_valid_depth)
-            .sort("depth", descending=True)
+            .select([strata_key_expr, pl.col("depth"), pl.col("fen")])
             .unique(subset=["fen"], keep="first")
-            .select([strata_key_expr, pl.col("depth")])
             .group_by(["strata_key", "depth"])
             .len("count")
             .collect(engine="streaming") 
@@ -84,40 +88,56 @@ def run_precision_matrix_shuffler_low_mem():
             k = row["strata_key"]
             d = row["depth"]
             c = row["count"]
+            if k == "early_dropped" or k == "mid_dropped" or k == "late_dropped":
+                continue
             if k not in global_depth_counts:
                 global_depth_counts[k] = {}
             global_depth_counts[k][d] = global_depth_counts[k].get(d, 0) + c
 
-    # Target Matrix weights optimizing for balanced Win-Loss Sigmoid distribution
+    # Performance-first distribution targets (Total: 100M positions baseline reference)
     target_ratios = {
-        "early_quiet": 0.100, "mid_quiet": 0.200, "late_quiet": 0.100,
-        "early_advantage": 0.070, "mid_advantage": 0.180, "late_advantage": 0.100,
-        "early_decisive": 0.025, "mid_decisive": 0.100, "late_decisive": 0.075,
-        "early_blunder": 0.005, "mid_blunder": 0.020, "late_blunder": 0.025
+        # --- PHASE 1: EARLY GAME (Total: 0.300) ---
+        "early_dead_equal":       0.045,  # 0 - 40 cp
+        "early_slight_pull":      0.090,  # 40 - 120 cp
+        "early_solid_edge":       0.075,  # 120 - 220 cp
+        "early_clear_dominance":  0.054,  # 220 - 400 cp
+        "early_decisive_minor":   0.024,  # 400 - 600 cp
+        "early_decisive_major":   0.012,  # 600 - 1000 cp
+
+        # --- PHASE 2: MID GAME (Total: 0.400) ---
+        "mid_dead_equal":         0.060,
+        "mid_slight_pull":        0.120,
+        "mid_solid_edge":         0.100,
+        "mid_clear_dominance":    0.072,
+        "mid_decisive_minor":     0.032,
+        "mid_decisive_major":     0.016,
+
+        # --- PHASE 3: LATE GAME (Total: 0.300) ---
+        "late_dead_equal":        0.045,
+        "late_slight_pull":       0.090,
+        "late_solid_edge":        0.075,
+        "late_clear_dominance":   0.054,
+        "late_decisive_minor":    0.024,
+        "late_decisive_major":    0.012,
     }
 
-    # Calculate global counts per bucket to determine anchor scale
-    global_counts = {k: sum(depths.values()) for k, depths in global_depth_counts.items()}
-    
-    # Anchor to mid_advantage to avoid over-squeezing good tactical data
-    anchor_multiplier = global_counts.get("mid_advantage", 1) / target_ratios["mid_advantage"]
-    
-    # Determine absolute depth cutoffs and sampling fractions for the boundary depth
+    # Dynamic baseline adjustments targeting maximum depth saturation 
+    # instead of constraining abundant strata volume down to starving buckets
+    TARGET_TOTAL_DATASET = 100_000_000
     depth_cutoffs = {}
-    total_rows = sum(global_counts.values())
-
-    print("\n=== Calculated Depth Cutoffs per Strata ===")
+    
+    print("\n=== Saturated Depth-Stability Cutoffs per Strata ===")
     for k, target_pct in target_ratios.items():
-        desired_count = int(target_pct * anchor_multiplier)
+        desired_count = int(target_pct * TARGET_TOTAL_DATASET)
         actual_dict = global_depth_counts.get(k, {})
         actual_count = sum(actual_dict.values())
         
+        # If the category is data-starved, retain 100% of data to maximize training signals
         if actual_count <= desired_count or actual_count == 0:
-            # Keep 100% of the data in this bucket across all depths
             depth_cutoffs[k] = {"min_depth": 0, "boundary_fraction": 1.0}
-            print(f" -> {k.ljust(18)}: Keep ALL positions (Available: {actual_count:,})")
+            print(f" -> {k.ljust(22)}: Data Deficit | Retaining 100% (Available: {actual_count:,})")
         else:
-            # Sort depths descending to prioritize keeping deeper calculations
+            # Sort evaluations to strictly keep deep calculations and discard unstable/shallow evaluations
             sorted_depths = sorted(actual_dict.keys(), reverse=True)
             running_sum = 0
             cutoff_depth = 0
@@ -127,7 +147,6 @@ def run_precision_matrix_shuffler_low_mem():
                 count_at_d = actual_dict[d]
                 if running_sum + count_at_d >= desired_count:
                     cutoff_depth = d
-                    # Calculate how much of this specific boundary depth we need to hit our exact target
                     needed_from_this_depth = desired_count - running_sum
                     fraction_needed = needed_from_this_depth / count_at_d
                     running_sum += needed_from_this_depth
@@ -136,7 +155,7 @@ def run_precision_matrix_shuffler_low_mem():
                     running_sum += count_at_d
             
             depth_cutoffs[k] = {"min_depth": cutoff_depth, "boundary_fraction": fraction_needed}
-            print(f" -> {k.ljust(18)}: Drop depths below {cutoff_depth} (Keep {running_sum:,}/{actual_count:,})")
+            print(f" -> {k.ljust(22)}: Saturated Clamped | Drop depths < {cutoff_depth} (Keep {running_sum:,}/{actual_count:,})")
 
     # =========================================================================
     # STEP 2: DETERMINISTIC ROUTING PASS WITH DEPTH FILTERING
@@ -150,10 +169,10 @@ def run_precision_matrix_shuffler_low_mem():
         chunk_df = (
             pl.scan_parquet(file_path)
             .filter((pl.col("target").abs() <= 1000) & is_valid_depth)
-            .sort("depth", descending=True)
-            .unique(subset=["fen"], keep="first")
             .with_columns(strata_key_expr)
+            .filter(pl.col("strata_key") != "dropped")
             .collect(engine="streaming")
+            .unique(subset=["fen"], keep="first")
         )
         
         if chunk_df.is_empty():
@@ -161,56 +180,51 @@ def run_precision_matrix_shuffler_low_mem():
 
         sampled_blocks = []
         for strata_key, group in chunk_df.partition_by("strata_key", as_dict=True).items():
-            s_key = strata_key if isinstance(strata_key, tuple) else strata_key
-            cutoff_info = depth_cutoffs.get(s_key, {"min_depth": 0, "boundary_fraction": 1.0})
-            
+            s_key = strata_key[0] if isinstance(strata_key, tuple) else strata_key
+            if s_key not in depth_cutoffs:
+                continue
+                
+            cutoff_info = depth_cutoffs[s_key]
             min_d = cutoff_info["min_depth"]
             b_frac = cutoff_info["boundary_fraction"]
             
-            # 1. Keep rows strictly higher than the floor cutoff depth
+            # Keep evaluations strictly higher than the stability floor cutoff depth
             high_depth_df = group.filter(pl.col("depth") > min_d)
-            if not high_depth_df.is_empty():
-                sampled_blocks.append(high_depth_df)
-                
-            # 2. Sample the boundary floor depth to meet the exact distribution requirement
-            if b_frac > 0.0:
-                boundary_df = group.filter(pl.col("depth") == min_d)
-                if not boundary_df.is_empty():
-                    if b_frac >= 1.0:
-                        sampled_blocks.append(boundary_df)
-                    else:
-                        sampled_blocks.append(boundary_df.sample(fraction=b_frac, shuffle=False))
-                        
+            sampled_blocks.append(high_depth_df)
+            
+            # Deterministically down-sample at the specific threshold edge boundary
+            boundary_df = group.filter(pl.col("depth") == min_d)
+            if not boundary_df.is_empty() and b_frac > 0.0:
+                # Add deterministic row selection using hashes to prevent memory leaks
+                boundary_df = boundary_df.filter(
+                    (pl.col("fen").map_elements(lambda x: int(hashlib.md5(x.encode()).hexdigest(), 16) % 10000, return_dtype=pl.Int64) / 10000.0) <= b_frac
+                )
+                sampled_blocks.append(boundary_df)
+        
         if not sampled_blocks:
             continue
             
-        chunk_df = pl.concat(sampled_blocks)
-        post_sampled_total += chunk_df.height
-
-        # Map FEN uniformly across the 200 output shards
-        chunk_df = chunk_df.with_columns(
-            pl.col("fen").map_elements(
-                lambda x: int(hashlib.md5(x.encode()).hexdigest(), 16) % NUM_OUTPUT_SHARDS, 
-                return_dtype=pl.Int64
-            ).alias("target_shard")
-        )
+        chunk_filtered = pl.concat(sampled_blocks)
+        post_sampled_total += len(chunk_filtered)
         
-        # Fixed: Explicitly grab the first integer scalar value out of the Series column map
-        for _, target_sub_df in chunk_df.partition_by("target_shard", as_dict=True).items():
-            if target_sub_df.is_empty():
-                continue
+        # Route the deep rows out to temporary buffered target files
+        if not chunk_filtered.is_empty():
+            chunk_filtered = chunk_filtered.with_columns(
+                (pl.col("fen").map_elements(lambda x: int(hashlib.md5(x.encode()).hexdigest(), 16) % NUM_OUTPUT_SHARDS, return_dtype=pl.Int64)).alias("shard_id")
+            )
             
-            s_idx = int(target_sub_df["target_shard"][0])
+            for s_id, group in chunk_filtered.partition_by("shard_id", as_dict=True).items():
+                actual_id = s_id[0] if isinstance(s_id, tuple) else s_id
+                out_path = os.path.join(TEMP_BUFFER_DIR, f"shard_{actual_id}", f"part_{idx}.parquet")
+                group.drop(["strata_key", "shard_id"]).write_parquet(out_path)
                 
-            out_chunk_path = os.path.join(TEMP_BUFFER_DIR, f"shard_{s_idx}", f"part_{idx}.parquet")
-            target_sub_df.drop(["strata_key", "target_shard"]).write_parquet(out_chunk_path, compression="snappy")
-            
-        del chunk_df
+    print(f"\n[SUCCESS] Route complete. Total stable positions consolidated: {post_sampled_total:,}")
+    
+    # =========================================================================
+    # STEP 3: CONSOLIDATION & SHUFFLE
+    # =========================================================================
+    print("\n=== Step 3: Consolidating and Shuffling Final Buffered Shards ===")
 
-    # =========================================================================
-    # STEP 3: CONSOLIDATE & RE-SHUFFLE SHARDS
-    # =========================================================================
-    print("\n=== Step 3: Finalizing and Shuffling Balanced Output Shards ===")
     for b_idx in range(NUM_OUTPUT_SHARDS):
         print(f" -> Applying final shuffle and saving organic balanced shard {b_idx + 1}/{NUM_OUTPUT_SHARDS}...")
         
