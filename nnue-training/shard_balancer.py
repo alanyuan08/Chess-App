@@ -1,19 +1,24 @@
 import os
+import sys
 import glob
+import numpy as np
 import polars as pl
-import hashlib
-import shutil
 
-INPUT_SHARDS_DIR = "./production_shards"
-BALANCED_OUTPUT_DIR = "./balanced_shards"
-NUM_OUTPUT_SHARDS = 200
+DEDUP_DATA_DIR = "./data_dedup"           
+TEMP_MIXER_DIR = "./temp_mixer_shards"    
+FINAL_OUTPUT_DIR = "./balanced_shards" 
 
-def get_strata_and_filter_expressions():
-    """
-    Translates the updated centipawn stratification rules natively into Polars expressions.
-    Filters out extreme blunders (>1000 cp) and scales categories appropriately.
-    """
-    # Optimized string parsing expression for piece counts
+TRAIN_DIR = os.path.join(FINAL_OUTPUT_DIR, "training")
+VAL_DIR = os.path.join(FINAL_OUTPUT_DIR, "validation")
+VAL_TEMP_DIR = os.path.join(VAL_DIR, "temp_mixer")
+
+NUM_BUCKETS = 64
+FLUSH_INTERVAL = 20 
+FINAL_DATA_SIZE = 2_007_040 
+CHUNK_SIZE = 8192
+STREAM_STEP = 500_000
+
+def get_strata_expressions():
     piece_count_expr = (
         pl.col("fen")
         .str.split(" ")
@@ -22,224 +27,306 @@ def get_strata_and_filter_expressions():
         .str.len_chars()
     )
     abs_score_expr = pl.col("target").abs()
-    
-    # Establish a high-fidelity depth floor to completely filter out shallow engine noise
-    is_valid_depth = pl.col("depth") >= 24
-    
+
     phase_expr = (
         pl.when(piece_count_expr >= 26).then(pl.lit("early"))
-        .when(piece_count_expr <= 14).then(pl.lit("late"))
-        .otherwise(pl.lit("mid"))
+        .when(piece_count_expr >= 13).then(pl.lit("mid"))
+        .otherwise(pl.lit("late"))                            
     )
-    
+
     score_expr = (
-        pl.when(abs_score_expr <= 0.4).then(pl.lit("dead_equal"))
-        .when(abs_score_expr <= 1.2).then(pl.lit("slight_pull"))
-        .when(abs_score_expr <= 2.2).then(pl.lit("solid_edge"))
-        .when(abs_score_expr <= 4.0).then(pl.lit("clear_dominance"))
-        .when(abs_score_expr <= 6.0).then(pl.lit("decisive_minor"))
-        .when(abs_score_expr <= 10.0).then(pl.lit("decisive_major"))
-        .otherwise(pl.lit("dropped"))
+        pl.when(abs_score_expr <= 0.45).then(pl.lit("dead_equal"))
+        .when(abs_score_expr <= 0.95).then(pl.lit("slight_pull"))
+        .when(abs_score_expr <= 1.75).then(pl.lit("micro_advantage"))
+        .when(abs_score_expr <= 3.50).then(pl.lit("solid_edge"))
+        .when(abs_score_expr <= 6.00).then(pl.lit("clear_dominance"))    
+        .when(abs_score_expr <= 15.00).then(pl.lit("decisive_zone"))
+        .otherwise(pl.lit("dropped")) 
     )
 
-    strata_key_expr = (phase_expr + "_" + score_expr).alias("strata_key")
-    
-    return is_valid_depth, strata_key_expr
+    return (phase_expr + "_" + score_expr).alias("strata_key")
 
-def run_precision_matrix_shuffler_low_mem():
-    os.makedirs(BALANCED_OUTPUT_DIR, exist_ok=True)
+def run_unified_mixer_balancer():
+    os.makedirs(TEMP_MIXER_DIR, exist_ok=True)
+    os.makedirs(TRAIN_DIR, exist_ok=True)
+    os.makedirs(VAL_DIR, exist_ok=True)
+    os.makedirs(VAL_TEMP_DIR, exist_ok=True)
     
-    shard_pattern = os.path.join(INPUT_SHARDS_DIR, "data_*.parquet")
-    input_files = sorted(glob.glob(shard_pattern))
+    input_shards = sorted(glob.glob(os.path.join(DEDUP_DATA_DIR, "*.parquet")))
+    if not input_shards:
+        print(f"[ERROR] No data found in {DEDUP_DATA_DIR}!")
+        sys.exit(1)
+        
+    print(f"=== Commencing Unified Global Mixer & Balancer Across {len(input_shards)} Shards ===")
     
-    if not input_files:
-        print("[ERROR] No input shards discovered!")
-        return
+    # -------------------------------------------------------------------------
+    # PHASE 1: Low-Memory Stream Routing via Intermediate Sharding
+    # -------------------------------------------------------------------------
+    print(" -> Phase 1: Running chunk-based out-of-core streaming topology...")
+        
+    # Pre-calculated expression to dynamically parse piece counts excluding kings
+    piece_count_expr = (
+        pl.col("fen")
+        .str.split(" ")
+        .list.get(0)
+        .str.replace_all(r"[\d/kK]", "")
+        .str.len_chars()
+    )
+    
+    strata_key_expr = get_strata_expressions()
+    global_strata_counts = {}
 
-    print("=== Commencing Depth-Saturated Stability Stratification Router ===")
-    
-    TEMP_BUFFER_DIR = "./temp_shard_buffers"
-    shutil.rmtree(TEMP_BUFFER_DIR, ignore_errors=True)
-    os.makedirs(TEMP_BUFFER_DIR, exist_ok=True)
-    
-    for b_idx in range(NUM_OUTPUT_SHARDS):
-        os.makedirs(os.path.join(TEMP_BUFFER_DIR, f"shard_{b_idx}"), exist_ok=True)
+    # Read and filter each file eagerly one by one to keep active RAM footprint tiny
+    for i, path in enumerate(input_shards, 1):
+        df_shard = pl.read_parquet(path)
+        if len(df_shard) == 0: continue
+            
+        # 1. Apply strict stratified depth floors instantly on the small local chunk
+        df_filtered = df_shard.filter(
+            ((piece_count_expr >= 26) & (pl.col("depth") >= 26)) |
+            ((piece_count_expr.is_between(13, 25)) & (pl.col("depth") >= 28)) |
+            ((piece_count_expr < 13) & (pl.col("depth") >= 32))
+        )
+        if len(df_filtered) == 0: continue
 
-    is_valid_depth, strata_key_expr = get_strata_and_filter_expressions()
-    
+        # 2. Add features and split hashes immediately on the clean local subset
+        df_filtered = df_filtered.with_columns([
+            strata_key_expr,
+            pl.col("fen").hash(seed=999).abs().alias("split_hash"),
+            pl.col("fen").hash(seed=777).alias("mix_hash")
+        ])
+
+        # Calculate routing bucket IDs based on your mixing entropy
+        df_filtered = df_filtered.with_row_index(name="row_idx")
+        df_filtered = df_filtered.with_columns(
+            (pl.col("mix_hash").abs() % NUM_BUCKETS).alias("bucket_id")
+        )
+
+        # 3. Secure Hash Split: Divert the 98% Train and 2% Validation rows cleanly
+        df_train_chunk = df_filtered.filter(pl.col("split_hash") % 100 < 98)
+        df_val_chunk = df_filtered.filter(pl.col("split_hash") % 100 >= 98)
+
+        # 4. Stream Training row allocations directly to raw disk bucket files
+        if len(df_train_chunk) > 0:
+            # Accumulate strata telemetry directly from the raw chunk
+            counts = df_train_chunk.group_by("strata_key").len("count")
+            for row in counts.iter_rows(named=True):
+                k = row["strata_key"]
+                if "_dropped" in k: continue
+                global_strata_counts[k] = global_strata_counts.get(k, 0) + row["count"]
+
+            for bucket_id, df_sub_bucket in df_train_chunk.group_by("bucket_id"):
+                if len(df_sub_bucket) == 0: continue
+                frag_path = os.path.join(TEMP_MIXER_DIR, f"bucket_{bucket_id}_raw_{i}.parquet")
+                df_sub_bucket.drop(["bucket_id", "row_idx", "split_hash"]).write_parquet(frag_path, compression="snappy")
+
+        # 5. Stream Validation row allocations directly to separate raw disk bucket files
+        if len(df_val_chunk) > 0:
+            for bucket_id, df_sub_bucket in df_val_chunk.group_by("bucket_id"):
+                if len(df_sub_bucket) == 0: continue
+                frag_path = os.path.join(VAL_TEMP_DIR, f"val_bucket_{bucket_id}_raw_{i}.parquet")
+                df_sub_bucket.drop(["bucket_id", "row_idx", "split_hash"]).write_parquet(frag_path, compression="snappy")
+
+        del df_shard, df_filtered, df_train_chunk, df_val_chunk
+
     # =========================================================================
-    # STEP 1: INCREMENTAL METADATA ANALYSIS (TRACK BUCKET + DEPTH)
+    # PHASE 2: Dynamic Capacity Scaling & Stratification Reporting
+    # Bridges global bucketing matrices with the downstream block exporter
     # =========================================================================
-    print("-> Analyzing dataset bucket and depth distributions incrementally...")
-    global_depth_counts = {}  # Key: strata_key, Value: {depth: count}
+    print("\n -> Phase 2: Recalculating true strata counts and optimizing global scale ceilings...")
     
-    for file_path in input_files:
-        chunk_counts = (
-            pl.scan_parquet(file_path)
-            .filter((pl.col("target").abs() <= 1000) & is_valid_depth)
-            .select([strata_key_expr, pl.col("depth"), pl.col("fen")])
-            .unique(subset=["fen"], keep="first")
-            .group_by(["strata_key", "depth"])
+    # 1. Re-scan the freshly deduplicated training buckets to clear out-of-core telemetry
+    true_strata_counts = {}
+    
+    for bucket_id in range(NUM_BUCKETS):
+        frag_path = os.path.join(TEMP_MIXER_DIR, f"bucket_{bucket_id}_frag_0.parquet")
+        if not os.path.exists(frag_path): continue
+        
+        # Read only the strata column from the clean fragment to save speed
+        df_counts = (
+            pl.read_parquet(frag_path, columns=["strata_key"])
+            .group_by("strata_key")
             .len("count")
-            .collect(engine="streaming") 
         )
         
-        for row in chunk_counts.iter_rows(named=True):
+        for row in df_counts.iter_rows(named=True):
             k = row["strata_key"]
-            d = row["depth"]
-            c = row["count"]
-            if k == "early_dropped" or k == "mid_dropped" or k == "late_dropped":
-                continue
-            if k not in global_depth_counts:
-                global_depth_counts[k] = {}
-            global_depth_counts[k][d] = global_depth_counts[k].get(d, 0) + c
+            if "_dropped" in k: continue
+            true_strata_counts[k] = true_strata_counts.get(k, 0) + row["count"]
 
-    # Performance-first distribution targets (Total: 100M positions baseline reference)
-    target_ratios = {
-        # --- PHASE 1: EARLY GAME (Total: 0.300) ---
-        "early_dead_equal":       0.045,  # 0 - 40 cp
-        "early_slight_pull":      0.090,  # 40 - 120 cp
-        "early_solid_edge":       0.075,  # 120 - 220 cp
-        "early_clear_dominance":  0.054,  # 220 - 400 cp
-        "early_decisive_minor":   0.024,  # 400 - 600 cp
-        "early_decisive_major":   0.012,  # 600 - 1000 cp
-
-        # --- PHASE 2: MID GAME (Total: 0.400) ---
-        "mid_dead_equal":         0.060,
-        "mid_slight_pull":        0.120,
-        "mid_solid_edge":         0.100,
-        "mid_clear_dominance":    0.072,
-        "mid_decisive_minor":     0.032,
-        "mid_decisive_major":     0.016,
-
-        # --- PHASE 3: LATE GAME (Total: 0.300) ---
-        "late_dead_equal":        0.045,
-        "late_slight_pull":       0.090,
-        "late_solid_edge":        0.075,
-        "late_clear_dominance":   0.054,
-        "late_decisive_minor":    0.024,
-        "late_decisive_major":    0.012,
+    # 2. Define stratified amplification limits by phase to eliminate over-fitting risks
+    AMPLIFICATION_LIMITS = {
+        "early": 2.0,   # Avoids over-memorizing specific engine opening lines
+        "mid": 3.5,     # Protects middlegame tactical volatility horizons
+        "late": 6.0     # Safely upscales scarce, pure depth-32+ endgames
     }
 
-    # Dynamic baseline adjustments targeting maximum depth saturation 
-    # instead of constraining abundant strata volume down to starving buckets
-    TARGET_TOTAL_DATASET = 100_000_000
-    depth_cutoffs = {}
-    
-    print("\n=== Saturated Depth-Stability Cutoffs per Strata ===")
-    for k, target_pct in target_ratios.items():
-        desired_count = int(target_pct * TARGET_TOTAL_DATASET)
-        actual_dict = global_depth_counts.get(k, {})
-        actual_count = sum(actual_dict.values())
+    TARGET_RATIOS = {
+        "early_dead_equal": 0.080, "early_slight_pull": 0.060, "early_micro_advantage": 0.035,
+        "early_solid_edge": 0.015, "early_clear_dominance": 0.007, "early_decisive_zone": 0.003,
         
-        # If the category is data-starved, retain 100% of data to maximize training signals
-        if actual_count <= desired_count or actual_count == 0:
-            depth_cutoffs[k] = {"min_depth": 0, "boundary_fraction": 1.0}
-            print(f" -> {k.ljust(22)}: Data Deficit | Retaining 100% (Available: {actual_count:,})")
+        "mid_dead_equal": 0.140, "mid_slight_pull": 0.120, "mid_micro_advantage": 0.100,
+        "mid_solid_edge": 0.065, "mid_clear_dominance": 0.020, "mid_decisive_zone": 0.005,  
+        
+        "late_dead_equal": 0.110, "late_slight_pull": 0.100, "late_micro_advantage": 0.085,
+        "late_solid_edge": 0.040, "late_clear_dominance": 0.010, "late_decisive_zone": 0.005,
+    }
+    
+    max_possible_scale = float('inf')
+    missing_strata = []
+    
+    for k, target_pct in TARGET_RATIOS.items():
+        actual_count = true_strata_counts.get(k, 0)
+        
+        # Track if a required stratum is missing to raise an operational warning
+        if actual_count == 0: 
+            missing_strata.append(k)
+            continue
+            
+        # --- Isolate the first element 'early', 'mid', or 'late' ---
+        phase_prefix = k.split('_')[0]
+        max_amp = AMPLIFICATION_LIMITS.get(phase_prefix, 3.0)
+            
+        # Dynamically scale global scale limits around the clean phase metrics
+        scale_limit = (actual_count * max_amp) / target_pct
+        if scale_limit < max_possible_scale:
+            max_possible_scale = scale_limit
+
+    # Handle the catastrophic empty data edge-case gracefully
+    if max_possible_scale == float('inf'):
+        print("[CRITICAL ERROR] All evaluated strata shapes returned 0 rows! Verify Phase 1 file loading paths.")
+        sys.exit(1)
+        
+    if missing_strata:
+        print(f"    [WARNING] The following strata targets were entirely absent from data pool: {missing_strata}")
+
+    DYNAMIC_TOTAL_DATASET = int(max_possible_scale)
+    retention_fractions = {}
+    
+    for k, target_pct in TARGET_RATIOS.items():
+        desired = int(target_pct * DYNAMIC_TOTAL_DATASET)
+        actual = true_strata_counts.get(k, 0)
+        # Type-safe fraction generation
+        retention_fractions[k] = desired / actual if actual > 0 else 0.0
+
+    print(f"    [CEILING SOLVED] Target dataset optimized to {DYNAMIC_TOTAL_DATASET:,} rows based on limiting stratum capacity.")
+    
+    # --- AUTOMATED TELEMETRY METRICS DASHBOARD ---
+    print("\n======================= STRATIFICATION METRICS REPORT (POST-REDUCE) =======================")
+    print(f"{'Strata Key':<30} | {'Raw Count':>12} | {'Target Pct':>10} | {'Target Count':>12} | {'Factor':>8}")
+    print("-" * 81)
+    
+    for k, target_pct in TARGET_RATIOS.items():
+        raw_cnt = true_strata_counts.get(k, 0)
+        tgt_cnt = int(target_pct * DYNAMIC_TOTAL_DATASET)
+        factor = retention_fractions.get(k, 0.0)
+        print(f"{k:<30} | {raw_cnt:>12,} | {target_pct*100:>9.1f}% | {tgt_cnt:>12,} | {factor:>7.2f}x")
+
+    # =========================================================================
+    # PHASE 3 Streaming Bucket Balancing & Strict Block Production
+    # =========================================================================
+    print("\n 3 -> Processing individual buckets with strict 8192 out-of-core block production...")
+        
+    CHUNK_MULTIPLE = 8192
+    shard_counter = 0
+    
+    # Initialize a clean, type-agnostic overflow sliding window buffer
+    df_overflow_buffer = None
+
+    for bucket_id in range(NUM_BUCKETS):
+        # --- ALIGNMENT FIX: Read the single finalized fragment file eagerly from Phase 1.5 ---
+        frag_path = os.path.join(TEMP_MIXER_DIR, f"bucket_{bucket_id}_frag_0.parquet")
+        if not os.path.exists(frag_path): continue
+        
+        print(f"    Processing pre-deduplicated bucket {bucket_id}/{NUM_BUCKETS - 1}...")
+        df_bucket = pl.read_parquet(frag_path)
+        
+        # Clean up source fragment immediately to free disk space
+        try: os.remove(frag_path)
+        except: pass
+
+        processed_strata = []
+        # Group and balance using the recalculations solved in Phase 2
+        for (strata_k,), sub_df in df_bucket.group_by("strata_key"):
+            fraction = retention_fractions.get(strata_k, 0.0)
+            if fraction <= 0.0 or strata_k not in TARGET_RATIOS: continue
+            
+            sub_df_shuffled = sub_df.sample(fraction=1.0, shuffle=True, seed=1337 + bucket_id)
+            
+            if fraction <= 1.0:
+                keep_count = int(len(sub_df_shuffled) * fraction)
+                if keep_count > 0:
+                    processed_strata.append(sub_df_shuffled.head(keep_count))
+            else:
+                # Strata upscaling replication loop (handles up to 6.0x for late game)
+                full_replications = int(fraction)
+                remainder_fraction = fraction - full_replications
+                
+                for _ in range(full_replications):
+                    processed_strata.append(sub_df_shuffled)
+                    
+                remainder_count = int(len(sub_df_shuffled) * remainder_fraction)
+                if remainder_count > 0:
+                    processed_strata.append(sub_df_shuffled.head(remainder_count))
+                
+        if not processed_strata: 
+            del df_bucket
+            continue
+            
+        # Drop metadata trackers no longer required by the training network
+        df_balanced = pl.concat(processed_strata).drop(["mix_hash", "strata_key"])
+        
+        # --- STITCH WITH PERSISTENT WINDOW BUFFER ---
+        if df_overflow_buffer is not None and len(df_overflow_buffer) > 0:
+            df_working = pl.concat([df_overflow_buffer, df_balanced])
         else:
-            # Sort evaluations to strictly keep deep calculations and discard unstable/shallow evaluations
-            sorted_depths = sorted(actual_dict.keys(), reverse=True)
-            running_sum = 0
-            cutoff_depth = 0
-            fraction_needed = 0.0
+            df_working = df_balanced
             
-            for d in sorted_depths:
-                count_at_d = actual_dict[d]
-                if running_sum + count_at_d >= desired_count:
-                    cutoff_depth = d
-                    needed_from_this_depth = desired_count - running_sum
-                    fraction_needed = needed_from_this_depth / count_at_d
-                    running_sum += needed_from_this_depth
-                    break
-                else:
-                    running_sum += count_at_d
+        # --- ADVANCED GLOBAL SHUFFLE ---
+        # Highly random multi-seeded cross-shuffle to completely break up the 6.0x sequential rows
+        df_working = df_working.sample(fraction=1.0, shuffle=True, seed=777 + bucket_id)
             
-            depth_cutoffs[k] = {"min_depth": cutoff_depth, "boundary_fraction": fraction_needed}
-            print(f" -> {k.ljust(22)}: Saturated Clamped | Drop depths < {cutoff_depth} (Keep {running_sum:,}/{actual_count:,})")
+        total_available = len(df_working)
+        num_chunks_to_write = total_available // CHUNK_MULTIPLE
+        rows_to_write = num_chunks_to_write * CHUNK_MULTIPLE
+        
+        if rows_to_write > 0:
+            df_production_shard = df_working.head(rows_to_write)
+            
+            final_out_path = os.path.join(TRAIN_DIR, f"nnue_train_shard_{shard_counter}.parquet")
+            df_production_shard.write_parquet(final_out_path, compression="snappy")
+            
+            print(f"      [EXPORTED] Production file {shard_counter} written with {rows_to_write} rows.")
+            shard_counter += 1
+            
+            df_overflow_buffer = df_working.slice(rows_to_write, total_available - rows_to_write)
+        else:
+            df_overflow_buffer = df_working
+            
+        del df_bucket, df_balanced, df_working, processed_strata
 
-    # =========================================================================
-    # STEP 2: DETERMINISTIC ROUTING PASS WITH DEPTH FILTERING
-    # =========================================================================
-    print("\n=== Step 2: Downsampling by Depth and Routing to Target Shards ===")
-    post_sampled_total = 0
-    
-    for idx, file_path in enumerate(input_files):
-        print(f" -> Processing input chunk {idx + 1}/{len(input_files)}: {os.path.basename(file_path)}")
+    # --- FINAL PARITY DATA FLUSH ---
+    if df_overflow_buffer is not None and len(df_overflow_buffer) >= CHUNK_MULTIPLE:
+        total_available = len(df_overflow_buffer)
+        num_chunks_to_write = total_available // CHUNK_MULTIPLE
+        rows_to_write = num_chunks_to_write * CHUNK_MULTIPLE
         
-        chunk_df = (
-            pl.scan_parquet(file_path)
-            .filter((pl.col("target").abs() <= 1000) & is_valid_depth)
-            .with_columns(strata_key_expr)
-            .filter(pl.col("strata_key") != "dropped")
-            .collect(engine="streaming")
-            .unique(subset=["fen"], keep="first")
-        )
+        df_production_shard = df_overflow_buffer.head(rows_to_write)
+        final_out_path = os.path.join(TRAIN_DIR, f"nnue_train_shard_{shard_counter}.parquet")
+        df_production_shard.write_parquet(final_out_path, compression="snappy")
+        print(f"    [FINAL FLUSH] Production file {shard_counter} written with {rows_to_write} rows.")
         
-        if chunk_df.is_empty():
-            continue
-
-        sampled_blocks = []
-        for strata_key, group in chunk_df.partition_by("strata_key", as_dict=True).items():
-            s_key = strata_key[0] if isinstance(strata_key, tuple) else strata_key
-            if s_key not in depth_cutoffs:
-                continue
-                
-            cutoff_info = depth_cutoffs[s_key]
-            min_d = cutoff_info["min_depth"]
-            b_frac = cutoff_info["boundary_fraction"]
+        remainder_dropped = total_available - rows_to_write
+        if remainder_dropped > 0:
+            print(f"    [TRUNCATED] Dropped {remainder_dropped} trailing rows for block parity alignment.")
+    elif df_overflow_buffer is not None and len(df_overflow_buffer) > 0:
+        print(f"    [TRUNCATED] Dropped final {len(df_overflow_buffer)} leftover rows to preserve strict block stride bounds.")
             
-            # Keep evaluations strictly higher than the stability floor cutoff depth
-            high_depth_df = group.filter(pl.col("depth") > min_d)
-            sampled_blocks.append(high_depth_df)
+    # Clean up the empty temporary mixer directory entirely
+    try: os.rmdir(TEMP_MIXER_DIR)
+    except: pass
             
-            # Deterministically down-sample at the specific threshold edge boundary
-            boundary_df = group.filter(pl.col("depth") == min_d)
-            if not boundary_df.is_empty() and b_frac > 0.0:
-                # Add deterministic row selection using hashes to prevent memory leaks
-                boundary_df = boundary_df.filter(
-                    (pl.col("fen").map_elements(lambda x: int(hashlib.md5(x.encode()).hexdigest(), 16) % 10000, return_dtype=pl.Int64) / 10000.0) <= b_frac
-                )
-                sampled_blocks.append(boundary_df)
-        
-        if not sampled_blocks:
-            continue
-            
-        chunk_filtered = pl.concat(sampled_blocks)
-        post_sampled_total += len(chunk_filtered)
-        
-        # Route the deep rows out to temporary buffered target files
-        if not chunk_filtered.is_empty():
-            chunk_filtered = chunk_filtered.with_columns(
-                (pl.col("fen").map_elements(lambda x: int(hashlib.md5(x.encode()).hexdigest(), 16) % NUM_OUTPUT_SHARDS, return_dtype=pl.Int64)).alias("shard_id")
-            )
-            
-            for s_id, group in chunk_filtered.partition_by("shard_id", as_dict=True).items():
-                actual_id = s_id[0] if isinstance(s_id, tuple) else s_id
-                out_path = os.path.join(TEMP_BUFFER_DIR, f"shard_{actual_id}", f"part_{idx}.parquet")
-                group.drop(["strata_key", "shard_id"]).write_parquet(out_path)
-                
-    print(f"\n[SUCCESS] Route complete. Total stable positions consolidated: {post_sampled_total:,}")
-    
-    # =========================================================================
-    # STEP 3: CONSOLIDATION & SHUFFLE
-    # =========================================================================
-    print("\n=== Step 3: Consolidating and Shuffling Final Buffered Shards ===")
-
-    for b_idx in range(NUM_OUTPUT_SHARDS):
-        print(f" -> Applying final shuffle and saving organic balanced shard {b_idx + 1}/{NUM_OUTPUT_SHARDS}...")
-        
-        shard_chunks = glob.glob(os.path.join(TEMP_BUFFER_DIR, f"shard_{b_idx}", "*.parquet"))
-        if not shard_chunks:
-            continue
-            
-        shard_df = pl.read_parquet(shard_chunks).sample(fraction=1.0, shuffle=True)
-        output_path = os.path.join(BALANCED_OUTPUT_DIR, f"data_{b_idx + 1}.parquet")
-        shard_df.write_parquet(output_path, compression="snappy")
-        
-        del shard_df
-
-    shutil.rmtree(TEMP_BUFFER_DIR, ignore_errors=True)
-    print(f"\n[SUCCESS] Extracted {post_sampled_total:,} rows. Low-depth positions were pruned first to maintain maximum evaluation quality!")
+    print(f"\n[SUCCESS] Unified Pipeline Engine Complete! Optimized shards reside in: {TRAIN_DIR}")
 
 if __name__ == "__main__":
-    run_precision_matrix_shuffler_low_mem()
+    run_unified_mixer_balancer()
