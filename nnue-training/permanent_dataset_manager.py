@@ -6,89 +6,119 @@ import queue
 import numpy as np
 import pandas as pd
 import multiprocessing as mp
-import numpy as np
-import pandas as pd
-import time
-import multiprocessing as mp
-import queue
 
-def _worker_loop(file_list, data_queue, shutdown_event, padding_index_value, chunk_size):
-    # Unique stochastic seed generation per independent background process
+def _worker_loop(file_list, data_queue, shutdown_event, padding_index_value, chunk_size, files_per_mixing_buffer=4):
     np.random.seed(int(time.time() * 1000) % 2**32 ^ mp.current_process().pid)
-    
     shuffled_files = list(file_list)
     
     while not shutdown_event.is_set():
-        # Scramble the macro file list path at the start of every iteration loop pass
         np.random.shuffle(shuffled_files)
+        
+        # Accumulators to mix data across multiple large files
+        mixed_active = []
+        mixed_passive = []
+        mixed_targets = []
+        accumulated_files = 0
         
         for file_path in shuffled_files:
             if shutdown_event.is_set():
                 break
             try:
-                # Explicitly load only what we need to minimize L3 cache pressure
                 df = pd.read_parquet(file_path, columns=['active_indices', 'passive_indices', 'target'])
-                total_rows = len(df)
-                if total_rows < chunk_size:
+                if len(df) == 0:
                     continue
                 
-                # High-speed continuous block extraction 
+                # Extract full arrays from the file
                 a_matrix = np.stack(df['active_indices'].to_numpy()).astype(np.int32)
                 p_matrix = np.stack(df['passive_indices'].to_numpy()).astype(np.int32)
                 targets = np.stack(df['target'].to_numpy()).astype(np.float32).reshape(-1, 1)
+                del df
                 
-                # Clear raw dataframe from RAM instantly
-                del df 
-                
-                # Apply padding arrays uniformly across un-set features
+                # Apply vector padding replacements immediately
                 a_matrix[a_matrix == -1] = padding_index_value
                 p_matrix[p_matrix == -1] = padding_index_value
                 
-                # --- FIXED: HIGH-SPEED MICRO-BATCH ROW SCRAMBLER ---
-                # Scramble the internal rows of this specific file chunk right inside the worker.
-                # This breaks any lingering game-continuity or bucket-bias before queue submission.
-                permutation = np.random.permutation(total_rows)
-                a_matrix = a_matrix[permutation]
-                p_matrix = p_matrix[permutation]
-                targets = targets[permutation]
+                # Append to our cross-file mixing collections
+                mixed_active.append(a_matrix)
+                mixed_passive.append(p_matrix)
+                mixed_targets.append(targets)
+                accumulated_files += 1
                 
-                # Calculate clean bounds matching our exact 8192 tensor size
-                full_batch_cutoff = total_rows - (total_rows % chunk_size)
-                
-                for i in range(0, full_batch_cutoff, chunk_size):
-                    if shutdown_event.is_set():
-                        break
+                # Once we have loaded enough files to mix, process them together
+                if accumulated_files >= files_per_mixing_buffer:
+                    # Merge arrays smoothly
+                    flat_active = np.concatenate(mixed_active, axis=0)
+                    flat_passive = np.concatenate(mixed_passive, axis=0)
+                    flat_targets = np.concatenate(mixed_targets, axis=0)
                     
-                    chunk_item = (
-                        {
-                            'active_features': a_matrix[i:i+chunk_size],
-                            'passive_features': p_matrix[i:i+chunk_size],
-                        },
-                        targets[i:i+chunk_size]
-                    )
+                    # TRUE CROSS-FILE GLOBAL SHUFFLE
+                    perm = np.random.permutation(len(flat_targets))
+                    flat_active = flat_active[perm]
+                    flat_passive = flat_passive[perm]
+                    flat_targets = flat_targets[perm]
                     
-                    # Yield perfectly scrambled block directly to the main consumer thread
-                    while not shutdown_event.is_set():
-                        try:
-                            data_queue.put(chunk_item, timeout=0.1)
+                    # Stream perfectly shuffled exact blocks out to the queue
+                    for i in range(0, len(flat_targets), chunk_size):
+                        if shutdown_event.is_set():
                             break
-                        except queue.Full:
-                            continue
-                            
-                del a_matrix, p_matrix, targets
+                        
+                        chunk_item = (
+                            {
+                                'active_features': flat_active[i:i+chunk_size],
+                                'passive_features': flat_passive[i:i+chunk_size],
+                            },
+                            flat_targets[i:i+chunk_size]
+                        )
+                        
+                        while not shutdown_event.is_set():
+                            try:
+                                data_queue.put(chunk_item, timeout=0.1)
+                                break
+                            except queue.Full:
+                                continue
+                    
+                    # Clear lists for the next file group
+                    mixed_active, mixed_passive, mixed_targets = [], [], []
+                    accumulated_files = 0
                             
             except Exception as e:
                 print(f"\n[Dataset Worker Error] Failed to process {file_path}: {e}")
                 continue
-                
-        # End of file list pass: send sentinel if your consumer loop handles single-pass epochs,
-        # or remove this block if your main training script explicitly manages epoch loops.
+        
+        # Flush block: handles trailing files if total_files % files_per_mixing_buffer != 0
+        if accumulated_files > 0 and not shutdown_event.is_set():
+            flat_active = np.concatenate(mixed_active, axis=0)
+            flat_passive = np.concatenate(mixed_passive, axis=0)
+            flat_targets = np.concatenate(mixed_targets, axis=0)
+            
+            perm = np.random.permutation(len(flat_targets))
+            flat_active = flat_active[perm]
+            flat_passive = flat_passive[perm]
+            flat_targets = flat_targets[perm]
+            
+            for i in range(0, len(flat_targets), chunk_size):
+                chunk_item = (
+                    {
+                        'active_features': flat_active[i:i+chunk_size],
+                        'passive_features': flat_passive[i:i+chunk_size],
+                    },
+                    flat_targets[i:i+chunk_size]
+                )
+                while not shutdown_event.is_set():
+                    try:
+                        data_queue.put(chunk_item, timeout=0.1)
+                        break
+                    except queue.Full:
+                        continue
+
+        # Single pass completed safely: push sentinel
         while not shutdown_event.is_set():
             try:
                 data_queue.put(None, timeout=0.1)
                 break
             except queue.Full:
                 continue
+
 
 class EpochSynchronizedDatasetManager:
     """
@@ -117,32 +147,31 @@ class EpochSynchronizedDatasetManager:
         self.shutdown_event = mp.Event()
         self.workers = []
         
-    def _spawn_workers(self, data_queue):
-        """Internal helper to split file matrices and start workers for the current epoch."""
-        self.shutdown_event.clear()
+    # Change this method signature in your class definition
+    def _spawn_workers(self, epoch_queue, worker_file_slices):
+        """
+        Spawns the worker pool using the dynamic chunks calculated for the current epoch.
+        """
         self.workers = []
-        
-        # Fresh global file shuffle before splitting work among background workers
-        shuffled_all_files = list(self.all_files)
-        np.random.shuffle(shuffled_all_files)
-        
-        files_per_worker = math.ceil(len(shuffled_all_files) / float(self.num_workers))
-        
         for i in range(self.num_workers):
-            start_idx = i * files_per_worker
-            end_idx = min(start_idx + files_per_worker, len(shuffled_all_files))
-            worker_files = shuffled_all_files[start_idx:end_idx]
-            
-            if not worker_files:
+            # Skip empty chunks if there are fewer files than workers
+            if not worker_file_slices[i]:
                 continue
                 
-            process = mp.Process(
+            p = mp.Process(
                 target=_worker_loop,
-                args=(worker_files, data_queue, self.shutdown_event, self.PADDING_INDEX_VALUE, self.batch_size),
-                daemon=True 
+                # Aligned perfectly to match your constructor properties
+                args=(
+                    list(worker_file_slices[i]),
+                    epoch_queue,
+                    self.shutdown_event,
+                    self.PADDING_INDEX_VALUE,
+                    self.batch_size 
+                ),
+                daemon=True
             )
-            self.workers.append(process)
-            process.start()
+            p.start()
+            self.workers.append(p)
 
     def _cleanup_workers(self, data_queue):
         """Gracefully terminates and joins active worker processes at the epoch boundary."""
@@ -175,7 +204,22 @@ class EpochSynchronizedDatasetManager:
             # Using standard mp.Queue instead of self.manager.Queue completely 
             # bypasses the SyncManager proxy dictionary KeyError trap!
             epoch_queue = mp.Queue(maxsize=self.queue_size)
-            self._spawn_workers(epoch_queue)
+            
+            # 1. FRESH GLOBAL FILE SHUFFLE BEFORE SPLITTING
+            shuffled_all_files = list(self.all_files)
+            np.random.shuffle(shuffled_all_files)
+            
+            # 2. CALCULATE AND GENERATE CHUNKS FOR THE SPAWNER
+            files_per_worker = math.ceil(len(shuffled_all_files) / float(self.num_workers))
+            worker_file_slices = []
+            for i in range(self.num_workers):
+                start_idx = i * files_per_worker
+                end_idx = min(start_idx + files_per_worker, len(shuffled_all_files))
+                worker_file_slices.append(shuffled_all_files[start_idx:end_idx])
+                
+            # 3. PASS CHUNKS TO MATCH THE 3-ARGUMENT CALL SIGNATURE PERFECTLY
+            self.shutdown_event.clear()
+            self._spawn_workers(epoch_queue, worker_file_slices)
             
             active_sentinels_expected = len(self.workers)
             steps_yielded = 0
@@ -202,6 +246,6 @@ class EpochSynchronizedDatasetManager:
                     print("\n[Pipeline Alert] Data queue starved! Forcing early epoch fallback transition.")
                     break
                 
-            # Clean up processes right at the epoch boundary boundary before looping
+            # Clean up processes right at the epoch boundary before looping
             self._cleanup_workers(epoch_queue)
             print("\n=== [Epoch Complete] Resetting infrastructure, re-shuffling universe shards... ===")

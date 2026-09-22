@@ -3,14 +3,16 @@ import sys
 import glob
 import numpy as np
 import polars as pl
+import chess
 
 DEDUP_DATA_DIR = "./data_dedup"           
-TEMP_MIXER_DIR = "./temp_mixer_shards"    
 FINAL_OUTPUT_DIR = "./balanced_shards" 
+
+TEMP_TRAINING_DIR = "./temp_training_dir"    
+TEMP_VAL_DIR = "./temp_validation_dir"   
 
 TRAIN_DIR = os.path.join(FINAL_OUTPUT_DIR, "training")
 VAL_DIR = os.path.join(FINAL_OUTPUT_DIR, "validation")
-VAL_TEMP_DIR = os.path.join(VAL_DIR, "temp_mixer")
 
 NUM_BUCKETS = 64
 FLUSH_INTERVAL = 20 
@@ -46,11 +48,28 @@ def get_strata_expressions():
 
     return (phase_expr + "_" + score_expr).alias("strata_key")
 
+def to_canonical_fen(fen_string: str) -> str:
+    """
+    Finds the horizontal mirror twin of a FEN string.
+    Returns min(original_fen, mirrored_fen) alphabetically to form a solid master key.
+    """
+    try:
+        # standard FEN strings usually have 4 components separated by spaces
+        # (board, active player, castling rights, en passant target)
+        board = chess.Board(fen_string)
+        mirrored_board = board.mirror().transform(chess.flip_horizontal)
+        fen_mirror = mirrored_board.fen()
+        return min(fen_string, fen_mirror)
+    except Exception:
+        # Fallback safeguard in case an incomplete or custom format FEN enters the pipe
+        return fen_string
+
 def run_unified_mixer_balancer():
-    os.makedirs(TEMP_MIXER_DIR, exist_ok=True)
     os.makedirs(TRAIN_DIR, exist_ok=True)
     os.makedirs(VAL_DIR, exist_ok=True)
-    os.makedirs(VAL_TEMP_DIR, exist_ok=True)
+    
+    os.makedirs(TEMP_VAL_DIR, exist_ok=True)
+    os.makedirs(TEMP_TRAINING_DIR, exist_ok=True)
     
     input_shards = sorted(glob.glob(os.path.join(DEDUP_DATA_DIR, "*.parquet")))
     if not input_shards:
@@ -90,6 +109,12 @@ def run_unified_mixer_balancer():
         if len(df_filtered) == 0: continue
 
         # 2. Add features and split hashes immediately on the clean local subset
+        df_filtered = df_filtered.with_columns(
+            pl.col("fen")
+            .map_elements(to_canonical_fen, return_dtype=pl.String)
+            .alias("canonical_fen")
+        )
+        
         df_filtered = df_filtered.with_columns([
             strata_key_expr,
             pl.col("fen").hash(seed=999).abs().alias("split_hash"),
@@ -115,16 +140,16 @@ def run_unified_mixer_balancer():
                 if "_dropped" in k: continue
                 global_strata_counts[k] = global_strata_counts.get(k, 0) + row["count"]
 
-            for bucket_id, df_sub_bucket in df_train_chunk.group_by("bucket_id"):
+            for (b_id,), df_sub_bucket in df_train_chunk.group_by("bucket_id"):
                 if len(df_sub_bucket) == 0: continue
-                frag_path = os.path.join(TEMP_MIXER_DIR, f"bucket_{bucket_id}_raw_{i}.parquet")
+                frag_path = os.path.join(TEMP_TRAINING_DIR, f"bucket_{b_id}_raw_{i}.parquet")
                 df_sub_bucket.drop(["bucket_id", "row_idx", "split_hash"]).write_parquet(frag_path, compression="snappy")
 
         # 5. Stream Validation row allocations directly to separate raw disk bucket files
         if len(df_val_chunk) > 0:
-            for bucket_id, df_sub_bucket in df_val_chunk.group_by("bucket_id"):
+            for (b_id,), df_sub_bucket in df_val_chunk.group_by("bucket_id"):
                 if len(df_sub_bucket) == 0: continue
-                frag_path = os.path.join(VAL_TEMP_DIR, f"val_bucket_{bucket_id}_raw_{i}.parquet")
+                frag_path = os.path.join(TEMP_VAL_DIR, f"bucket_{b_id}_raw_{i}.parquet")
                 df_sub_bucket.drop(["bucket_id", "row_idx", "split_hash"]).write_parquet(frag_path, compression="snappy")
 
         del df_shard, df_filtered, df_train_chunk, df_val_chunk
@@ -139,12 +164,13 @@ def run_unified_mixer_balancer():
     true_strata_counts = {}
     
     for bucket_id in range(NUM_BUCKETS):
-        frag_path = os.path.join(TEMP_MIXER_DIR, f"bucket_{bucket_id}_frag_0.parquet")
-        if not os.path.exists(frag_path): continue
+        frag_pattern = os.path.join(TEMP_TRAINING_DIR, f"bucket_{bucket_id}_raw_*.parquet")
+        fragments = glob.glob(frag_pattern)
+        if not fragments: continue
         
         # Read only the strata column from the clean fragment to save speed
         df_counts = (
-            pl.read_parquet(frag_path, columns=["strata_key"])
+            pl.concat([pl.read_parquet(f, columns=["strata_key"]) for f in fragments])
             .group_by("strata_key")
             .len("count")
         )
@@ -153,6 +179,8 @@ def run_unified_mixer_balancer():
             k = row["strata_key"]
             if "_dropped" in k: continue
             true_strata_counts[k] = true_strata_counts.get(k, 0) + row["count"]
+
+        del df_counts
 
     # 2. Define stratified amplification limits by phase to eliminate over-fitting risks
     AMPLIFICATION_LIMITS = {
@@ -223,110 +251,173 @@ def run_unified_mixer_balancer():
         print(f"{k:<30} | {raw_cnt:>12,} | {target_pct*100:>9.1f}% | {tgt_cnt:>12,} | {factor:>7.2f}x")
 
     # =========================================================================
-    # PHASE 3 Streaming Bucket Balancing & Strict Block Production
+    # PHASE 3: Streaming Bucket Balancing & Strict Block Production
     # =========================================================================
-    print("\n 3 -> Processing individual buckets with strict 8192 out-of-core block production...")
-        
-    CHUNK_MULTIPLE = 8192
-    shard_counter = 0
     
-    # Initialize a clean, type-agnostic overflow sliding window buffer
-    df_overflow_buffer = None
-
-    for bucket_id in range(NUM_BUCKETS):
-        # --- ALIGNMENT FIX: Read the single finalized fragment file eagerly from Phase 1.5 ---
-        frag_path = os.path.join(TEMP_MIXER_DIR, f"bucket_{bucket_id}_frag_0.parquet")
-        if not os.path.exists(frag_path): continue
+    def produce_strict_blocks(source_dir, output_dir, file_prefix, is_validation=False):
+        """
+        Processes pre-deduplicated fragments from a source cache directory, 
+        balances them symmetrically against retention fractions, shuffles, 
+        and writes block-aligned Parquet shards to the target destination.
+        """
+        mode_str = "VALIDATION" if is_validation else "TRAINING"
+        print(f"\n 3 [{mode_str}] -> Processing individual buckets with strict 8192 out-of-core block production...")
         
-        print(f"    Processing pre-deduplicated bucket {bucket_id}/{NUM_BUCKETS - 1}...")
-        df_bucket = pl.read_parquet(frag_path)
-        
-        # Clean up source fragment immediately to free disk space
-        try: os.remove(frag_path)
-        except: pass
+        CHUNK_MULTIPLE = 8192
+        shard_counter = 0
+        df_overflow_buffer = None
 
-        processed_strata = []
-        # Group and balance using the recalculations solved in Phase 2
-        for (strata_k,), sub_df in df_bucket.group_by("strata_key"):
-            fraction = retention_fractions.get(strata_k, 0.0)
-            if fraction <= 0.0 or strata_k not in TARGET_RATIOS: continue
+        for bucket_id in range(NUM_BUCKETS):
+            # Look for the finalized fragment file generated in Phase 2
+            frag_pattern = os.path.join(source_dir, f"bucket_{bucket_id}_raw_*.parquet")
+            fragments = glob.glob(frag_pattern)
+            if not fragments: continue
+
+            print(f"    Processing pre-deduplicated {mode_str.lower()} bucket {bucket_id}/{NUM_BUCKETS - 1}...")
             
-            sub_df_shuffled = sub_df.sample(fraction=1.0, shuffle=True, seed=1337 + bucket_id)
+            # 1. Concat all intermediate shard fragments
+            df_raw = pl.concat([pl.read_parquet(f) for f in fragments])
             
-            if fraction <= 1.0:
-                keep_count = int(len(sub_df_shuffled) * fraction)
-                if keep_count > 0:
-                    processed_strata.append(sub_df_shuffled.head(keep_count))
-            else:
-                # Strata upscaling replication loop (handles up to 6.0x for late game)
-                full_replications = int(fraction)
-                remainder_fraction = fraction - full_replications
+            # 2. Tag each position with its canonical FEN key and determine its mirror status
+            df_processed = df_raw.with_columns(
+                pl.col("fen")
+                .map_elements(to_canonical_fen, return_dtype=pl.String)
+                .alias("canonical_fen")
+            ).with_columns(
+                # is_mirror is True (1) if it's a mirrored transformation, False (0) if it's the original FEN
+                is_mirror=(pl.col("fen") != pl.col("canonical_fen"))
+            )
+            
+            # 3. Clean up input fragments immediately to free up MacBook SSD space
+            for frag_path in fragments:
+                try: os.remove(frag_path)
+                except: pass
+
+            processed_strata = []
+            
+            # 4. Group by strata key to evaluate target ratios before dropping any data
+            for (strata_k,), sub_df in df_processed.group_by("strata_key"):
+                fraction = retention_fractions.get(strata_k, 0.0)
+                if fraction <= 0.0 or strata_k not in TARGET_RATIOS: continue
                 
-                for _ in range(full_replications):
-                    processed_strata.append(sub_df_shuffled)
+                # Check target sufficiency: If fraction <= 1.0, we have more than enough data
+                if fraction <= 1.0:
+                    # COPIOUS DATA STRATEGY: Prioritize unique originals to maximize structural diversity.
+                    # Sort unique native positions to the top, then by deepest search value.
+                    sub_df_optimized = (
+                        sub_df.sort(by=["is_mirror", "depth"], descending=[False, True])
+                        .unique(subset=["canonical_fen"], keep="first")
+                        .drop(["canonical_fen", "is_mirror"])
+                    )
                     
-                remainder_count = int(len(sub_df_shuffled) * remainder_fraction)
-                if remainder_count > 0:
-                    processed_strata.append(sub_df_shuffled.head(remainder_count))
-                
-        if not processed_strata: 
-            del df_bucket
-            continue
-            
-        # Drop metadata trackers no longer required by the training network
-        df_balanced = pl.concat(processed_strata).drop(["mix_hash", "strata_key"])
-        
-        # --- STITCH WITH PERSISTENT WINDOW BUFFER ---
-        if df_overflow_buffer is not None and len(df_overflow_buffer) > 0:
-            df_working = pl.concat([df_overflow_buffer, df_balanced])
-        else:
-            df_working = df_balanced
-            
-        # --- ADVANCED GLOBAL SHUFFLE ---
-        # Highly random multi-seeded cross-shuffle to completely break up the 6.0x sequential rows
-        df_working = df_working.sample(fraction=1.0, shuffle=True, seed=777 + bucket_id)
-            
-        total_available = len(df_working)
-        num_chunks_to_write = total_available // CHUNK_MULTIPLE
-        rows_to_write = num_chunks_to_write * CHUNK_MULTIPLE
-        
-        if rows_to_write > 0:
-            df_production_shard = df_working.head(rows_to_write)
-            
-            final_out_path = os.path.join(TRAIN_DIR, f"nnue_train_shard_{shard_counter}.parquet")
-            df_production_shard.write_parquet(final_out_path, compression="snappy")
-            
-            print(f"      [EXPORTED] Production file {shard_counter} written with {rows_to_write} rows.")
-            shard_counter += 1
-            
-            df_overflow_buffer = df_working.slice(rows_to_write, total_available - rows_to_write)
-        else:
-            df_overflow_buffer = df_working
-            
-        del df_bucket, df_balanced, df_working, processed_strata
+                    # Apply multi-seeded shuffle on the high-diversity, un-mirrored subset
+                    sub_df_shuffled = sub_df_optimized.sample(fraction=1.0, shuffle=True, seed=1337 + bucket_id)
+                    keep_count = int(len(sub_df_shuffled) * fraction)
+                    if keep_count > 0:
+                        processed_strata.append(sub_df_shuffled.head(keep_count))
+                        
+                else:
+                    # DATA STARVATION STRATEGY: We don't have enough positions to meet the target ratio.
+                    # Keep both original AND mirrored perspectives to build critical mass.
+                    # Deduplicate only on exact text matching ("fen") so distinct mirror versions survive.
+                    sub_df_starved = (
+                        sub_df.sort("depth", descending=True)
+                        .unique(subset=["fen"], keep="first")
+                        .drop(["canonical_fen", "is_mirror"])
+                    )
+                    
+                    sub_df_shuffled = sub_df_starved.sample(fraction=1.0, shuffle=True, seed=1337 + bucket_id)
+                    
+                    # Execute symmetrical upscaling replication loop (applies up to 6.0x to BOTH streams)
+                    full_replications = int(fraction)
+                    remainder_fraction = fraction - full_replications
+                    
+                    for _ in range(full_replications):
+                        processed_strata.append(sub_df_shuffled)
+                        
+                    remainder_count = int(len(sub_df_shuffled) * remainder_fraction)
+                    if remainder_count > 0:
+                        processed_strata.append(sub_df_shuffled.head(remainder_count))
+                    
+            if not processed_strata: 
+                continue
 
-    # --- FINAL PARITY DATA FLUSH ---
-    if df_overflow_buffer is not None and len(df_overflow_buffer) >= CHUNK_MULTIPLE:
-        total_available = len(df_overflow_buffer)
-        num_chunks_to_write = total_available // CHUNK_MULTIPLE
-        rows_to_write = num_chunks_to_write * CHUNK_MULTIPLE
-        
-        df_production_shard = df_overflow_buffer.head(rows_to_write)
-        final_out_path = os.path.join(TRAIN_DIR, f"nnue_train_shard_{shard_counter}.parquet")
-        df_production_shard.write_parquet(final_out_path, compression="snappy")
-        print(f"    [FINAL FLUSH] Production file {shard_counter} written with {rows_to_write} rows.")
-        
-        remainder_dropped = total_available - rows_to_write
-        if remainder_dropped > 0:
-            print(f"    [TRUNCATED] Dropped {remainder_dropped} trailing rows for block parity alignment.")
-    elif df_overflow_buffer is not None and len(df_overflow_buffer) > 0:
-        print(f"    [TRUNCATED] Dropped final {len(df_overflow_buffer)} leftover rows to preserve strict block stride bounds.")
+            # Strip metadata fields no longer needed by the active NNUE network graph
+            df_balanced = pl.concat(processed_strata).drop(["mix_hash", "strata_key"])
             
-    # Clean up the empty temporary mixer directory entirely
-    try: os.rmdir(TEMP_MIXER_DIR)
-    except: pass
+            # --- STITCH WITH MOVING OVERFLOW SLIDING WINDOW ---
+            if df_overflow_buffer is not None and len(df_overflow_buffer) > 0:
+                df_working = pl.concat([df_overflow_buffer, df_balanced])
+            else:
+                df_working = df_balanced
+                
+            # --- HIGH-ENTROPY INTERLEAVING SHUFFLE ---
+            # Completely shatters the sequential upscaled rows to protect AdamW gradients
+            df_working = df_working.sample(fraction=1.0, shuffle=True, seed=777 + bucket_id)
+                
+            total_available = len(df_working)
+            num_chunks_to_write = total_available // CHUNK_MULTIPLE
+            rows_to_write = num_chunks_to_write * CHUNK_MULTIPLE
             
-    print(f"\n[SUCCESS] Unified Pipeline Engine Complete! Optimized shards reside in: {TRAIN_DIR}")
+            if rows_to_write > 0:
+                df_production_shard = df_working.head(rows_to_write)
+                
+                final_out_path = os.path.join(output_dir, f"{file_prefix}_{shard_counter}.parquet")
+                df_production_shard.write_parquet(final_out_path, compression="snappy")
+                
+                print(f"      [EXPORTED] Production file {shard_counter} written with {rows_to_write} rows.")
+                shard_counter += 1
+                
+                df_overflow_buffer = df_working.slice(rows_to_write, total_available - rows_to_write)
+            else:
+                df_overflow_buffer = df_working
+                
+            del df_bucket, df_balanced, df_working, processed_strata
+
+        # --- PARITY BLOCK FLUSH ---
+        if df_overflow_buffer is not None and len(df_overflow_buffer) >= CHUNK_MULTIPLE:
+            total_available = len(df_overflow_buffer)
+            num_chunks_to_write = total_available // CHUNK_MULTIPLE
+            rows_to_write = num_chunks_to_write * CHUNK_MULTIPLE
+            
+            df_production_shard = df_overflow_buffer.head(rows_to_write)
+            final_out_path = os.path.join(output_dir, f"{file_prefix}_{shard_counter}.parquet")
+            df_production_shard.write_parquet(final_out_path, compression="snappy")
+            print(f"    [FINAL FLUSH] Production file {shard_counter} written with {rows_to_write} rows.")
+            
+            remainder_dropped = total_available - rows_to_write
+            if remainder_dropped > 0:
+                print(f"    [TRUNCATED] Dropped {remainder_dropped} trailing rows for block parity alignment.")
+        elif df_overflow_buffer is not None and len(df_overflow_buffer) > 0:
+            print(f"    [TRUNCATED] Dropped final {len(df_overflow_buffer)} leftover rows to preserve strict block stride bounds.")
+                
+        # Clean up the localized raw intermediate directory cache folder completely
+        try: os.rmdir(source_dir)
+        except: pass
+        
+        print(f"[SUCCESS] {mode_str} stream block compilation complete! Target: {output_dir}")
+
+    # =========================================================================
+    # EXECUTE DUAL-STREAM MIRRORED COMPILATION
+    # =========================================================================
+    
+    # Run Part A: Materialize balanced training shards
+    produce_strict_blocks(
+        source_dir=TEMP_TRAINING_DIR,
+        output_dir=TRAIN_DIR,
+        file_prefix="nnue_train_shard",
+        is_validation=False
+    )
+
+    # Run Part B: Materialize balanced validation shards
+    produce_strict_blocks(
+        source_dir=TEMP_VAL_DIR,
+        output_dir=VAL_DIR,
+        file_prefix="nnue_val_shard",
+        is_validation=True
+    )
+    
+    print(f"\n[PIPELINE SYSTEM COMPLETE] Co-balanced training sets are ready for the GPU!")
 
 if __name__ == "__main__":
     run_unified_mixer_balancer()

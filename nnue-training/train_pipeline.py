@@ -99,10 +99,10 @@ class CustomWarmupCosineSchedule(keras.optimizers.schedules.LearningRateSchedule
 @keras.utils.register_keras_serializable()
 class SharedAccumulatorBias(layers.Layer):
     """
-    Custom Keras layer to host a single, shared trainable 
-    256-dimensional accumulator bias vector (b1) across both perspectives.
+    Custom Keras layer hosting a single, shared trainable 
+    256-dimensional accumulator bias vector (b1) applied to a single perspective.
     """
-    def __init__(self, output_dim=512, **kwargs):
+    def __init__(self, output_dim=256, **kwargs):
         super().__init__(**kwargs)
         self.output_dim = output_dim
 
@@ -116,14 +116,13 @@ class SharedAccumulatorBias(layers.Layer):
         super().build(input_shape)
 
     def call(self, inputs):
-        # Broadcasts the (256,) bias vector across the (Batch, 256) incoming tensors
+        # Broadcasts the (256,) bias vector across the (Batch, 256) incoming tensor
         return inputs + self.bias
 
     def get_config(self):
         config = super().get_config()
         config.update({"output_dim": self.output_dim})
         return config
-
 
 def get_local_shard_directories():
     """
@@ -205,7 +204,7 @@ def train_nnue_on_fens():
         input_dim=INPUT_FEATURES + 1,
         output_dim=256,
         embeddings_initializer=nnue_accumulator_init,
-        mask_zero=False,
+        mask_zero=True,
         name="accumulator_layer"
     )
 
@@ -330,7 +329,10 @@ def train_nnue_on_fens():
         alpha=0.0167
     )
     
-    lr_schedule = CustomWarmupCosineSchedule(warmup_steps=STEPS_PER_EPOCH, cosine_schedule=base_cosine_schedule)
+    lr_schedule = CustomWarmupCosineSchedule(
+        warmup_steps=STEPS_PER_EPOCH, 
+        cosine_schedule=base_cosine_schedule
+    )
 
     stockfish_optimizer = keras.optimizers.AdamW(
         learning_rate=lr_schedule,
@@ -388,7 +390,6 @@ def train_nnue_on_fens():
         filepath=checkpoint_path,
         monitor='val_loss',
         save_best_only=True,
-        mode='min',
         verbose=1
     )
 

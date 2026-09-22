@@ -49,20 +49,17 @@
   - **Input Preprocessing:** 
     - Convert to CentiPawn: ($\text{Centipawn / 100.0}$) -> pawn_units
 
-  $$\text{Inputs (49,152)} \rightarrow \text{Accumulator (256)} \rightarrow \text{Multiplexed Perspective (256*2)} \rightarrow \text{Hidden 2 (128)} \rightarrow \text{Hidden 3 (32)} \rightarrow \text{Output (1)}$$
+  $$\text{Inputs (49,152)} \rightarrow \text{Accumulator (256)} \rightarrow \text{Multiplexed Perspective (256*2)} \rightarrow \text{Hidden 2 (32)} \rightarrow \text{Hidden 3 (32)} \rightarrow \text{Output (1)}$$
 
   - **Input Layer:** $12 \times 64 \times 64 = 49,152$ sparse features mapping active piece-square configurations relative to your own active King's position.
   - **Accumulator Layer:** Shapes into $(49152, 256)$ weights and $(256,)$ biases quantized to signed 16-bit integers (`i16`). Uses branchless tensor multiplexing to concatenate White/Black points of view into a unified $256$-dimensional vector.
     - *Activation:* Clipped/Bounded Linear ReLU ($\text{ReLU1}$) bounded strictly between `0.0` and `1.0`.
-  - **Hidden Layer 2:** Matrix transformation mapping $(256*2, 128)$ quantized to signed 8-bit weights (`i8`) and 32-bit biases (`i32`).
+  - **Hidden Layer 2:** Matrix transformation mapping $(256*2, 32)$ quantized to signed 8-bit weights (`i8`) and 32-bit biases (`i32`).
     - *Activation:* Clipped/Bounded Linear ReLU ($\text{ReLU1}$) bounded strictly between `0.0` and `1.0`.
-  - **Hidden Layer 3:** Matrix transformation mapping $(128, 32)$ quantized to signed 8-bit weights (`i8`) and 32-bit biases (`i32`).
+  - **Hidden Layer 3:** Matrix transformation mapping $(32, 32)$ quantized to signed 8-bit weights (`i8`) and 32-bit biases (`i32`).
     - *Activation:* Clipped/Bounded Linear ReLU ($\text{ReLU1}$) bounded strictly between `0.0` and `1.0`.
   - **Output Layer:** Combines $(32, 1)$ outputs down to a single evaluation scalar using 8-bit weights (`i8`) and 32-bit biases (`i32`).
     - *Activation:* None
-  - **Loss Function:** Custom Mean Squared Error Function where the model output is converted from pawnUnits to Loss/ Win [0, 1] using the function ($\text{1.0 / (1.0 + tf.math.exp(STOCKFISH-CONSTANT * pawnUnits))}$)
-
-  STOCKFISH-CONSTANT = 0.244
 
 ## 4. NNUE Training
 
@@ -73,52 +70,67 @@
 
   - **Data Augmentation & DeDuplication:** The filtered positions are augmented by rotating each board state 180 degrees. The positions are then deduplicationed. This yields a total of **392,386,524 unique positions**.
 
-  - **Down-Sampling:** The positions are downscaled to this ratio with a priority on deeper evaluations.
+    ### **1. High-Fidelity Data Distribution Matrix**    
+    * **Total Training Positions:** **25,953,458 positions**
+    * **Total Validation Positions:** **524,288 positions**
 
-    #### **Target Distribution Matrix (%)**
+    * **Final Operational Phase Split:** **20.00% Early** / **45.00% Mid** / **35.00% Late**
 
-    | Score Phase | Early | Mid | Late | Total By Type |
+    | Score Phase | Early (Opening) | Mid (Midgame) | Late (All Endgames) | Total By Type |
     | :--- | :---: | :---: | :---: | :---: |
-    | **Dead Equal** | 4.5% | 6.0% | 4.5% | **15.0%** |
-    | **Slight Pull** | 9.0% | 12.0% | 9.0% | **30.0%** |
-    | **Solid Edge** | 7.5% | 10.0% | 7.5% | **25.0%** |
-    | **Clear Dominance** | 5.4% | 7.2% | 5.4% | **18.0%** |
-    | **Decisive Minor** | 2.4% | 3.2% | 2.4% | **8.0%** |
-    | **Decisive Major** | 1.2% | 1.6% | 1.2% | **4.0%** |
-    | **Total By Phase** | **30.0%** | **40.0%** | **30.0%** | **100.0%** |
+    | **`0` to `45 cp` (Dead Equal)** | 8.00% | 14.00% | 11.00% | **33.00%** |
+    | **`45` to `95 cp` (Slight Pull)** | 6.00% | 12.00% | 10.00% | **28.00%** |
+    | **`95` to `175 cp` (Micro Advantage)** | 3.50% | 10.00% | 8.50% | **22.00%** |
+    | **`175` to `350 cp` (Solid Edge)** | 1.50% | 6.50% | 4.00% | **12.00%** |
+    | **`350` to `600 cp` (Clear Dominance)** | 0.70% | 2.00% | 1.00% | **3.70%** |
+    | **`600` to `1500 cp` (Decisive Zone)** | 0.30% | 0.50% | 0.50% | **1.30%** |
+    | **Total By Phase** | **20.00%** | **45.00%** | **35.00%** | **100.00%** |
 
-    ---
+    #### Piece Count Definitions by Game Phase
+    * **Early (Opening):** >= 26 active pieces remaining on the board / Min Depth 26
+    * **Mid (Midgame):** 13 to 25 active pieces remaining on the board / Min Depth 28
+    * **Late (All Endgames):** <= 13 active pieces remaining on the board / Min Depth 32
 
-    #### **Centipawn (cp) Differential Thresholds**
-    * **Dead Equal:** 0 – 40 cp
-    * **Slight Pull:** 40 – 120 cp
-    * **Solid Edge:** 120 – 220 cp
-    * **Clear Dominance:** 220 – 400 cp
-    * **Decisive Minor:** 400 – 600 cp
-    * **Decisive Major:** 600 – 1000 cp
-    * *(Note: Positions with structural blunders or engine evaluations exceeding 1000+ cp are completely excluded from the dataset).*
+    ### **2. Dataset Stratification**
 
-    #### **Piece Count by Phase**
-    * **Early (Opening):** 26+ pieces remaining on the board
-    * **Mid (Midgame):** 14 – 25 pieces remaining on the board
-    * **Late (Endgame):** < 14 pieces remaining on the board
+    ======================= STRATIFICATION METRICS REPORT  =======================
+    Strata Key                     |    Raw Count | Target Pct | Target Count |   Factor
+    ---------------------------------------------------------------------------------
+    early_dead_equal               |   22,917,211 |       8.0% |    2,097,052 |    0.09x
+    early_slight_pull              |   11,180,018 |       6.0% |    1,572,789 |    0.14x
+    early_micro_advantage          |    4,926,429 |       3.5% |      917,460 |    0.19x
+    early_solid_edge               |    3,121,462 |       1.5% |      393,197 |    0.13x
+    early_clear_dominance          |    1,504,164 |       0.7% |      183,492 |    0.12x
+    early_decisive_zone            |      207,554 |       0.3% |       78,639 |    0.38x
+    mid_dead_equal                 |   39,188,019 |      14.0% |    3,669,841 |    0.09x
+    mid_slight_pull                |    6,924,663 |      12.0% |    3,145,578 |    0.45x
+    mid_micro_advantage            |    5,422,790 |      10.0% |    2,621,315 |    0.48x
+    mid_solid_edge                 |    6,687,541 |       6.5% |    1,703,854 |    0.25x
+    mid_clear_dominance            |    6,696,913 |       2.0% |      524,263 |    0.08x
+    mid_decisive_zone              |    1,603,402 |       0.5% |      131,065 |    0.08x
+    late_dead_equal                |   35,430,018 |      11.0% |    2,883,446 |    0.08x
+    late_slight_pull               |      754,724 |      10.0% |    2,621,315 |    3.47x
+    late_micro_advantage           |      371,353 |       8.5% |    2,228,117 |    6.00x
+    late_solid_edge                |      823,335 |       4.0% |    1,048,526 |    1.27x
+    late_clear_dominance           |    1,589,883 |       1.0% |      262,131 |    0.16x
+    late_decisive_zone             |      848,244 |       0.5% |      131,065 |    0.15x
+    ======================================================================================
 
-    This yields a total of **81,555,624 unique positions**.
-
-  - **Shard Balancing:** The data is batched into shards maintaining this ratio for training.
+    If there is a surplus of positions, it will opt for the positions without a mirror FEN + higher stockfish depth eval.
 
 - **Training Configuration:**
-  - **Target Optimization:** The model applies a Sigmoid transformation to convert raw evaluation scores into a win probability scale where 1.0 represents a win, 0.5 a draw, and 0.0 a loss. This bounds the output and forces the model to focus on highly competitive positions rather than overwhelming outliers.
-
-  - **Architecture & Schedule:** Training runs for **2,000 epochs**, featuring **4,000 steps per epoch** with a batch size of **8,192 positions per step**.
-
-  - **Loss Function:** Performance is calculated using Mean Squared Error (MSE) between the predicted and expected win probabilities: 
-    $$\text{MSE} = (Y_{\text{pred}} - Y_{\text{expected}})^2$$
-    
-  - **Learning Rate Schedule:** The optimization uses a stepped learning rate decay to fine-tune weights over time:
-    - Epochs 0 to 25: 0.001
-    - Epochs 25 to 50: 0.0001
-    - Epochs 50 to 100: 0.00001
+    - **Target Optimization & Value Mapping:** The model transforms raw evaluation scores ($y_{\text{pawn}}$) into a bounded win probability scale $[0.0, 1.0]$, where 1.0 represents a guaranteed win, 0.5 a draw, and 0.0 a loss. This bounding suppresses extreme outliers and forces the network to focus its learning capacity on highly competitive positions.
+    - **Probability Smoothing Function:** To smooth out large evaluation spikes (such as $+4.00$ centipawn values) into stable target probabilities, raw scores are scaled before applying the sigmoid activation:
+      $$\text{Win Probability} = \sigma(y_{\text{pawn}} \times 0.639607)$$
+    - **Loss Function:** Network performance is optimized using Mean Squared Error (MSE) between the predicted and target win probabilities: 
+      $$\text{MSE} = (Y_{\text{pred}} - Y_{\text{expected}})^2$$
+    - **Schedule & Batching Dynamics:** 
+      * **Total Duration:** 24 epochs.
+      * **Training Throughput:** 3,199 steps per epoch.
+      * **Batch Size:** 8,192 positions per step.
+      * **Validation Window:** 184 steps per epoch.
+      * **Data Pipeline:** Datasets are systematically shuffled between epochs to prevent sequential memorization and overfitting.
+    - **Learning Rate Dynamics:** Optimization utilizes the **AdamW** algorithm paired with a **CosineDecay** learning rate schedule, ensuring smooth, monotonic convergence toward the minimum floor ($\alpha = 2 \times 10^{-7}$).
 
 - cd nnue-training
 - /train_pipeline.sh
