@@ -93,8 +93,6 @@
 
     ### **2. Dataset Stratification**
 
-# STRATIFICATION METRICS REPORT POST REDUCE
-
     | Strata Key | Raw Count | Target Pct | Target Count | Factor |
     | :--- | :--- | :--- | :--- | :--- |
     | early_dead_equal | 22685342 | 8.0 | 2076892 | 0.09x |
