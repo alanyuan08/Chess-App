@@ -17,14 +17,14 @@ use crate::nnue_network::*;
 use crate::search_command::*;
 use crate::move_command::*;
 
-pub const PV_DEPTH: i32 = 20;
-pub const MAX_DEPTH: i32 = 25;
+pub const PV_DEPTH: i32 = 15;
+pub const MAX_DEPTH: i32 = 20;
 
 // When a thread finishes, if it exceeds the time, it will send the 
 // termination signal to the other threads.
 
 // The other threads the single every 2048 executions
-pub const SEARCH_TIME_LIMIT: u64 = 15;
+pub const SEARCH_TIME_LIMIT: u64 = 25;
 
 pub const INFINITY: i32 = 32000;
 pub const MATE_VALUE: i32 = 30000;
