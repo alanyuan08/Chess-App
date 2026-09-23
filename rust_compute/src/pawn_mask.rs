@@ -32,8 +32,13 @@ pub fn black_pawn_attacks(black_pawns: u64) -> u64 {
     captures_left | captures_right
 }
 
-pub fn white_pawn_moves(chess_board: &mut ChessBoard, player_index: usize, opp_index: usize,
-    moves: &mut ArrayVec::<ForwardMove, 256>)  {
+pub fn white_pawn_moves(
+    chess_board: &mut ChessBoard, 
+    player_index: usize, 
+    opp_index: usize,
+    moves: &mut ArrayVec::<ForwardMove, 256>,
+    only_tactical: bool
+)  {
 
     let white_pawns = chess_board.pawns[player_index];
     let black_pieces = chess_board.all_pieces[opp_index];
@@ -44,16 +49,37 @@ pub fn white_pawn_moves(chess_board: &mut ChessBoard, player_index: usize, opp_i
         1 << chess_board.en_passant()
     };
 
-    // --- Aggregating Single Pushes (No Promotion) ---
-    let mut one_move = ((white_pawns & !RANK_7) << 8) & !occupancy;
-    while one_move != 0 {
-        let target = one_move.trailing_zeros() as u8;
-        moves.push(
-            ForwardMove { 
-                start_sq: target - 8, end_sq: target, move_type: MoveFlag::MOVE, pv_score: 1000 
-            }
-        );
-        one_move &= one_move - 1;
+    if !only_tactical {
+        // --- Aggregating Single Pushes (No Promotion) ---
+        let mut one_move = ((white_pawns & !RANK_7) << 8) & !occupancy;
+        while one_move != 0 {
+            let target = one_move.trailing_zeros() as u8;
+            moves.push(
+                ForwardMove { 
+                    start_sq: target - 8, 
+                    end_sq: target, 
+                    move_type: MoveFlag::MOVE, 
+                    pv_score: 0 
+                }
+            );
+            one_move &= one_move - 1;
+        }
+
+        // --- Aggregating Double Pushes ---
+        let single_move = ((white_pawns & RANK_2) << 8) & !occupancy;
+        let mut double_move = (single_move << 8) & !occupancy;
+        while double_move != 0 {
+            let target = double_move.trailing_zeros() as u8;
+            moves.push(
+                ForwardMove { 
+                    start_sq: target - 16, 
+                    end_sq: target, 
+                    move_type: MoveFlag::PAWNOPENMOVE, 
+                    pv_score: 0
+                }
+            );
+            double_move &= double_move - 1;
+        }
     }
 
     // --- Aggregating Single Pushes (Promotion) ---
@@ -62,33 +88,32 @@ pub fn white_pawn_moves(chess_board: &mut ChessBoard, player_index: usize, opp_i
         let target = promotion_move.trailing_zeros() as u8;
         
         moves.push(ForwardMove { 
-            start_sq: target - 8, end_sq: target, move_type: MoveFlag::PROMOTIONQUEEN, pv_score: 50 
+            start_sq: target - 8, 
+            end_sq: target, 
+            move_type: MoveFlag::PROMOTIONQUEEN, 
+            pv_score: 90_000 
         });
 
         moves.push(ForwardMove { 
-            start_sq: target - 8, end_sq: target, move_type: MoveFlag::PROMOTIONROOK, pv_score: 2000 
+            start_sq: target - 8, 
+            end_sq: target, 
+            move_type: MoveFlag::PROMOTIONROOK, 
+            pv_score: -500 
         });
         moves.push(ForwardMove { 
-            start_sq: target - 8, end_sq: target, move_type: MoveFlag::PROMOTIONBISHOP, pv_score: 2100 
+            start_sq: target - 8, 
+            end_sq: target, 
+            move_type: MoveFlag::PROMOTIONBISHOP, 
+            pv_score: -500 
         });
         moves.push(ForwardMove { 
-            start_sq: target - 8, end_sq: target, move_type: MoveFlag::PROMOTIONKNIGHT, pv_score: 2200 
+            start_sq: target - 8, 
+            end_sq: target, 
+            move_type: MoveFlag::PROMOTIONKNIGHT, 
+            pv_score: -500 
         });
 
         promotion_move &= promotion_move - 1;
-    }
-
-    // --- Aggregating Double Pushes ---
-    let single_move = ((white_pawns & RANK_2) << 8) & !occupancy;
-    let mut double_move = (single_move << 8) & !occupancy;
-    while double_move != 0 {
-        let target = double_move.trailing_zeros() as u8;
-        moves.push(
-            ForwardMove { 
-                start_sq: target - 8 * 2, end_sq: target, move_type: MoveFlag::PAWNOPENMOVE, pv_score: 600
-            }
-        );
-        double_move &= double_move - 1;
     }
 
     // --- Aggregating Capture (No Promotion) ---
@@ -100,11 +125,14 @@ pub fn white_pawn_moves(chess_board: &mut ChessBoard, player_index: usize, opp_i
         let target = left_capture_no_promotion.trailing_zeros() as u8;
 
         let captured_piece_val = piece_value(chess_board.mailbox_piece(target));
-        let pv_score = 100 - (captured_piece_val * 10) + 1; 
+        let pv_score = 10_000 + (captured_piece_val * 10) - 100; 
 
         moves.push(
             ForwardMove { 
-                start_sq: target - 7, end_sq: target, move_type: MoveFlag::CAPTURE, pv_score 
+                start_sq: target - 7, 
+                end_sq: target, 
+                move_type: MoveFlag::CAPTURE, 
+                pv_score 
             }
         );
         left_capture_no_promotion &= left_capture_no_promotion - 1;
@@ -115,11 +143,14 @@ pub fn white_pawn_moves(chess_board: &mut ChessBoard, player_index: usize, opp_i
         let target = right_capture_no_promotion.trailing_zeros() as u8;
 
         let captured_piece_val = piece_value(chess_board.mailbox_piece(target));
-        let pv_score = 100 - (captured_piece_val * 10) + 1; 
+        let pv_score = 10_000 + (captured_piece_val * 10) - 100; 
 
         moves.push(
             ForwardMove { 
-                start_sq: target - 9, end_sq: target, move_type: MoveFlag::CAPTURE, pv_score 
+                start_sq: target - 9, 
+                end_sq: target, 
+                move_type: MoveFlag::CAPTURE, 
+                pv_score 
             }
         );
         right_capture_no_promotion &= right_capture_no_promotion - 1;
@@ -130,18 +161,30 @@ pub fn white_pawn_moves(chess_board: &mut ChessBoard, player_index: usize, opp_i
     while left_capture_promotion != 0 {
         let target = left_capture_promotion.trailing_zeros() as u8;
         moves.push(ForwardMove { 
-            start_sq: target - 7, end_sq: target, move_type: MoveFlag::PROMOTIONQUEEN, pv_score: 10 
+            start_sq: target - 7, 
+            end_sq: target, 
+            move_type: MoveFlag::PROMOTIONQUEEN, 
+            pv_score: 95_000 
         });
 
         // Under-promotions: Pushed past 1000 so they are evaluated after quiet moves
         moves.push(ForwardMove { 
-            start_sq: target - 7, end_sq: target, move_type: MoveFlag::PROMOTIONROOK, pv_score: 2000 
+            start_sq: target - 7, 
+            end_sq: target, 
+            move_type: MoveFlag::PROMOTIONROOK, 
+            pv_score: -500 
         });
         moves.push(ForwardMove { 
-            start_sq: target - 7, end_sq: target, move_type: MoveFlag::PROMOTIONBISHOP, pv_score: 2100 
+            start_sq: target - 7, 
+            end_sq: target, 
+            move_type: MoveFlag::PROMOTIONBISHOP, 
+            pv_score: -500 
         });
         moves.push(ForwardMove { 
-            start_sq: target - 7, end_sq: target, move_type: MoveFlag::PROMOTIONKNIGHT, pv_score: 2200 
+            start_sq: target - 7, 
+            end_sq: target, 
+            move_type: MoveFlag::PROMOTIONKNIGHT, 
+            pv_score: -500 
         });
         left_capture_promotion &= left_capture_promotion - 1;
     }
@@ -150,18 +193,30 @@ pub fn white_pawn_moves(chess_board: &mut ChessBoard, player_index: usize, opp_i
     while right_capture_promotion != 0 {
         let target = right_capture_promotion.trailing_zeros() as u8;
         moves.push(ForwardMove { 
-            start_sq: target - 9, end_sq: target, move_type: MoveFlag::PROMOTIONQUEEN, pv_score: 10 
+            start_sq: target - 9, 
+            end_sq: target, 
+            move_type: MoveFlag::PROMOTIONQUEEN, 
+            pv_score: 95_000 
         });
 
         // Under-promotions: Pushed past 1000 so they are evaluated after quiet moves
         moves.push(ForwardMove { 
-            start_sq: target - 9, end_sq: target, move_type: MoveFlag::PROMOTIONROOK, pv_score: 2000 
+            start_sq: target - 9, 
+            end_sq: target, 
+            move_type: MoveFlag::PROMOTIONROOK, 
+            pv_score: -500 
         });
         moves.push(ForwardMove { 
-            start_sq: target - 9, end_sq: target, move_type: MoveFlag::PROMOTIONBISHOP, pv_score: 2100 
+            start_sq: target - 9, 
+            end_sq: target, 
+            move_type: MoveFlag::PROMOTIONBISHOP, 
+            pv_score: -500 
         });
         moves.push(ForwardMove { 
-            start_sq: target - 9, end_sq: target, move_type: MoveFlag::PROMOTIONKNIGHT, pv_score: 2200 
+            start_sq: target - 9, 
+            end_sq: target, 
+            move_type: MoveFlag::PROMOTIONKNIGHT, 
+            pv_score: -500 
         });
         right_capture_promotion &= right_capture_promotion - 1;
     }
@@ -170,9 +225,13 @@ pub fn white_pawn_moves(chess_board: &mut ChessBoard, player_index: usize, opp_i
     let mut left_attackers = (en_passant_board >> 9) & NOT_H_FILE & white_pawns;
     while left_attackers != 0 {
         let from = left_attackers.trailing_zeros() as u8;
+        let pv_score = 10_900;
         moves.push(
             ForwardMove { 
-                start_sq: from, end_sq: from + 9, move_type: MoveFlag::ENPASSANT, pv_score: 150 
+                start_sq: from, 
+                end_sq: from + 9, 
+                move_type: MoveFlag::ENPASSANT, 
+                pv_score 
             }
         );
         left_attackers &= left_attackers - 1;
@@ -181,17 +240,26 @@ pub fn white_pawn_moves(chess_board: &mut ChessBoard, player_index: usize, opp_i
     let mut right_attackers = (en_passant_board >> 7) & NOT_A_FILE & white_pawns;
     while right_attackers != 0 {
         let from = right_attackers.trailing_zeros() as u8;
+        let pv_score = 10_900; 
         moves.push(
             ForwardMove { 
-                start_sq: from, end_sq: from + 7, move_type: MoveFlag::ENPASSANT, pv_score: 150 
+                start_sq: from, 
+                end_sq: from + 7, 
+                move_type: MoveFlag::ENPASSANT, 
+                pv_score 
             }
         );
         right_attackers &= right_attackers - 1;
     }
 }
 
-pub fn black_pawn_moves(chess_board: &mut ChessBoard, player_index: usize, opp_index: usize,
-    moves: &mut ArrayVec::<ForwardMove, 256>)  {
+pub fn black_pawn_moves(
+    chess_board: &mut ChessBoard, 
+    player_index: usize, 
+    opp_index: usize,
+    moves: &mut ArrayVec::<ForwardMove, 256>,
+    only_tactical: bool
+)  {
 
     let black_pawns = chess_board.pawns[player_index];
     let white_pieces = chess_board.all_pieces[opp_index];
@@ -202,16 +270,37 @@ pub fn black_pawn_moves(chess_board: &mut ChessBoard, player_index: usize, opp_i
         1 << chess_board.en_passant()
     };
 
-    // --- Aggregating Single Pushes (No Promotion) ---
-    let mut one_move = ((black_pawns & !RANK_2) >> 8) & !occupancy;
-    while one_move != 0 {
-        let target = one_move.trailing_zeros() as u8;
-        moves.push(
-            ForwardMove { 
-                start_sq: target + 8, end_sq: target, move_type: MoveFlag::MOVE, pv_score: 1000
-            }
-        );
-        one_move &= one_move - 1;
+    if !only_tactical {
+        // --- Aggregating Single Pushes (No Promotion) ---
+        let mut one_move = ((black_pawns & !RANK_2) >> 8) & !occupancy;
+        while one_move != 0 {
+            let target = one_move.trailing_zeros() as u8;
+            moves.push(
+                ForwardMove { 
+                    start_sq: target + 8, 
+                    end_sq: target, 
+                    move_type: MoveFlag::MOVE, 
+                    pv_score: 0
+                }
+            );
+            one_move &= one_move - 1;
+        }
+
+        // --- Aggregating Double Pushes ---
+        let single_move = ((black_pawns & RANK_7) >> 8) & !occupancy;
+        let mut double_move = (single_move >> 8) & !occupancy;
+        while double_move != 0 {
+            let target = double_move.trailing_zeros() as u8;
+            moves.push(
+                ForwardMove { 
+                    start_sq: target + 8 * 2, 
+                    end_sq: target, 
+                    move_type: MoveFlag::PAWNOPENMOVE, 
+                    pv_score: 0 
+                }
+            );
+            double_move &= double_move - 1;
+        }
     }
 
     // --- Aggregating Single Pushes (Promotion) ---
@@ -220,33 +309,32 @@ pub fn black_pawn_moves(chess_board: &mut ChessBoard, player_index: usize, opp_i
         let target = promotion_move.trailing_zeros() as u8;
         // 1. Queen Promotion: Highest priority (most negative)
         moves.push(ForwardMove { 
-            start_sq: target + 8, end_sq: target, move_type: MoveFlag::PROMOTIONQUEEN, pv_score: 10 
+            start_sq: target + 8, 
+            end_sq: target, 
+            move_type: MoveFlag::PROMOTIONQUEEN, 
+            pv_score: 90_000 
         });
 
         // 2. Under-promotions: Pushed past 1000 so they are evaluated after quiet moves
         moves.push(ForwardMove { 
-            start_sq: target + 8, end_sq: target, move_type: MoveFlag::PROMOTIONROOK, pv_score: 2000 
+            start_sq: target + 8, 
+            end_sq: target, 
+            move_type: MoveFlag::PROMOTIONROOK, 
+            pv_score: -500 
         });
         moves.push(ForwardMove { 
-            start_sq: target + 8, end_sq: target, move_type: MoveFlag::PROMOTIONBISHOP, pv_score: 2100 
+            start_sq: target + 8, 
+            end_sq: target, 
+            move_type: MoveFlag::PROMOTIONBISHOP, 
+            pv_score: -500 
         });
         moves.push(ForwardMove { 
-            start_sq: target + 8, end_sq: target, move_type: MoveFlag::PROMOTIONKNIGHT, pv_score: 2200 
+            start_sq: target + 8, 
+            end_sq: target, 
+            move_type: MoveFlag::PROMOTIONKNIGHT, 
+            pv_score: -500 
         });
         promotion_move &= promotion_move - 1;
-    }
-
-    // --- Aggregating Double Pushes ---
-    let single_move = ((black_pawns & RANK_7) >> 8) & !occupancy;
-    let mut double_move = (single_move >> 8) & !occupancy;
-    while double_move != 0 {
-        let target = double_move.trailing_zeros() as u8;
-        moves.push(
-            ForwardMove { 
-                start_sq: target + 8 * 2, end_sq: target, move_type: MoveFlag::PAWNOPENMOVE, pv_score: 600 
-            }
-        );
-        double_move &= double_move - 1;
     }
 
     // --- Aggregating Capture (No Promotion) ---
@@ -258,11 +346,14 @@ pub fn black_pawn_moves(chess_board: &mut ChessBoard, player_index: usize, opp_i
         let target = left_capture_no_promotion.trailing_zeros() as u8;
 
         let captured_piece_val = piece_value(chess_board.mailbox_piece(target));
-        let pv_score = 100 - (captured_piece_val * 10) + 1; 
+        let pv_score = 10_000 + (captured_piece_val * 10) - 100;
 
         moves.push(
             ForwardMove { 
-                start_sq: target + 9, end_sq: target, move_type: MoveFlag::CAPTURE, pv_score 
+                start_sq: target + 9, 
+                end_sq: target, 
+                move_type: MoveFlag::CAPTURE, 
+                pv_score 
             }
         );
         left_capture_no_promotion &= left_capture_no_promotion - 1;
@@ -273,11 +364,14 @@ pub fn black_pawn_moves(chess_board: &mut ChessBoard, player_index: usize, opp_i
         let target = right_capture_no_promotion.trailing_zeros() as u8;
 
         let captured_piece_val = piece_value(chess_board.mailbox_piece(target));
-        let pv_score = 100 - (captured_piece_val * 10) + 1; 
+        let pv_score = 10_000 + (captured_piece_val * 10) - 100; 
 
         moves.push(
             ForwardMove { 
-                start_sq: target + 7, end_sq: target, move_type: MoveFlag::CAPTURE, pv_score 
+                start_sq: target + 7, 
+                end_sq: target, 
+                move_type: MoveFlag::CAPTURE, 
+                pv_score 
             }
         );
         right_capture_no_promotion &= right_capture_no_promotion - 1;
@@ -289,18 +383,30 @@ pub fn black_pawn_moves(chess_board: &mut ChessBoard, player_index: usize, opp_i
         let target = left_capture_promotion.trailing_zeros() as u8;
         // 1. Queen Promotion: Highest priority (most negative)
         moves.push(ForwardMove { 
-            start_sq: target + 9, end_sq: target, move_type: MoveFlag::PROMOTIONQUEEN, pv_score: 10 
+            start_sq: target + 9, 
+            end_sq: target, 
+            move_type: MoveFlag::PROMOTIONQUEEN, 
+            pv_score: 95_000 
         });
 
         // 2. Under-promotions: Pushed past 1000 so they are evaluated after quiet moves
         moves.push(ForwardMove { 
-            start_sq: target + 9, end_sq: target, move_type: MoveFlag::PROMOTIONROOK, pv_score: 2000 
+            start_sq: target + 9, 
+            end_sq: target, 
+            move_type: MoveFlag::PROMOTIONROOK, 
+            pv_score: -500 
         });
         moves.push(ForwardMove { 
-            start_sq: target + 9, end_sq: target, move_type: MoveFlag::PROMOTIONBISHOP, pv_score: 2100 
+            start_sq: target + 9, 
+            end_sq: target, 
+            move_type: MoveFlag::PROMOTIONBISHOP, 
+            pv_score: -500 
         });
         moves.push(ForwardMove { 
-            start_sq: target + 9, end_sq: target, move_type: MoveFlag::PROMOTIONKNIGHT, pv_score: 2200 
+            start_sq: target + 9, 
+            end_sq: target, 
+            move_type: MoveFlag::PROMOTIONKNIGHT, 
+            pv_score: -500 
         });
         left_capture_promotion &= left_capture_promotion - 1;
     }
@@ -310,18 +416,30 @@ pub fn black_pawn_moves(chess_board: &mut ChessBoard, player_index: usize, opp_i
         let target = right_capture_promotion.trailing_zeros() as u8;
         // 1. Queen Promotion: Highest priority (most negative)
         moves.push(ForwardMove { 
-            start_sq: target + 7, end_sq: target, move_type: MoveFlag::PROMOTIONQUEEN, pv_score: 10 
+            start_sq: target + 7, 
+            end_sq: target, 
+            move_type: MoveFlag::PROMOTIONQUEEN, 
+            pv_score: 95_000 
         });
 
         // 2. Under-promotions: Pushed past 1000 so they are evaluated after quiet moves
         moves.push(ForwardMove { 
-            start_sq: target + 7, end_sq: target, move_type: MoveFlag::PROMOTIONROOK, pv_score: 2000 
+            start_sq: target + 7, 
+            end_sq: target, 
+            move_type: MoveFlag::PROMOTIONROOK, 
+            pv_score: -500 
         });
         moves.push(ForwardMove { 
-            start_sq: target + 7, end_sq: target, move_type: MoveFlag::PROMOTIONBISHOP, pv_score: 2100 
+            start_sq: target + 7, 
+            end_sq: target, 
+            move_type: MoveFlag::PROMOTIONBISHOP, 
+            pv_score: -500 
         });
         moves.push(ForwardMove { 
-            start_sq: target + 7, end_sq: target, move_type: MoveFlag::PROMOTIONKNIGHT, pv_score: 2200 
+            start_sq: target + 7, 
+            end_sq: target, 
+            move_type: MoveFlag::PROMOTIONKNIGHT, 
+            pv_score: -500 
         });
         right_capture_promotion &= right_capture_promotion - 1;
     }
@@ -330,9 +448,14 @@ pub fn black_pawn_moves(chess_board: &mut ChessBoard, player_index: usize, opp_i
     let mut left_attackers = (en_passant_board << 7) & NOT_H_FILE & black_pawns;
     while left_attackers != 0 {
         let target = left_attackers.trailing_zeros() as u8;
+        let pv_score = 10_900; 
+
         moves.push(
             ForwardMove { 
-                start_sq: target, end_sq: target - 7, move_type: MoveFlag::ENPASSANT, pv_score: 150  
+                start_sq: target, 
+                end_sq: target - 7, 
+                move_type: MoveFlag::ENPASSANT, 
+                pv_score  
             }
         );
         left_attackers &= left_attackers - 1;
@@ -341,9 +464,14 @@ pub fn black_pawn_moves(chess_board: &mut ChessBoard, player_index: usize, opp_i
     let mut right_attackers = (en_passant_board << 9) & NOT_A_FILE & black_pawns;
     while right_attackers != 0 {
         let target = right_attackers.trailing_zeros() as u8;
+        let pv_score = 10_900; 
+
         moves.push(
             ForwardMove { 
-                start_sq: target, end_sq: target - 9, move_type: MoveFlag::ENPASSANT, pv_score: 150   
+                start_sq: target, 
+                end_sq: target - 9, 
+                move_type: MoveFlag::ENPASSANT, 
+                pv_score   
             }
         );
         right_attackers &= right_attackers - 1;

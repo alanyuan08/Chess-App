@@ -16,6 +16,7 @@ const-random = "0.1"
 rand = "0.10.1"
 arrayvec = "0.7"
 crossbeam-channel = "0.5"
+polyglot = "0.1" 
 
 [dependencies.pyo3]
 version = "0.27.0"

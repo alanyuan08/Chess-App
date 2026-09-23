@@ -8,4 +8,11 @@ build/
 nnue-training/*.csv
 nnue-training/*.bin
 nnue-training/*.keras
+nnue-training/data/*
+nnue-training/data_dedup/*
+nnue-training/balanced_shards/*
+nnue-training/data_mirrored/*
+nnue-training/data_dedup_mixed/*
+nnue-training/production_shards/*
+nnue-training/temp_*/*
 profile.json.gz

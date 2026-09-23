@@ -31,8 +31,13 @@ pub const KNIGHT_ATTACKS: [u64; 64] = {
     knight_attack
 };
 
-pub fn knight_moves(chess_board: &mut ChessBoard, player_index: usize, opp_index: usize,
-    moves: &mut ArrayVec::<ForwardMove, 256>)  {
+pub fn knight_moves(
+    chess_board: &mut ChessBoard, 
+    player_index: usize, 
+    opp_index: usize,
+    moves: &mut ArrayVec::<ForwardMove, 256>,
+    only_tactical: bool
+)  {
 
     let mut knight_bitboard = chess_board.knights[player_index];
 
@@ -40,28 +45,36 @@ pub fn knight_moves(chess_board: &mut ChessBoard, player_index: usize, opp_index
         let knight = knight_bitboard.trailing_zeros() as u8;
         let knight_attack_paths = KNIGHT_ATTACKS[knight as usize];
 
-        let mut knight_moves = knight_attack_paths & !chess_board.occupied;
-        let mut knight_captures = knight_attack_paths & chess_board.all_pieces[opp_index];
+        if !only_tactical {
+            let mut knight_moves = knight_attack_paths & !chess_board.occupied;
 
-        while knight_moves != 0 {
-            let target = knight_moves.trailing_zeros() as u8;
-            moves.push(
-                ForwardMove { 
-                    start_sq: knight, end_sq: target, move_type: MoveFlag::MOVE, pv_score: 1000
-                }
-            );
-            knight_moves &= knight_moves - 1;
+            while knight_moves != 0 {
+                let target = knight_moves.trailing_zeros() as u8;
+                moves.push(
+                    ForwardMove { 
+                        start_sq: knight, 
+                        end_sq: target, 
+                        move_type: MoveFlag::MOVE, 
+                        pv_score: 0
+                    }
+                );
+                knight_moves &= knight_moves - 1;
+            }
         }
 
+        let mut knight_captures = knight_attack_paths & chess_board.all_pieces[opp_index];
         while knight_captures != 0 {
             let target = knight_captures.trailing_zeros() as u8;
 
             let captured_piece_val = piece_value(chess_board.mailbox_piece(target));
-            let pv_score = 100 - (captured_piece_val * 10) + 2; 
+            let pv_score = 10_000 + (captured_piece_val * 10) - 300; 
 
             moves.push(
                 ForwardMove { 
-                    start_sq: knight, end_sq: target, move_type: MoveFlag::CAPTURE, pv_score 
+                    start_sq: knight, 
+                    end_sq: target, 
+                    move_type: MoveFlag::CAPTURE, 
+                    pv_score 
                 }
             );
             knight_captures &= knight_captures - 1;
