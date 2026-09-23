@@ -72,29 +72,48 @@ class AggressiveMemoryCleanup(keras.callbacks.Callback):
         keras.backend.clear_session()
 
 # --- THE TELEMETRY TRACKER CALLBACK ---
+@keras.utils.register_keras_serializable(package="CustomSchedules")
 class CustomWarmupCosineSchedule(keras.optimizers.schedules.LearningRateSchedule):
-    def __init__(self, warmup_steps, cosine_schedule):
+    def __init__(self, warmup_steps, cosine_schedule, initial_lr=1e-6):
         super().__init__()
-        self.warmup_steps = tf.cast(warmup_steps, tf.float32)
+        self.warmup_steps = warmup_steps
         self.cosine_schedule = cosine_schedule
-        self.initial_lr = 1e-6
-        self.peak_lr = 3e-4
+        self.initial_lr = initial_lr
+        
+        # Dynamically extract peak LR from the underlying cosine schedule config
+        if hasattr(cosine_schedule, 'initial_learning_rate'):
+            self.peak_lr = cosine_schedule.initial_learning_rate
+        else:
+            # Fallback if config structure varies
+            self.peak_lr = cosine_schedule.get_config().get('initial_learning_rate', 3e-4)
 
     def __call__(self, step):
         step_f = tf.cast(step, tf.float32)
+        warmup_steps_f = tf.cast(self.warmup_steps, tf.float32)
         
         # Epoch 1: Linear upward ramp
-        warmup_lr = self.initial_lr + (self.peak_lr - self.initial_lr) * (step_f / self.warmup_steps)
+        warmup_lr = self.initial_lr + (self.peak_lr - self.initial_lr) * (step_f / warmup_steps_f)
         
         # Epochs 2-30: Native Cosine Decay tracking steps past warmup
-        decay_step = tf.maximum(step_f - self.warmup_steps, 0.0)
+        decay_step = tf.maximum(step_f - warmup_steps_f, 0.0)
         cosine_lr = self.cosine_schedule(decay_step)
         
-        is_warmup = tf.cast(step_f < self.warmup_steps, tf.float32)
-        return (is_warmup * warmup_lr) + ((1.0 - is_warmup) * cosine_lr)
+        # Graph-safe conditional selection
+        return tf.where(step_f < warmup_steps_f, warmup_lr, cosine_lr)
 
     def get_config(self):
-        return {"warmup_steps": float(self.warmup_steps)}
+        # Must return primitive types or serializable Keras objects
+        return {
+            "warmup_steps": self.warmup_steps,
+            "cosine_schedule": keras.optimizers.schedules.serialize(self.cosine_schedule),
+            "initial_lr": self.initial_lr
+        }
+
+    @classmethod
+    def from_config(cls, config):
+        # Correctly deserializes the nested schedule upon loading
+        config["cosine_schedule"] = keras.optimizers.schedules.deserialize(config["cosine_schedule"])
+        return cls(**config)
 
 @keras.utils.register_keras_serializable()
 class SharedAccumulatorBias(layers.Layer):
@@ -389,7 +408,7 @@ def train_nnue_on_fens():
     checkpoint_cb = tf.keras.callbacks.ModelCheckpoint(
         filepath=checkpoint_path,
         monitor='val_loss',
-        save_best_only=True,
+        save_best_only=False,
         verbose=1
     )
 

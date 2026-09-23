@@ -71,7 +71,7 @@
   - **Data Augmentation & DeDuplication:** The filtered positions are augmented by rotating each board state 180 degrees. The positions are then deduplicationed. This yields a total of **392,386,524 unique positions**.
 
     ### **1. High-Fidelity Data Distribution Matrix**    
-    * **Total Training Positions:** **25,953,458 positions**
+    * **Total Training Positions:** **25,952,256 positions**
     * **Total Validation Positions:** **524,288 positions**
 
     * **Final Operational Phase Split:** **20.00% Early** / **45.00% Mid** / **35.00% Late**
@@ -93,27 +93,27 @@
 
     ### **2. Dataset Stratification**
 
-    ======================= STRATIFICATION METRICS REPORT  =======================
-    Strata Key                     |    Raw Count | Target Pct | Target Count |   Factor
-    ---------------------------------------------------------------------------------
-    early_dead_equal               |   22,917,211 |       8.0% |    2,097,052 |    0.09x
-    early_slight_pull              |   11,180,018 |       6.0% |    1,572,789 |    0.14x
-    early_micro_advantage          |    4,926,429 |       3.5% |      917,460 |    0.19x
-    early_solid_edge               |    3,121,462 |       1.5% |      393,197 |    0.13x
-    early_clear_dominance          |    1,504,164 |       0.7% |      183,492 |    0.12x
-    early_decisive_zone            |      207,554 |       0.3% |       78,639 |    0.38x
-    mid_dead_equal                 |   39,188,019 |      14.0% |    3,669,841 |    0.09x
-    mid_slight_pull                |    6,924,663 |      12.0% |    3,145,578 |    0.45x
-    mid_micro_advantage            |    5,422,790 |      10.0% |    2,621,315 |    0.48x
-    mid_solid_edge                 |    6,687,541 |       6.5% |    1,703,854 |    0.25x
-    mid_clear_dominance            |    6,696,913 |       2.0% |      524,263 |    0.08x
-    mid_decisive_zone              |    1,603,402 |       0.5% |      131,065 |    0.08x
-    late_dead_equal                |   35,430,018 |      11.0% |    2,883,446 |    0.08x
-    late_slight_pull               |      754,724 |      10.0% |    2,621,315 |    3.47x
-    late_micro_advantage           |      371,353 |       8.5% |    2,228,117 |    6.00x
-    late_solid_edge                |      823,335 |       4.0% |    1,048,526 |    1.27x
-    late_clear_dominance           |    1,589,883 |       1.0% |      262,131 |    0.16x
-    late_decisive_zone             |      848,244 |       0.5% |      131,065 |    0.15x
+    ==================== STRATIFICATION METRICS REPORT (POST-REDUCE) =====================
+      Strata Key                     |    Raw Count | Target Pct | Target Count |   Factor
+      -------------------------------------------------------------------------------------
+      early_dead_equal               |   22,685,342 |       8.0% |    2,076,892 |    0.09x
+      early_slight_pull              |   11,066,408 |       6.0% |    1,557,669 |    0.14x
+      early_micro_advantage          |    4,876,664 |       3.5% |      908,640 |    0.19x
+      early_solid_edge               |    3,089,720 |       1.5% |      389,417 |    0.13x
+      early_clear_dominance          |    1,488,865 |       0.7% |      181,728 |    0.12x
+      early_decisive_zone            |      205,469 |       0.3% |       77,883 |    0.38x
+      mid_dead_equal                 |   38,791,499 |      14.0% |    3,634,561 |    0.09x
+      mid_slight_pull                |    6,854,365 |      12.0% |    3,115,338 |    0.45x
+      mid_micro_advantage            |    5,367,918 |      10.0% |    2,596,115 |    0.48x
+      mid_solid_edge                 |    6,620,911 |       6.5% |    1,687,474 |    0.25x
+      mid_clear_dominance            |    6,629,447 |       2.0% |      519,223 |    0.08x
+      mid_decisive_zone              |    1,587,169 |       0.5% |      129,805 |    0.08x
+      late_dead_equal                |   35,070,519 |      11.0% |    2,855,726 |    0.08x
+      late_slight_pull               |      747,026 |      10.0% |    2,596,115 |    3.48x
+      late_micro_advantage           |      367,783 |       8.5% |    2,206,697 |    6.00x
+      late_solid_edge                |      815,142 |       4.0% |    1,038,446 |    1.27x
+      late_clear_dominance           |    1,573,635 |       1.0% |      259,611 |    0.16x
+      late_decisive_zone             |      839,720 |       0.5% |      129,805 |    0.15x
     ======================================================================================
 
     If there is a surplus of positions, it will opt for the positions without a mirror FEN + higher stockfish depth eval.
@@ -125,12 +125,15 @@
     - **Loss Function:** Network performance is optimized using Mean Squared Error (MSE) between the predicted and target win probabilities: 
       $$\text{MSE} = (Y_{\text{pred}} - Y_{\text{expected}})^2$$
     - **Schedule & Batching Dynamics:** 
-      * **Total Duration:** 24 epochs.
-      * **Training Throughput:** 3,199 steps per epoch.
+      * **Total Duration:** 30 epochs.
+      * **Training Throughput:** 3,168 steps per epoch.
       * **Batch Size:** 8,192 positions per step.
-      * **Validation Window:** 184 steps per epoch.
+      * **Validation Window:** 63 steps per epoch.
       * **Data Pipeline:** Datasets are systematically shuffled between epochs to prevent sequential memorization and overfitting.
     - **Learning Rate Dynamics:** Optimization utilizes the **AdamW** algorithm paired with a **CosineDecay** learning rate schedule, ensuring smooth, monotonic convergence toward the minimum floor ($\alpha = 2 \times 10^{-7}$).
+
+- **Training Error:**
+    * **Average Centipawn Error for position**: 35 Centipawns
 
 - cd nnue-training
 - /train_pipeline.sh
