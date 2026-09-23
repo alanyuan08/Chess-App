@@ -228,7 +228,11 @@ impl SearchWorker {
 
         // 2. Apply thread diversity (helps different threads explore different paths)
         if self.thread_id != 0 {
-            let thread_offset = if self.thread_id % 2 == 1 { 1 } else { -1 };
+            let thread_offset = if self.thread_id % 2 == 1 { 
+                1 
+            } else { 
+                if depth > 4 { -2 } else { -1 } 
+            };
             reduction = (base_reduction + thread_offset).max(0);
         }
 
@@ -394,18 +398,30 @@ impl SearchWorker {
 
         // 4. Late Futility Pruning
         if depth <= 3 && !king_in_check && beta < MATE_THRESHOLD && beta > -MATE_THRESHOLD {
-            // Flat evaluation tuning factor: 40-70 centipawns per depth works well for Stockfish scale
-            let rfp_margin = 60 * depth;
+            // Baseline network evaluation uncertainty (40 centipawns)
+            let net_error_buffer = 40;
+            
+            // Dynamic margin: base linear scaling + error buffer to protect against network noise
+            let rfp_margin = (50 * depth) + net_error_buffer;
             let computed_val = static_eval - rfp_margin;
+            
             if computed_val >= beta {
+                // Guard condition: Verify that storing computed_val does not inject false bounds
+                let stored_score = if computed_val > MATE_THRESHOLD - 100 { beta } else { computed_val };
+
                 if beta == original_beta {
                     self.transposition_table.store(
-                        hash, computed_val, ply, ForwardMove::NULL_MOVE, depth, HashFlag::LOWERBOUND
+                        hash, 
+                        stored_score, 
+                        ply, 
+                        ForwardMove::NULL_MOVE, 
+                        depth, 
+                        HashFlag::LOWERBOUND
                     );
                 }
 
                 return SearchResult {
-                    score: computed_val,
+                    score: stored_score,
                     best_move: ForwardMove::NULL_MOVE,
                     was_aborted: false,
                 };

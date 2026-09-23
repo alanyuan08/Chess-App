@@ -6,7 +6,7 @@
   
 - **Compute Engine:** Rust Maturin for Adversarial Search - Negamax with Quiescence Search with advanced pruning techniques such as Killer Move Heuristics, Late Move Reduction, Principal Variation Search, and Null-Move Pruning.
 
-  The engine processes 17+ million nodes per second on Apple M4 Pro (8 Performance Threads) and averages 16+ depth on 15 second search. 
+  The engine processes 17+ million nodes per second on Apple M4 Pro (8 Performance Threads) and averages 14+ depth on 15 second search. 
 
 - **Move Generation:** BitBoard for board representation and BitBoard Magic Number to calculate moves for sliding pieces. 
 
@@ -15,6 +15,8 @@
 - **NNuE Training:** Trained on [Lichess Chess Position Evaluations](https://huggingface.co/datasets/Lichess/chess-position-evaluations).
 
   The positions are filtered for Quiet Positions and the score is converted to a win percentage between [0 to 1] using a Sigmoid Function.
+
+  The NNuE achieves an average of +/- 35 centipawns off stockfish for positions between -3.5 to 3.5 pawns and +/- 45 centipawns overall
   
 ## 1. Python Presentation & Validation Layer
 
@@ -131,7 +133,7 @@
     - **Learning Rate Dynamics:** Optimization utilizes the **AdamW** algorithm paired with a **CosineDecay** learning rate schedule, ensuring smooth, monotonic convergence toward the minimum floor ($\alpha = 2 \times 10^{-7}$).
 
 - **Training Error:**
-    * **Average Centipawn Error for position**: 35 Centipawns
+    * **Average Centipawn Error for positons +/- 3.5 Pawn Units**: 35 Centipawns
 
 - cd nnue-training
 - /train_pipeline.sh
