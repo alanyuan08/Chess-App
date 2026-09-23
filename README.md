@@ -70,6 +70,7 @@
 - **Preprocessing & Data Preparation:**
   - **Quiet Position Filtering:** The dataset is filtered to include only "quiet" positions. Board states are excluded if the king is in check, an immediate tactical win is available via captures, or a forced checkmate sequence exists.
 
+<<<<<<< HEAD
   - **Data Augmentation & DeDuplication:** The filtered positions are augmented by rotating each board state 180 degrees. The positions are then deduplicationed. This yields a total of **392,386,524 unique positions**.
 
     ### **1. High-Fidelity Data Distribution Matrix**    
@@ -140,7 +141,7 @@
 
 ## 5. Playing Level
 
-The Chess AI has been tested against ELO 3200+ Chess.com bots.
+The Chess AI has been tested against ELO 3200+ Chess.com bots - These bots are inflated and used primarily as a smoke test. 
 
 - [WIN - ELO 3200 Bot](https://www.chess.com/analysis/game/computer/1617707258/analysis)
 - [WIN - ELO 3200 Bot](https://www.chess.com/analysis/game/computer/1978599994/analysis)
