@@ -93,28 +93,28 @@
 
     ### **2. Dataset Stratification**
 
-    ==================== STRATIFICATION METRICS REPORT (POST-REDUCE) =====================
-      Strata Key                     |    Raw Count | Target Pct | Target Count |   Factor
-      -------------------------------------------------------------------------------------
-      early_dead_equal               |   22,685,342 |       8.0% |    2,076,892 |    0.09x
-      early_slight_pull              |   11,066,408 |       6.0% |    1,557,669 |    0.14x
-      early_micro_advantage          |    4,876,664 |       3.5% |      908,640 |    0.19x
-      early_solid_edge               |    3,089,720 |       1.5% |      389,417 |    0.13x
-      early_clear_dominance          |    1,488,865 |       0.7% |      181,728 |    0.12x
-      early_decisive_zone            |      205,469 |       0.3% |       77,883 |    0.38x
-      mid_dead_equal                 |   38,791,499 |      14.0% |    3,634,561 |    0.09x
-      mid_slight_pull                |    6,854,365 |      12.0% |    3,115,338 |    0.45x
-      mid_micro_advantage            |    5,367,918 |      10.0% |    2,596,115 |    0.48x
-      mid_solid_edge                 |    6,620,911 |       6.5% |    1,687,474 |    0.25x
-      mid_clear_dominance            |    6,629,447 |       2.0% |      519,223 |    0.08x
-      mid_decisive_zone              |    1,587,169 |       0.5% |      129,805 |    0.08x
-      late_dead_equal                |   35,070,519 |      11.0% |    2,855,726 |    0.08x
-      late_slight_pull               |      747,026 |      10.0% |    2,596,115 |    3.48x
-      late_micro_advantage           |      367,783 |       8.5% |    2,206,697 |    6.00x
-      late_solid_edge                |      815,142 |       4.0% |    1,038,446 |    1.27x
-      late_clear_dominance           |    1,573,635 |       1.0% |      259,611 |    0.16x
-      late_decisive_zone             |      839,720 |       0.5% |      129,805 |    0.15x
-    ======================================================================================
+# STRATIFICATION METRICS REPORT POST REDUCE
+
+    | Strata Key | Raw Count | Target Pct | Target Count | Factor |
+    | :--- | :--- | :--- | :--- | :--- |
+    | early_dead_equal | 22685342 | 8.0 | 2076892 | 0.09x |
+    | early_slight_pull | 11066408 | 6.0 | 1557669 | 0.14x |
+    | early_micro_advantage | 4876664 | 3.5 | 908640 | 0.19x |
+    | early_solid_edge | 3089720 | 1.5 | 389417 | 0.13x |
+    | early_clear_dominance | 1488865 | 0.7 | 181728 | 0.12x |
+    | early_decisive_zone | 205469 | 0.3 | 77883 | 0.38x |
+    | mid_dead_equal | 38791499 | 14.0 | 3634561 | 0.09x |
+    | mid_slight_pull | 6854365 | 12.0 | 3115338 | 0.45x |
+    | mid_micro_advantage | 5367918 | 10.0 | 2596115 | 0.48x |
+    | mid_solid_edge | 6620911 | 6.5 | 1687474 | 0.25x |
+    | mid_clear_dominance | 6629447 | 2.0 | 519223 | 0.08x |
+    | mid_decisive_zone | 1587169 | 0.5 | 129805 | 0.08x |
+    | late_dead_equal | 35070519 | 11.0 | 2855726 | 0.08x |
+    | late_slight_pull | 747026 | 10.0 | 2596115 | 3.48x |
+    | late_micro_advantage | 367783 | 8.5 | 2206697 | 6.00x |
+    | late_solid_edge | 815142 | 4.0 | 1038446 | 1.27x |
+    | late_clear_dominance | 1573635 | 1.0 | 259611 | 0.16x |
+    | late_decisive_zone | 839720 | 0.5 | 129805 | 0.15x |
 
     If there is a surplus of positions, it will opt for the positions without a mirror FEN + higher stockfish depth eval.
 
