@@ -37,7 +37,7 @@ pub const MATE_THRESHOLD: i32 = MATE_VALUE - (MAX_DEPTH * 2);
 pub const NUM_THREADS: usize = 8;
 
 // Condon-Thompson Bucket Transposition Table
-pub const CACHE_SIZE: usize = 16;
+pub const CACHE_SIZE: usize = 128;
 
 // Model path
 pub const MODEL_PATH: &str = "nnue-training/nnue_weights.bin";
@@ -142,6 +142,9 @@ impl ChessGame {
         py: Python<'py>, 
     ) -> PyResult<Bound<'py, PyString>> {  
         
+        // Increment TT Age
+        self._transposition_table.increment_age();
+
         // 1. Reset the Start
         let mut total_nodes_processed = 0;
         self.stop_signal.store(false, Ordering::Relaxed);

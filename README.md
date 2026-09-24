@@ -6,8 +6,10 @@
   
 - **Compute Engine:** Rust Maturin for Adversarial Search - Negamax with Quiescence Search with advanced pruning techniques such as Killer Move Heuristics, Late Move Reduction, Principal Variation Search, and Null-Move Pruning.
 
-  The engine processes 17+ million nodes per second on Apple M4 Pro (8 Performance Threads) and averages 14+ depth on 15 second search. 
+  The engine processes 40+ million nodes per second on Apple M4 Pro (8 Performance Threads) - This definition includes cache retrieval and processing.
 
+  The engine computes an average of 18+ depth on a restricted 15 second search. 
+  
 - **Move Generation:** BitBoard for board representation and BitBoard Magic Number to calculate moves for sliding pieces. 
 
 - **Evaluation:** Self-trained NNUE (Dual-Perspective HalfKA) using Lichess FEN -> Score Positions.

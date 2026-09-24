@@ -399,7 +399,7 @@ impl SearchWorker {
         // 4. Late Futility Pruning
         if depth <= 3 && !king_in_check && beta < MATE_THRESHOLD && beta > -MATE_THRESHOLD {
             // Baseline network evaluation uncertainty (40 centipawns)
-            let net_error_buffer = 40;
+            let net_error_buffer = 20;
             
             // Dynamic margin: base linear scaling + error buffer to protect against network noise
             let rfp_margin = (50 * depth) + net_error_buffer;

@@ -1,7 +1,6 @@
 use crate::move_command::*;
 use crate::chess_game::*;
-
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 
 // TT Entry Flag definitions
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -22,6 +21,7 @@ pub struct TTEntry {
     pub score: i16,
     pub depth: i8,
     pub flag: HashFlag,
+    pub age: u8,
 }
 
 // Condon-Thompson Bucket using 100% stable AtomicU64 primitives.
@@ -37,7 +37,7 @@ pub struct TtBucket {
 pub struct TranspositionTable {
     buckets: Vec<TtBucket>,
     mask: usize,
-    age: u8
+    age: AtomicU8
 }
 
 impl TranspositionTable {
@@ -59,12 +59,14 @@ impl TranspositionTable {
         Self {
             buckets,
             mask: final_count - 1,
-            age: 0,
+            age: AtomicU8::new(0),
         }
     }
 
-    pub fn increment_age(&mut self) {
-        self.age = self.age.wrapping_add(1);
+    pub fn increment_age(&self) {
+        let _ = self.age.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            Some((current + 1) & 0x3F)
+        });
     }
 
     /// Packs raw components into a 64-bit word
@@ -72,14 +74,18 @@ impl TranspositionTable {
     fn pack_entry(&self, move_id: u16, score: i16, depth: i32, 
         flag: HashFlag, key: u64) -> u64 {
         
-        let tag_22 = (key >> 42) & 0x3F_FFFF; 
+        let tag_16 = (key >> 42) & 0x3F_FFFF; 
         let mut packed = 0u64;
+        
+        let current_age = self.age.load(Ordering::Relaxed);
 
-        packed |= (move_id as u64) & 0xFFFF;
-        packed |= ((score as u16) as u64) << 16;
-        packed |= ((depth as u8) as u64 & 0xFF) << 32;
-        packed |= (tag_22 & 0x3F_FFFF) << 40;
-        packed |= (flag as u8 as u64) << 62;
+        packed |= (move_id as u64) & 0xFFFF; 
+        packed |= ((score as u16) as u64) << 16; 
+        packed |= ((depth as u8) as u64 & 0xFF) << 32; 
+        packed |= ((current_age as u64) & 0x3F) << 40;
+        packed |= (tag_16 & 0xFFFF) << 46; 
+        packed |= ((flag as u8) as u64 & 0x03) << 62; 
+
         packed
     }
 
@@ -92,25 +98,19 @@ impl TranspositionTable {
             score: 0,
             depth: 0,
             flag: HashFlag::EMPTY,
+            age: 0,
         };
 
         if packed == 0 {
             return empty_entry;
         }
 
-        let stored_tag = ((packed >> 40) & 0x3F_FFFF) as u32;
-        let current_tag = ((key >> 42) & 0x3F_FFFF) as u32; 
-
-        if stored_tag != current_tag {
-            return empty_entry;
-        }
-        
         let move_id = packed as u16;
-        let score = ((packed >> 16) & 0xFFFF) as i16;
-        let depth = ((packed >> 32) & 0xFF) as u8 as i8;
-        let flag_val = ((packed >> 62) & 0b11) as u8;
+        let score = (packed >> 16) as i16;
+        let depth = (packed >> 32) as i8;
+        let age = ((packed >> 40) & 0x3F) as u8;
 
-        let flag = match flag_val {
+        let flag = match (packed >> 62) & 0x03 {
             0 => HashFlag::EXACT,
             1 => HashFlag::LOWERBOUND,
             2 => HashFlag::UPPERBOUND,
@@ -123,6 +123,7 @@ impl TranspositionTable {
             score,
             depth,
             flag,
+            age
         };
 
         if entry.score > MATE_THRESHOLD as i16 { 
@@ -158,6 +159,7 @@ impl TranspositionTable {
             score: 0,
             depth: 0,
             flag: HashFlag::EMPTY,
+            age: 0
         }
     }
 
@@ -184,16 +186,29 @@ impl TranspositionTable {
         let packed_new = self.pack_entry(move_id, storage_score as i16, depth, flag, key);
 
         let packed_depth_slot = bucket.depth_preferred.load(Ordering::Relaxed);
+
+        // Unpack the existing entry (matching the updated 2-argument layout)
         let current_depth_entry = self.unpack_entry(packed_depth_slot, key, ply);
+        let is_same_position = current_depth_entry.key == key;
+        
+        // Check if the current entry belongs to an older search generation
+        let is_old_age = current_depth_entry.age != self.age.load(Ordering::Relaxed);
 
         // Replacement Strategy Logic:
-        // Overwrite depth preferred if the slot is empty, if the old entry belongs to an 
-        // older engine search iteration, or if the new search depth is deeper.
-        if current_depth_entry.flag == HashFlag::EMPTY || (depth as i8) >= current_depth_entry.depth {
+        // Overwrite the depth-preferred slot if:
+        // 1. The slot is entirely empty.
+        // 2. The slot contains a different position (hash collision).
+        // 3. The entry is from an older search iteration (outdated age).
+        // 4. The new entry has a deeper or equal search depth.
+        if packed_depth_slot == 0 
+            || !is_same_position 
+            || is_old_age 
+            || (depth as i8) >= current_depth_entry.depth 
+        {
             bucket.depth_preferred.store(packed_new, Ordering::Relaxed);
         } else {
-            // If the depth slot is too high quality to overwrite, put this shallower entry
-            // (like a quiescence search result) into the secondary replacement tier.
+            // If the depth-preferred slot is too high quality to overwrite, 
+            // put it into the fallback always-replace slot.
             bucket.always_replace.store(packed_new, Ordering::Relaxed);
         }
     }
