@@ -1,11 +1,11 @@
 // Retain White / Black Accumulator values across Positions
-#[repr(C, align(64))]
+#[repr(C, align(128))]
 #[derive(Debug, Clone, Copy)]
 pub struct Accumulator {
     pub vals: [i16; 256],
 }
 
-#[repr(C, align(64))]
+#[repr(C, align(128))]
 #[derive(Debug, Clone, Copy)]
 pub struct BoardAccumulators {
     pub white: Accumulator,

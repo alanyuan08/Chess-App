@@ -13,7 +13,7 @@ pip install .
 
 # Build Rust
 cargo clean
-RUSTFLAGS="-C target-cpu=native" maturin develop --release
+RUSTFLAGS="-C target-cpu=native -C split-debuginfo=packed" maturin develop --release
 
 python --version
 
@@ -42,4 +42,9 @@ fi
 python chessApp.py $1
 
 # Rust Flame Graph
-# samply record python chessApp.py $1
+#  samply record python chessApp.py $1
+
+# Profiler
+# sudo open -a Instruments \
+#    --args -t "Core Hardware Events" \
+#     "$(which python3)" chessApp.py "$1"

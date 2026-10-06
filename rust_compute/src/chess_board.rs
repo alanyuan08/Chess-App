@@ -761,17 +761,18 @@ impl ChessBoard {
         let w_king_sq = self.kings[Side::WHITE as usize].trailing_zeros() as u8;
         let b_king_sq = self.kings[Side::BLACK as usize].trailing_zeros() as u8;
 
-        let target_white = &mut self.accumulators[self.ply].white.vals[..256];
-        let target_black = &mut self.accumulators[self.ply].black.vals[..256];
-        let biases = &self.nnue_network.l1_biases[..256];
+        // Force fixed references to our 128-byte aligned blocks
+        let target_white: &mut [i16; 256] = (&mut self.accumulators[self.ply].white.vals).try_into().unwrap();
+        let target_black: &mut [i16; 256] = (&mut self.accumulators[self.ply].black.vals).try_into().unwrap();
+        let biases: &[i32; 256] = (&self.nnue_network.l1_biases).try_into().unwrap();
 
-        // Initialize both sides with biases first
+        // Initialize both sides with biases
         for i in 0..256 {
             target_white[i] = biases[i] as i16;
             target_black[i] = biases[i] as i16;
         }
 
-        // Combine ALL piece bitboards to ensure nothing (especially the Kings!) is missed.
+        // Combine ALL piece bitboards
         let mut pieces_bitboard = (self.pawns[0] | self.pawns[1])
 
             | (self.knights[0] | self.knights[1])
@@ -780,47 +781,95 @@ impl ChessBoard {
             | (self.queens[0] | self.queens[1])
             | (self.kings[0] | self.kings[1]);
 
-        // Create tiny arrays on the stack to hold our pre-calculated weight indices.
-        // 32 slots is plenty since a chess board can never have more than 32 pieces.
         let mut white_indices = [0usize; 32];
         let mut black_indices = [0usize; 32];
         let mut active_piece_count = 0;
 
-        // --- SINGLE PASS: GATHER ALL FEATURE INDICES ---
-        // This eliminates all duplicate mailbox lookups and bitboard scans!
+        // --- SINGLE PASS: GATHER & PREFETCH ---
         while pieces_bitboard != 0 {
             let sq = pieces_bitboard.trailing_zeros() as u8;
             let piece = self.mailbox[sq as usize];
 
-            // Pre-calculate the exact NNUE weight pointer rows for both perspectives
-            white_indices[active_piece_count] = get_feature_index(w_king_sq, piece, sq, false);
-            black_indices[active_piece_count] = get_feature_index(b_king_sq, piece, sq, true);
-            
+            let w_idx = get_feature_index(w_king_sq, piece, sq, false);
+            let b_idx = get_feature_index(b_king_sq, piece, sq, true);
+
+            white_indices[active_piece_count] = w_idx;
+            black_indices[active_piece_count] = b_idx;
+
+            // 💡 HARDWARE PREFETCH HINT via Inline Assembly:
+            // Instructs the Apple Silicon memory controller to pull these specific 
+            // weight rows into the L1 Data cache *before* the accumulation loops begin.
+            unsafe {
+                let w_ptr = &self.nnue_network.l1_weights[w_idx] as *const [i16; 256];
+                let b_ptr = &self.nnue_network.l1_weights[b_idx] as *const [i16; 256];
+
+                // PLDL1KEEP = Prefetch for Load, L1 Cache, Keep (Temporal)
+                std::arch::asm!(
+                    "prfm pldl1keep, [{0}]",
+                    "prfm pldl1keep, [{1}]",
+                    in(reg) w_ptr,
+                    in(reg) b_ptr,
+                    options(readonly, nostack, preserves_flags)
+                );
+            }
+
             active_piece_count += 1;
             pieces_bitboard &= pieces_bitboard - 1;
         }
+        // --- OPTIMIZATION: UNROLL MULTIPLE ACCUMULATIONS INTO REGISTERS ---
+        // Instead of feeding the CPU one row at a time, we accumulate chunks of 4 rows at once.
+        // This keeps the ARM NEON execution pipelines fully saturated, preventing the Map Unit from stalling.
+        
+        // 1. Process White
+        let mut w_chunks = white_indices[..active_piece_count].chunks_exact(4);
+        for chunk in &mut w_chunks {
+            let r0 = &self.nnue_network.l1_weights[chunk[0]];
+            let r1 = &self.nnue_network.l1_weights[chunk[1]];
+            let r2 = &self.nnue_network.l1_weights[chunk[2]];
+            let r3 = &self.nnue_network.l1_weights[chunk[3]];
 
-        // --- LOOP 1: PROCESS WHITE PERSPECTIVE COMPLETELY ---
-        // Perfect auto-vectorization! The CPU fills all registers exclusively with White data.
-        for &w_idx in white_indices.iter().take(active_piece_count) {
-            let w_row = &self.nnue_network.l1_weights[w_idx][..256];
-            
+            for i in 0..256 {
+                target_white[i] = target_white[i]
+                    .wrapping_add(r0[i])
+                    .wrapping_add(r1[i])
+                    .wrapping_add(r2[i])
+                    .wrapping_add(r3[i]);
+            }
+        }
+        // Handle any remaining odd rows
+        for &w_idx in w_chunks.remainder() {
+            let w_row = &self.nnue_network.l1_weights[w_idx];
             for i in 0..256 {
                 target_white[i] = target_white[i].wrapping_add(w_row[i]);
             }
         }
 
-        // --- LOOP 2: PROCESS BLACK PERSPECTIVE COMPLETELY ---
-        // Perfect auto-vectorization! The CPU reuses those same registers exclusively for Black data.
-        for &b_idx in black_indices.iter().take(active_piece_count) {
-            let b_row = &self.nnue_network.l1_weights[b_idx][..256];
-            
+        // 2. Process Black
+        let mut b_chunks = black_indices[..active_piece_count].chunks_exact(4);
+        for chunk in &mut b_chunks {
+            let r0 = &self.nnue_network.l1_weights[chunk[0]];
+            let r1 = &self.nnue_network.l1_weights[chunk[1]];
+            let r2 = &self.nnue_network.l1_weights[chunk[2]];
+            let r3 = &self.nnue_network.l1_weights[chunk[3]];
+
+            for i in 0..256 {
+                target_black[i] = target_black[i]
+                    .wrapping_add(r0[i])
+                    .wrapping_add(r1[i])
+                    .wrapping_add(r2[i])
+                    .wrapping_add(r3[i]);
+            }
+        }
+        // Handle any remaining odd rows
+        for &b_idx in b_chunks.remainder() {
+            let b_row = &self.nnue_network.l1_weights[b_idx];
             for i in 0..256 {
                 target_black[i] = target_black[i].wrapping_add(b_row[i]);
             }
         }
     }
 
+    #[inline(never)]
     pub fn evaluate(&mut self, buffer: &mut NnueInferenceBuffer) -> i32 {
         // --- PERSPECTIVE ROUTING ---
         // Side to move (US) always fills the first 256 inputs.
@@ -902,6 +951,7 @@ impl ChessBoard {
     }
 
     /// Progresses the network forward incrementally during move making
+    #[inline(never)]
     pub fn make_move(
         &mut self, 
         mv: ForwardMove,
@@ -968,6 +1018,7 @@ impl ChessBoard {
         
         let prev_white = &prev_acc.white.vals[..256];
         let prev_black = &prev_acc.black.vals[..256];
+        let biases = &self.nnue_network.l1_biases[..256];
 
         if captured_piece != BoardPiece::NONE {
             let w_cap = get_feature_index(w_king_sq, captured_piece, captured_sq, false);
@@ -976,17 +1027,23 @@ impl ChessBoard {
             let w_cap_row = &self.nnue_network.l1_weights[w_cap][..256];
             let b_cap_row = &self.nnue_network.l1_weights[b_cap][..256];
 
-            // 1. Process White entirely in a clean, isolated memory pipeline
+            // 1. Process White entirely with bias inclusion
             for i in 0..256 {
-                curr_white[i] = prev_white[i]
+                let bias_i16 = biases[i] as i16; // Cast bias to match i16 array
+                let base_white = prev_white[i].wrapping_sub(bias_i16); 
+                curr_white[i] = bias_i16
+                    .wrapping_add(base_white)
                     .wrapping_add(w_add_row[i])
                     .wrapping_sub(w_rem_row[i])
                     .wrapping_sub(w_cap_row[i]);
             }
 
-            // 2. Process Black entirely in a clean, isolated memory pipeline
+            // 2. Process Black entirely with bias inclusion
             for i in 0..256 {
-                curr_black[i] = prev_black[i]
+                let bias_i16 = biases[i] as i16; // Cast bias to match i16 array
+                let base_black = prev_black[i].wrapping_sub(bias_i16);
+                curr_black[i] = bias_i16
+                    .wrapping_add(base_black)
                     .wrapping_add(b_add_row[i])
                     .wrapping_sub(b_rem_row[i])
                     .wrapping_sub(b_cap_row[i]);
@@ -994,14 +1051,20 @@ impl ChessBoard {
         } else {
             // 1. Process White entirely
             for i in 0..256 {
-                curr_white[i] = prev_white[i]
+                let bias_i16 = biases[i] as i16;
+                let base_white = prev_white[i].wrapping_sub(bias_i16);
+                curr_white[i] = bias_i16
+                    .wrapping_add(base_white)
                     .wrapping_add(w_add_row[i])
                     .wrapping_sub(w_rem_row[i]);
             }
 
             // 2. Process Black entirely
             for i in 0..256 {
-                curr_black[i] = prev_black[i]
+                let bias_i16 = biases[i] as i16;
+                let base_black = prev_black[i].wrapping_sub(bias_i16);
+                curr_black[i] = bias_i16
+                    .wrapping_add(base_black)
                     .wrapping_add(b_add_row[i])
                     .wrapping_sub(b_rem_row[i]);
             }

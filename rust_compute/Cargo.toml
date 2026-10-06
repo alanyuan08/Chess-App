@@ -6,6 +6,7 @@ rand = "0.9"
 
 [profile.release]
 debug = true
+split-debuginfo = "packed"
 
 [build]
 # Forces the compiler to auto-vectorize loops into AVX2 / Neon SIMD registers
