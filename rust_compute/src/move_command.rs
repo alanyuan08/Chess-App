@@ -1,38 +1,14 @@
 #[derive(Debug, Clone, Copy)]
-#[repr(C)] // Ensures a predictable layout in memory
+#[repr(C)] // 5 Bytes
 pub struct ForwardMove {
-    pub pv_score: i32,       // 32 bits | Move ordering score
-    pub start_sq: u8,        //  8 bits | 0 to 63
-    pub end_sq: u8,          //  8 bits | 0 to 63
-    pub move_type: MoveFlag, //  8 bits | Enum marked with #[repr(u8)]
+    pub pv_score: i16, // 2 Byte
+    pub start_sq: u8, // 1 Byte
+    pub end_sq: u8, // 1 Byte
+    pub move_type: MoveFlag, // 1 Byte
 }
 
 // Packs the move into a single u16 for the Transposition Table
 impl ForwardMove {
-    // Packs the move into a single u16 for the Transposition Table
-    pub fn pack(&self) -> u16 {
-        (self.start_sq as u16) | ((self.end_sq as u16) << 6) | ((self.move_type as u16) << 12)
-    }
-
-    // Unpacks the u16 back into our 64-bit struct safely with zero overhead
-    pub fn unpack(packed: u16) -> Self {
-        // Extract the 4-bit move type flag (bits 12 to 15)
-        let raw_flag = ((packed >> 12) & 0x0F) as u8;
-        
-        // Map the raw integer back to your exact enum variants safely
-        let move_type = match MoveFlag::try_from(raw_flag) {
-            Ok(flag) => flag,
-            Err(_) => MoveFlag::NULL,
-        };
-
-        Self {
-            start_sq: (packed & 0x3F) as u8,
-            end_sq: ((packed >> 6) & 0x3F) as u8,
-            move_type,
-            pv_score: 0,
-        }
-    }
-
     pub const NULL_MOVE: Self = ForwardMove {
         start_sq: 0,
         end_sq: 0,
@@ -53,15 +29,15 @@ impl PartialEq for ForwardMove {
 impl Eq for ForwardMove {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(C, align(16))]
+#[repr(C)] // 6 Bytes
 pub struct UndoMove {
-    pub start_sq: u8,               // 8 bits | 0 to 63
-    pub end_sq: u8,                 // 8 bits | 0 to 63
-    pub prev_castle_rights: u8,     // 8 bits | Packed bitmask
-    pub prev_en_passant: u8,     // 8 bits | Square index (0-63), or 64 for None
+    pub start_sq: u8, // 1 Byte
+    pub end_sq: u8, // 1 Byte
+    pub prev_castle_rights: u8, // 1 Byte
+    pub prev_en_passant: u8, // 1 Byte
     
-    pub move_type: MoveFlag,        // 8 bits | (Requires #[repr(u8)] on MoveFlag)
-    pub captured_piece: BoardPiece, // 8 bits | (Requires #[repr(u8)] on BoardPiece)
+    pub move_type: MoveFlag, // 1 Byte
+    pub captured_piece: BoardPiece, // 1 Byte
 }
 
 impl UndoMove {
@@ -232,7 +208,7 @@ pub fn is_none(piece: BoardPiece) -> bool {
     matches!(piece, BoardPiece::NONE)
 }
 
-pub fn piece_value(piece_type: BoardPiece) -> i32 {
+pub fn piece_value(piece_type: BoardPiece) -> i16 {
     match piece_type {
         BoardPiece::WPAWN | BoardPiece::BPAWN => {
             100

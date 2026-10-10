@@ -218,7 +218,7 @@ impl SearchWorker {
     // A simple, linear-logarithmic approximation using integer division:
     // R increases slowly as depth and move count grow.
     #[inline]
-    fn get_reduced_depth(&self, depth: i32, moves_tried: i32) -> i32 {
+    fn get_reduced_depth(&self, depth: i8, moves_tried: i8) -> i8 {
         // 1. Safe array bounds clamping
         let d = depth.clamp(0, 63) as usize;
         let m = moves_tried.clamp(0, 63) as usize;
@@ -251,7 +251,7 @@ impl SearchWorker {
     }
 
     // Store Killer Move - No Captures
-    fn store_killer_move(&mut self, new_killer_move: ForwardMove, ply: i32) {
+    fn store_killer_move(&mut self, new_killer_move: ForwardMove, ply: i16) {
         // Convert the incoming ply directly into our safe array index context
         let ply_idx = ply as usize;
 
@@ -272,7 +272,7 @@ impl SearchWorker {
 
     // StockFish NMP Reduction algorithm
     #[inline]
-    fn calculate_nmp_reduction(&self, depth: i32, static_eval: i32, beta: i32) -> i32 {
+    fn calculate_nmp_reduction(&self, depth: i8, static_eval: i16, beta: i16) -> i16 {
         let base_reduction = 3 + (depth / 4);
         
         let eval_bonus = ((static_eval - beta) / 300).clamp(0, 3);
@@ -282,7 +282,7 @@ impl SearchWorker {
 
     // Static Eval
     #[inline]
-    fn static_eval(&mut self) -> i32 {
+    fn static_eval(&mut self) -> i16 {
         self.chess_board.evaluate(&mut self.thread_buffer)
     }
 
@@ -307,7 +307,7 @@ impl SearchWorker {
 
     // Fail-Soft -> Return the first value that breaches alpha - beta -> Not Guaranteed to be best Value
     // Hard Cut-Off -> Once a value causes alpha >= beta, stop the search
-    fn negamax(&mut self, depth: i32, ply: i32, mut alpha: i32, mut beta: i32, 
+    fn negamax(&mut self, depth: i8, ply: i16, mut alpha: i16, mut beta: i16, 
         mut pv_move_hint: ForwardMove, allow_null: bool) -> SearchResult {
 
         // 1. Halt Signal
@@ -339,8 +339,8 @@ impl SearchWorker {
         // 3. Fail-Soft Transposition Table
         let tt_entry = self.transposition_table.probe(hash, ply);
         if tt_entry.flag != HashFlag::EMPTY {
-            let retrieved_score: i32 = tt_entry.score as i32;
-            let retrieved_depth: i32 = tt_entry.depth as i32;
+            let retrieved_score = tt_entry.score;
+            let retrieved_depth = tt_entry.depth;
             
             // Transposition Move > PV Hint
             if tt_entry.move_id != 0 {
@@ -430,7 +430,7 @@ impl SearchWorker {
 
         // 5. Pure Fail-Soft Null Move Pruning
         let mut lmr_eligibility;
-        let mut moves_tried: i32 = 0;
+        let mut moves_tried: i8 = 0;
         if allow_null && !king_in_check && depth >= 3 && 
             self.chess_board.has_major_pieces() && ply > 0 &&
             beta < MATE_THRESHOLD && beta > -MATE_THRESHOLD {
@@ -608,7 +608,7 @@ impl SearchWorker {
 
     // Quiescence Search -> Q-Search only uses Score and was_aborted. 
     // Fail-Soft Framework 
-    fn quiescence_search(&mut self, mut alpha: i32, mut beta: i32, ply: i32) -> SearchResult {        
+    fn quiescence_search(&mut self, mut alpha: i16, mut beta: i16, ply: i16) -> SearchResult {        
         // 1. Halt Signal
         if self.nodes_processed & 0x3FFF == 0 && self.stop_signal.load(Ordering::Relaxed) {
             return SearchResult { 
@@ -632,21 +632,18 @@ impl SearchWorker {
 
         let hash = self.chess_board.zobrist_hash();
         let mut pv_move_hint = ForwardMove::NULL_MOVE;
-        const Q_DEPTH_MARKER: i32 = -1;
+        const Q_DEPTH_MARKER: i8 = -1;
         let original_alpha = alpha;
         let original_beta = beta;
 
         // 3. Tranposition Table
         let tt_entry = self.transposition_table.probe(hash, ply);
         if tt_entry.flag != HashFlag::EMPTY {
-            let retrieved_score: i32 = tt_entry.score as i32;
-            let retrieved_depth: i32 = tt_entry.depth as i32;
+            let retrieved_score = tt_entry.score;
+            let retrieved_depth = tt_entry.depth;
             
-            if tt_entry.move_id != 0 {
-                let mut tt_move = ForwardMove::unpack(tt_entry.move_id);
-                tt_move.pv_score = -2_000_000;
-                pv_move_hint = tt_move;
-            };
+            // Set PV Hint
+            pv_move_hint = TTForwardMove::unpackForwardMove(tt_entry.tt_forward_move);
 
             if retrieved_depth >= Q_DEPTH_MARKER {
                 // EXACT: The true minimax value was found; return it immediately.

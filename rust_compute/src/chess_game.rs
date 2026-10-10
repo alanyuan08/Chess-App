@@ -17,8 +17,8 @@ use crate::nnue_network::*;
 use crate::search_command::*;
 use crate::move_command::*;
 
-pub const PV_DEPTH: i32 = 18;
-pub const MAX_DEPTH: i32 = 22;
+pub const PV_DEPTH: i16 = 18;
+pub const MAX_DEPTH: i16 = 22;
 
 // When a thread finishes, if it exceeds the time, it will send the 
 // termination signal to the other threads.
@@ -26,10 +26,10 @@ pub const MAX_DEPTH: i32 = 22;
 // The other threads the single every 2048 executions
 pub const SEARCH_TIME_LIMIT: u64 = 15;
 
-pub const INFINITY: i32 = 32000;
-pub const MATE_VALUE: i32 = 30000;
+pub const INFINITY: i16 = 32000;
+pub const MATE_VALUE: i16 = 30000;
 
-pub const MATE_THRESHOLD: i32 = MATE_VALUE - (MAX_DEPTH * 2);
+pub const MATE_THRESHOLD: i16 = MATE_VALUE - (MAX_DEPTH * 2);
 
 // This is tuned for the Mac M4 Pro Chip
 // Thread Count is set to the number of Performance Cores to avoid 

@@ -275,7 +275,7 @@ impl ChessBoard {
     pub fn generate_moves(&mut self, 
         gen_moves: &mut ArrayVec::<ForwardMove, 256>, 
         pv_move_hint: ForwardMove,
-        ply_idx: i32,
+        ply_idx: i16,
         killer_move_table: &[[ForwardMove; 2]; 128],
         only_tactical: bool, 
     ) {        
@@ -821,7 +821,7 @@ impl ChessBoard {
         }
     }
 
-    pub fn evaluate(&mut self, buffer: &mut NnueInferenceBuffer) -> i32 {
+    pub fn evaluate(&mut self, buffer: &mut NnueInferenceBuffer) -> i16 {
         // --- PERSPECTIVE ROUTING ---
         // Side to move (US) always fills the first 256 inputs.
         // Opponent (THEM) always fills the second 256 inputs.
@@ -898,7 +898,7 @@ impl ChessBoard {
         let internal_pawns_scaled = final_sum >> 5;
 
         // Shift by >> 7 remove remaining scale
-        (internal_pawns_scaled * 100) >> 7
+        ((internal_pawns_scaled * 100) >> 7) as i16
     }
 
     /// Progresses the network forward incrementally during move making
