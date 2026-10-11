@@ -1,7 +1,7 @@
 use std::sync::LazyLock;
 
 // Compute the Late Move Reduction Table
-pub static LMR_TABLE: LazyLock<[[i32; 64]; 64]> = LazyLock::new(|| {
+pub static LMR_TABLE: LazyLock<[[i8; 64]; 64]> = LazyLock::new(|| {
     let mut table = [[0; 64]; 64];
     
     for (depth, row) in table.iter_mut().enumerate() {
@@ -13,7 +13,7 @@ pub static LMR_TABLE: LazyLock<[[i32; 64]; 64]> = LazyLock::new(|| {
             }
                          
             let r = (depth as f64).ln() * (moves as f64).ln() / 2.3;
-            *cell = r.floor() as i32;
+            *cell = r.floor() as i8;
         }
     }
          

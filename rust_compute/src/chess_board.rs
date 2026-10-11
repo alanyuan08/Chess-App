@@ -313,7 +313,7 @@ impl ChessBoard {
 
             for m in gen_moves.iter_mut() {
                 if has_valid_pv && *m == pv_move_hint {
-                    m.pv_score = 10_000_000;
+                    m.pv_score = 32_000;
                 } else if has_k0 && *m == k0 {
                     m.pv_score = 500;
                 } else if has_k1 && *m == k1 {

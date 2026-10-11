@@ -91,7 +91,7 @@ pub fn white_pawn_moves(
             start_sq: target - 8, 
             end_sq: target, 
             move_type: MoveFlag::PROMOTIONQUEEN, 
-            pv_score: 90_000 
+            pv_score: 30_000 
         });
 
         moves.push(ForwardMove { 
@@ -164,7 +164,7 @@ pub fn white_pawn_moves(
             start_sq: target - 7, 
             end_sq: target, 
             move_type: MoveFlag::PROMOTIONQUEEN, 
-            pv_score: 95_000 
+            pv_score: 30_000 
         });
 
         // Under-promotions: Pushed past 1000 so they are evaluated after quiet moves
@@ -196,7 +196,7 @@ pub fn white_pawn_moves(
             start_sq: target - 9, 
             end_sq: target, 
             move_type: MoveFlag::PROMOTIONQUEEN, 
-            pv_score: 95_000 
+            pv_score: 30_000 
         });
 
         // Under-promotions: Pushed past 1000 so they are evaluated after quiet moves
@@ -312,7 +312,7 @@ pub fn black_pawn_moves(
             start_sq: target + 8, 
             end_sq: target, 
             move_type: MoveFlag::PROMOTIONQUEEN, 
-            pv_score: 90_000 
+            pv_score: 30_000 
         });
 
         // 2. Under-promotions: Pushed past 1000 so they are evaluated after quiet moves
@@ -386,7 +386,7 @@ pub fn black_pawn_moves(
             start_sq: target + 9, 
             end_sq: target, 
             move_type: MoveFlag::PROMOTIONQUEEN, 
-            pv_score: 95_000 
+            pv_score: 30_000 
         });
 
         // 2. Under-promotions: Pushed past 1000 so they are evaluated after quiet moves
@@ -419,7 +419,7 @@ pub fn black_pawn_moves(
             start_sq: target + 7, 
             end_sq: target, 
             move_type: MoveFlag::PROMOTIONQUEEN, 
-            pv_score: 95_000 
+            pv_score: 30_000 
         });
 
         // 2. Under-promotions: Pushed past 1000 so they are evaluated after quiet moves

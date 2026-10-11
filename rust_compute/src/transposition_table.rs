@@ -1,3 +1,5 @@
+use std::cell::UnsafeCell;
+
 use crate::move_command::*;
 use crate::chess_game::*;
 
@@ -17,16 +19,16 @@ impl TTForwardMove {
     };
 
     #[inline(always)]
-    pub const fn packForwardMove(forwardMove: ForwardMove) -> Self {
+    pub const fn pack_forward_move(forward_move: ForwardMove) -> Self {
         Self {
-            start_sq: forwardMove.start_sq,
-            end_sq: forwardMove.end_sq,
-            move_type: forwardMove.move_type,
+            start_sq: forward_move.start_sq,
+            end_sq: forward_move.end_sq,
+            move_type: forward_move.move_type,
         }
     }
 
     #[inline(always)]
-    pub const fn unpackForwardMove(self) -> ForwardMove {
+    pub const fn unpack_forward_move(self) -> ForwardMove {
         ForwardMove {
             pv_score: 0,
             start_sq: self.start_sq,
@@ -51,7 +53,7 @@ pub enum HashFlag {
 #[repr(C, align(16))]
 pub struct TTEntry {
     pub key: u64,       // 8 bytes
-    pub tt_forward_move: TTForwardMove // 3 bytes
+    pub tt_forward_move: TTForwardMove, // 3 bytes
     pub score: i16,     // 2 bytes
     pub depth: i8,      // 1 byte
     pub flag: HashFlag,  // 1 byte
@@ -79,14 +81,15 @@ impl Default for TTEntry {
 
 // Condon-Thompson Bucket using 100% stable AtomicU64 primitives.
 // current implement
-#[derive(Clone)]
 #[repr(C, align(128))]
 pub struct TtBucket {
     // Slots 0 & 4: Depth Preferred
     // Slots 5 through 7: Always Replace
-    pub slots: [TTEntry; 8],
+    pub slots: UnsafeCell<[TTEntry; 8]>,
 
 }
+
+unsafe impl Sync for TtBucket {}
 
 // Condon-Thompson transposition table using packed 128-bit buckets
 pub struct TranspositionTable {
@@ -108,7 +111,12 @@ impl TranspositionTable {
         }
         final_count = std::cmp::max(1, final_count);
 
-        let buckets = vec![TtBucket { slots: [TTEntry::empty(); 8] }; final_count];
+        let mut buckets = Vec::with_capacity(final_count);
+        for _ in 0..final_count {
+            buckets.push(TtBucket {
+                slots: UnsafeCell::new([TTEntry::empty(); 8]),
+            });
+        }
 
         Self {
             buckets,
@@ -121,9 +129,11 @@ impl TranspositionTable {
         let index = (key as usize) & self.mask;
         let bucket = &self.buckets[index];
         
+        let slots = unsafe { &*bucket.slots.get() };
+
         // Scanning slots across the 128-byte cache line block.
         for i in 0..8 {
-            let entry = bucket.slots[i];
+            let entry = slots[i];
             
             if entry.key == key && entry.flag != HashFlag::EMPTY {
                 let mut returned_entry = entry;
@@ -143,13 +153,13 @@ impl TranspositionTable {
     }
 
     #[inline(always)]
-    pub fn store(&mut self, key: u64, score: i16, ply: i16, 
+    pub fn store(&self, key: u64, score: i16, ply: i16, 
         forward_move: ForwardMove, depth: i8, flag: HashFlag
     ) {
         let index = (key as usize) & self.mask;
-        let bucket = &mut self.buckets[index];
+        let bucket = &self.buckets[index];
 
-        let tt_forward_move = TTForwardMove::packForwardMove(forward_move);
+        let tt_forward_move = TTForwardMove::pack_forward_move(forward_move);
 
         let mut storage_score = score;
         if storage_score >= MATE_THRESHOLD {
@@ -160,39 +170,42 @@ impl TranspositionTable {
 
         let incoming_depth = depth;
 
-        // =========================================================================
-        // PASS 1: Exact Key Match Overwrite Check
-        // =========================================================================
-        for i in 0..8 {
-            let slot = &mut bucket.slots[i];
-            if slot.key == key {
-                // Overwrite existing data if the new search is as deep or deeper
-                if slot.flag == HashFlag::EMPTY || incoming_depth >= slot.depth {
-                    slot.tt_forward_move = tt_forward_move;
-                    slot.score = storage_score;
-                    slot.depth = incoming_depth;
-                    slot.flag = flag;
+        unsafe {
+            let slots = &mut *bucket.slots.get();
+
+            // =========================================================================
+            // PASS 1: Exact Key Match Overwrite Check
+            // =========================================================================
+            for i in 0..8 {
+                let slot = &mut slots[i];
+                if slot.key == key {
+                    if slot.flag == HashFlag::EMPTY || incoming_depth >= slot.depth {
+                        slot.tt_forward_move = tt_forward_move;
+                        slot.score = storage_score;
+                        slot.depth = incoming_depth;
+                        slot.flag = flag;
+                    }
+                    return;
                 }
-                return;
             }
-        }
 
-        // =========================================================================
-        // PASS 2: Depth-Preferred Protection (Slots 0 and 1)
-        // =========================================================================
-        for i in 0..2 {
-            let slot = &mut bucket.slots[i];
-            if slot.flag == HashFlag::EMPTY || incoming_depth >= slot.depth {
-                *slot = TTEntry { key, tt_forward_move, score: storage_score, depth: incoming_depth, flag };
-                return;
+            // =========================================================================
+            // PASS 2: Depth-Preferred Protection (Slots 0 and 1)
+            // =========================================================================
+            for i in 0..2 {
+                let slot = &mut slots[i];
+                if slot.flag == HashFlag::EMPTY || incoming_depth >= slot.depth {
+                    *slot = TTEntry { key, tt_forward_move, score: storage_score, depth: incoming_depth, flag };
+                    return;
+                }
             }
-        }
 
-        // =========================================================================
-        // PASS 3: Always-Replace Churn Fallback (Slots 2 through 7)
-        // =========================================================================
-        // We map the remaining 6 slots. key % 6 yields 0..5, which maps perfectly to indices 2..7.
-        let replace_index = 2 + (key % 6) as usize; 
-        bucket.slots[replace_index] = TTEntry { key, tt_forward_move, score: storage_score, depth: incoming_depth, flag };
+            // =========================================================================
+            // PASS 3: Always-Replace Churn Fallback (Slots 2 through 7)
+            // =========================================================================
+            // Map remaining 6 slots. key % 6 yields 0..5, indexing perfectly into 2..7.
+            let replace_index = 2 + (key % 6) as usize; 
+            slots[replace_index] = TTEntry { key, tt_forward_move, score: storage_score, depth: incoming_depth, flag };
+        }
     }
 }

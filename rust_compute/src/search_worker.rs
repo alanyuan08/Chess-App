@@ -272,12 +272,12 @@ impl SearchWorker {
 
     // StockFish NMP Reduction algorithm
     #[inline]
-    fn calculate_nmp_reduction(&self, depth: i8, static_eval: i16, beta: i16) -> i16 {
+    fn calculate_nmp_reduction(&self, depth: i8, static_eval: i16, beta: i16) -> i8 {
         let base_reduction = 3 + (depth / 4);
         
         let eval_bonus = ((static_eval - beta) / 300).clamp(0, 3);
         
-        base_reduction + eval_bonus
+        base_reduction + (eval_bonus as i8)
     }
 
     // Static Eval
@@ -343,11 +343,7 @@ impl SearchWorker {
             let retrieved_depth = tt_entry.depth;
             
             // Transposition Move > PV Hint
-            if tt_entry.move_id != 0 {
-                let mut tt_move = ForwardMove::unpack(tt_entry.move_id);
-                tt_move.pv_score = -2_000_000;
-                pv_move_hint = tt_move;
-            };
+            pv_move_hint = TTForwardMove::unpack_forward_move(tt_entry.tt_forward_move);
 
             if retrieved_depth >= depth {
                 // EXACT: The true minimax value was found; return it immediately.
@@ -366,7 +362,7 @@ impl SearchWorker {
                     // Fail-Soft Cutoff
                     if alpha >= beta {
                         return SearchResult {
-                            score: alpha,
+                            score: retrieved_score,
                             best_move: pv_move_hint,
                             was_aborted: false,
                         };
@@ -379,7 +375,7 @@ impl SearchWorker {
                     // Fail-Soft Cutoff
                     if alpha >= beta {
                         return SearchResult {
-                            score: beta,
+                            score: retrieved_score,
                             best_move: pv_move_hint,
                             was_aborted: false,
                         };
@@ -403,7 +399,7 @@ impl SearchWorker {
             
             // Dynamic margin: base linear scaling + error buffer to protect against network noise
             let rfp_margin = (50 * depth) + net_error_buffer;
-            let computed_val = static_eval - rfp_margin;
+            let computed_val = static_eval - (rfp_margin as i16);
             
             if computed_val >= beta {
                 // Guard condition: Verify that storing computed_val does not inject false bounds
@@ -642,8 +638,7 @@ impl SearchWorker {
             let retrieved_score = tt_entry.score;
             let retrieved_depth = tt_entry.depth;
             
-            // Set PV Hint
-            pv_move_hint = TTForwardMove::unpackForwardMove(tt_entry.tt_forward_move);
+            pv_move_hint = TTForwardMove::unpack_forward_move(tt_entry.tt_forward_move);
 
             if retrieved_depth >= Q_DEPTH_MARKER {
                 // EXACT: The true minimax value was found; return it immediately.
@@ -662,7 +657,7 @@ impl SearchWorker {
                     // Fail-Soft Cutoff
                     if alpha >= beta {
                         return SearchResult {
-                            score: alpha,
+                            score: retrieved_score,
                             best_move: pv_move_hint,
                             was_aborted: false,
                         };
@@ -675,7 +670,7 @@ impl SearchWorker {
                     // Fail-Soft Cutoff
                     if alpha >= beta {
                         return SearchResult {
-                            score: beta,
+                            score: retrieved_score,
                             best_move: pv_move_hint,
                             was_aborted: false,
                         };
