@@ -36,6 +36,10 @@ impl TTForwardMove {
             move_type: self.move_type,
         }
     }
+    #[inline(always)]
+    pub const fn is_null(self) -> bool {
+        self.start_sq == 0 && self.end_sq == 0
+    }
 }
 
 // TT Entry Flag definitions
@@ -139,9 +143,9 @@ impl TranspositionTable {
                 let mut returned_entry = entry;
 
                 // --- Scale Mate Scores back to local search ply ---
-                if returned_entry.score > MATE_THRESHOLD { 
+                if returned_entry.score >= MATE_THRESHOLD { 
                     returned_entry.score -= ply; 
-                } else if returned_entry.score < -MATE_THRESHOLD { 
+                } else if returned_entry.score <= -MATE_THRESHOLD { 
                     returned_entry.score += ply; 
                 }
                 
