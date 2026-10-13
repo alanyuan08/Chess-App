@@ -43,18 +43,6 @@ pub struct TTEntry {
     pub age: i8                         // 1 byte
 }
 
-// Probe Result
-#[derive(Debug)]
-pub struct ProbeResult {
-    pub score: i16,
-    pub flag: HashFlag,
-    pub depth: u8,
-    pub alpha: i16,
-    pub beta: i16,
-    pub pv_move: TTForwardMove,
-    pub is_cutoff: bool,
-}
-
 // The TTEntry needs to be restructued as a AtomicU128 such that it can be used 
 // inside load(Ordering::Relaxed) / store(packed_new, Ordering::Relaxed) without Locks 
 impl TTEntry {
@@ -156,15 +144,11 @@ impl TranspositionTable {
         }
     }
 
+    // Transposition Table Entries are unique for every key 
     #[inline(always)]
-    pub fn probe(&self, key: u64, ply: i16, depth: u8, orig_alpha: i16, orig_beta: i16) -> ProbeResult {
+     pub fn probe(&self, key: u64, ply: i16) -> TTEntry {
         let bucket_idx = (key as usize) & self.mask;
         let bucket = &self.buckets[bucket_idx];
-
-        let mut current_alpha = orig_alpha;
-        let mut current_beta = orig_beta;
-        
-        let mut deepest_fallback = TTEntry::empty();
 
         for i in 0..SLOTS_PER_BUCKET {
             let bits = bucket.slots[i].load(Ordering::Relaxed);
@@ -172,219 +156,102 @@ impl TranspositionTable {
                 continue;
             }
 
-            let entry = TTEntry::unpack(bits);
-            
+            let entry = TTEntry::unpack(bits);           
             if entry.key == key {
                 let mut returned_entry = entry;
 
-                // --- Scale Mate Scores back to local search ply ---
-                if returned_entry.score >= MATE_THRESHOLD { 
-                    returned_entry.score -= ply; 
-                } else if returned_entry.score <= -MATE_THRESHOLD { 
-                    returned_entry.score += ply; 
-                }
+                // Assume Ply = 0 is assigned MATE_THRESHOLD
+                let is_pos_mate = returned_entry.score >= MATE_THRESHOLD;
+                let is_neg_mate = returned_entry.score <= -MATE_THRESHOLD;
+                returned_entry.score = returned_entry.score - (is_pos_mate * ply) + (is_neg_mate * ply);
                 
-                // --- 1. Pure Exact Cutoff Check ---
-                if returned_entry.depth >= depth && returned_entry.flag == HashFlag::Exact {
-                    return ProbeResult {
-                        score: returned_entry.score,
-                        flag: HashFlag::Exact,
-                        depth: returned_entry.depth,
-                        alpha: current_alpha,
-                        beta: current_beta,
-                        pv_move: returned_entry.tt_forward_move,
-                        is_cutoff: true,
-                    };
-                }
-
-                // --- 2. Dynamic Window Squeezing ---
-                if returned_entry.depth >= depth {
-                    match returned_entry.flag {
-                        HashFlag::Beta => {
-                            // Lower bound found. Attempt to raise alpha.
-                            if returned_entry.score > current_alpha {
-                                current_alpha = returned_entry.score;
-                            }
-                        }
-                        HashFlag::Alpha => {
-                            // Upper bound found. Attempt to lower beta.
-                            if returned_entry.score < current_beta {
-                                current_beta = returned_entry.score;
-                            }
-                        }
-                        _ => {}
-                    }
-
-                    // Alpha-Beta Cut-Off
-                    if current_alpha >= current_beta {
-                        return ProbeResult {
-                            score: returned_entry.score,
-                            flag: returned_entry.flag,
-                            depth: returned_entry.depth,
-                            alpha: current_alpha,
-                            beta: current_beta,
-                            pv_move: returned_entry.tt_forward_move,
-                            is_cutoff: true,
-                        };
-                    }
-                }
-
-                // --- 3. Deepest Tracking Fallback ---
-                if returned_entry.depth > deepest_fallback.depth {
-                    deepest_fallback = returned_entry;
-                }
+                return returned_entry;
             }
         }
         
-        // --- 4. Open Window Pass-through ---
-        ProbeResult {
-            score: deepest_fallback.score,
-            flag: deepest_fallback.flag,
-            depth: deepest_fallback.depth,
-            alpha: current_alpha,
-            beta: current_beta,
-            pv_move: deepest_fallback.tt_forward_move,
-            is_cutoff: false,
-        }
+        TTEntry::empty()
     }
 
+    // Key should be unique and is incremented once per move 
+    // Always replace older entries -> Starting position with 30+ positions will not be encountered again
+    // Depth-Preferred -> Replace if it defeats the deepest position
+    // Always-Replace -> Randomly replace an entry 
     #[inline(always)]
-    pub fn store(&self, hash: u64, depth: u8, flag: HashFlag, score: i16, mv: TTForwardMove, age: i8) {
+    pub fn store(&self, 
+        hash: u64, score: i16, 
+        ply: i16, depth: i8, age: i8,
+        mv: TTForwardMove, flag: HashFlag, 
+    ) {
         let bucket_idx = (hash as usize) & self.mask;
         let bucket = &self.buckets[bucket_idx];
-        
-        // Split exactly 50/50:
         let midpoint = SLOTS_PER_BUCKET / 2;
 
-        let new_entry = TTEntry {
-            key: hash,
-            tt_forward_move: mv,
-            score,
-            depth,
-            flag,
-            age,
-        };
+        // Assume Ply = 0 is assigned MATE_THRESHOLD
+        let is_pos_mate = score >= MATE_THRESHOLD;
+        let is_neg_mate = score <= -MATE_THRESHOLD;
+        let adjusted_score = score + (is_pos_mate * ply) - (is_neg_mate * ply);
+
+        let new_entry = TTEntry { key: hash, tt_forward_move: mv, score: adjusted_score, depth, flag, age };
         let packed_new = new_entry.pack();
 
-        // --- PHASE 1: SCAN ALL 8 SLOTS FOR AN EXACT HASH MATCH FIRST ---
-        // Guarantees key uniqueness across both tiers for fast probe early-exits.
+        // --- PHASE 1: IF HASH EXISTS, REPLACE THAT ITEM ---
+        // Enforces the rule that all keys across the bucket must be completely unique.
         for i in 0..SLOTS_PER_BUCKET {
             let bits = bucket.slots[i].load(Ordering::Relaxed);
             if bits == 0 { continue; }
 
             let slot = TTEntry::unpack(bits);
-            
             if slot.key == hash {
-                // Determine entry strength criteria based on flag bounds and depth
-                let incoming_has_stronger_flag = flag == HashFlag::Exact && slot.flag != HashFlag::Exact;
-                let flags_are_equivalent = flag == slot.flag || (flag != HashFlag::Exact && slot.flag != HashFlag::Exact);
+                let is_stale = slot.age != age;
+                let is_depth_preferred = i < midpoint;
+                let meets_depth = depth >= slot.depth;
                 
-                let incoming_is_stronger = incoming_has_stronger_flag || (flags_are_equivalent && depth >= slot.depth);
-
-                if i >= midpoint {
-                    // --- Tier 2 (Always-Replace Section) Overwrite Rule ---
-                    // Replace ONLY if the new cutoff representation is structurally stronger
-                    if incoming_is_stronger {
-                        bucket.slots[i].store(packed_new, Ordering::Relaxed);
-                    }
-                    return;
-                }
-
-                // --- Tier 1 (Depth-Preferred Section) Matching Path ---
-                if incoming_is_stronger {
-                    // Current entry is better or equal, overwrite in-place in Tier 1
-                    bucket.slots[i].store(packed_new, Ordering::Relaxed);
-                    return;
-                }
-
-                // Demotion Rule: The incoming entry is weaker than the existing Tier 1 entry. 
-                // We update Tier 1 with the fresh entry and push the deep entry down to Tier 2.
-                let mut worst_tier2_idx = midpoint;
-                let mut oldest_age_diff = -1;
-                let mut shallowest_t2_depth = u8::MAX;
-
-                for j in midpoint..SLOTS_PER_BUCKET {
-                    let t2_bits = bucket.slots[j].load(Ordering::Relaxed);
-                    if t2_bits == 0 {
-                        worst_tier2_idx = j;
-                        break;
-                    }
-                    
-                    let t2_slot = TTEntry::unpack(t2_bits);
-                    let age_difference = (age as i16 - t2_slot.age as i16).abs();
-                    
-                    // Prioritize the oldest age difference. 
-                    // If age is equal, evict the one that has the shallower search depth.
-                    if age_difference > oldest_age_diff {
-                        oldest_age_diff = age_difference;
-                        shallowest_t2_depth = t2_slot.depth;
-                        worst_tier2_idx = j;
-                    } else if age_difference == oldest_age_diff && t2_slot.depth < shallowest_t2_depth {
-                        shallowest_t2_depth = t2_slot.depth;
-                        worst_tier2_idx = j;
-                    }
-                }
-
-                // Atomically swap the nodes
-                bucket.slots[worst_tier2_idx].store(bits, Ordering::Relaxed); // Demote deep entry down
-                bucket.slots[i].store(packed_new, Ordering::Relaxed);        // Place fresh entry in Tier 1
+                let should_replace = is_stale | !is_depth_preferred | (is_depth_preferred & meets_depth);
+                let final_bits = if should_replace { packed_new } else { bits };
+                bucket.slots[i].store(final_bits, Ordering::Relaxed);
+        
                 return;
             }
         }
 
-        // --- PHASE 2: NO MATCHING KEY FOUND (NEW NODE INSERTION) ---
+        // --- PHASE 2: NEW HASH INSERTION ---
         
-        // --- PART A: TIER 1 (DEPTH-PREFERRED / AGE FRESHNESS) ---
-        let mut replace_idx = 0;
-        let mut lowest_priority = i32::MAX;
+        // --- STEP A: Depth First Search ---
+        // Replace Stale then Shallow-Depth
+        let mut best_tier1_idx = 0;
+        let mut lowest_priority = MAX_DEPTH * 2;
 
         for i in 0..midpoint {
             let bits = bucket.slots[i].load(Ordering::Relaxed);
             if bits == 0 {
-                // Found an empty slot, claim it instantly
                 bucket.slots[i].store(packed_new, Ordering::Relaxed);
                 return;
             }
 
             let slot = TTEntry::unpack(bits);
-            
-            // Age eviction priority rules: If the entry belongs to a dead search turn, 
-            // set its score to 0 to make it the prime target for replacement.
             let is_stale = slot.age != age;
-            let slot_priority = if is_stale { 0 } else { slot.depth as i32 };
-
+            
+            // Instant eviction if stale 
+            if is_stale {
+                bucket.slots[i].store(packed_new, Ordering::Relaxed);
+                return;
+            }
             if slot_priority < lowest_priority {
                 lowest_priority = slot_priority;
-                replace_idx = i;
+                best_tier1_idx = i;
             }
         }
 
-        // Claim the slot if our new node is deeper, or if the target slot is stale (priority 0)
-        if (depth as i32) > lowest_priority || lowest_priority == 0 {
-            bucket.slots[replace_idx].store(packed_new, Ordering::Relaxed);
+        if depth > lowest_priority {
+            bucket.slots[best_tier1_idx].store(packed_new, Ordering::Relaxed);
             return;
         }
 
-        // --- PART B: TIER 2 (ALWAYS-REPLACE WITH AGE EVICTION) ---
-        let mut worst_tier2_idx = midpoint;
-        let mut oldest_age_diff = -1;
+        // --- STEP B: Always Replace ---
+        // Always Replace - Traffic is high and ovewrites are common.
+        let random_offset = (hash >> 12) as usize % midpoint;
+        let target_tier2_idx = midpoint + random_offset; 
 
-        for i in midpoint..SLOTS_PER_BUCKET {
-            let bits = bucket.slots[i].load(Ordering::Relaxed);
-            if bits == 0 {
-                bucket.slots[i].store(packed_new, Ordering::Relaxed);
-                return;
-            }
-
-            let slot = TTEntry::unpack(bits);
-            let age_difference = (age as i16 - slot.age as i16).abs();
-            if age_difference > oldest_age_diff {
-                oldest_age_diff = age_difference;
-                worst_tier2_idx = i;
-            }
-        }
-
-        // Replace the oldest, most decayed entry in Tier 2
-        bucket.slots[worst_tier2_idx].store(packed_new, Ordering::Relaxed);
+        bucket.slots[target_tier2_idx].store(packed_new, Ordering::Relaxed);
     }
 }

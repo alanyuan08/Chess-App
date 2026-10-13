@@ -85,7 +85,8 @@ impl NnueNetwork {
 
 /// The runtime container holding the current calculation buffers.
 /// Allocated once per search thread to prevent runtime overhead.
-#[repr(C, align(128))]
+#[cfg_attr(target_arch = "aarch64", repr(C, align(128)))]
+#[cfg_attr(not(target_arch = "aarch64"), repr(C, align(64)))]
 #[derive(Clone, Debug)]
 pub struct NnueInferenceBuffer {
     // 4 * 128 -> 512
@@ -93,6 +94,8 @@ pub struct NnueInferenceBuffer {
     // 32 + 32 + 64 pading -> 128
     pub l3_inputs: [i8; 32],
     pub l4_inputs: [i8; 32],
+
+    #[cfg(target_arch = "aarch64")] 
      _padding: [u8; 64],
 }
 

@@ -563,7 +563,8 @@ impl SearchWorker {
             };
 
             self.transposition_table.store(
-                hash, terminal_score, ply, ForwardMove::NULL_MOVE, depth, HashFlag::EXACT
+                hash, terminal_score, ply, 
+                ForwardMove::NULL_MOVE, depth, HashFlag::EXACT
             );
 
             return SearchResult { 
