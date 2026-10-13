@@ -6,8 +6,8 @@ use crate::rook_mask::*;
 use crate::queen_mask::*;
 use crate::move_command::*;
 use crate::zobrist_hash::*;
-use crate::board_accumlator::*;
 use crate::nnue_network::*;
+use crate::board_accumlator::*;
 use arrayvec::ArrayVec;
 
 // 0 -> White / 1 -> Black
@@ -22,20 +22,14 @@ pub struct ChessBoard {
     
     pub all_pieces: [u64; 2],
     pub occupied: u64,
-    
     pub mailbox: [BoardPiece; 64],
 
     castling_rights: u8,
     en_passant: u8,
     active_player: Side,
 
-    // Zobrist Hash
     zobrist_hash: u64,
-
-    // --- INTEGRATED NNUE ACCUMULATOR BASE ---
-    accumulators: Box<[BoardAccumulators; 256]>, 
     ply: usize,
-
     nnue_network: &'static NnueNetwork,
 }
 
@@ -68,9 +62,7 @@ impl ChessBoard {
             mailbox: [BoardPiece::NONE; 64],
             zobrist_hash: 0,
 
-            accumulators: Box::new([BoardAccumulators::default(); 256]),
             ply: 0,
-
             nnue_network,
         }
     }
@@ -761,9 +753,12 @@ impl ChessBoard {
         let w_king_sq = self.kings[Side::WHITE as usize].trailing_zeros() as u8;
         let b_king_sq = self.kings[Side::BLACK as usize].trailing_zeros() as u8;
 
-        let target_white = &mut self.accumulators[self.ply].white.vals[..256];
-        let target_black = &mut self.accumulators[self.ply].black.vals[..256];
-        let biases = &self.nnue_network.l1_biases[..256];
+        // Use .0 if you adopted the Align128 wrapper; remove .0 if using Option A (manual padding)
+        let biases = &self.nnue_network.l1_biases;
+        
+        // Grab fixed-size 256-byte arrays to completely eliminate runtime bounds checks
+        let target_white: &mut [i16; 256] = (&mut self.accumulators[self.ply].white.vals[..256]).try_into().unwrap();
+        let target_black: &mut [i16; 256] = (&mut self.accumulators[self.ply].black.vals[..256]).try_into().unwrap();
 
         // Initialize both sides with biases first
         for i in 0..256 {
@@ -771,7 +766,7 @@ impl ChessBoard {
             target_black[i] = biases[i] as i16;
         }
 
-        // Combine ALL piece bitboards to ensure nothing (especially the Kings!) is missed.
+        // Combine ALL piece bitboards
         let mut pieces_bitboard = (self.pawns[0] | self.pawns[1])
 
             | (self.knights[0] | self.knights[1])
@@ -780,19 +775,15 @@ impl ChessBoard {
             | (self.queens[0] | self.queens[1])
             | (self.kings[0] | self.kings[1]);
 
-        // Create tiny arrays on the stack to hold our pre-calculated weight indices.
-        // 32 slots is plenty since a chess board can never have more than 32 pieces.
         let mut white_indices = [0usize; 32];
         let mut black_indices = [0usize; 32];
         let mut active_piece_count = 0;
 
         // --- SINGLE PASS: GATHER ALL FEATURE INDICES ---
-        // This eliminates all duplicate mailbox lookups and bitboard scans!
         while pieces_bitboard != 0 {
             let sq = pieces_bitboard.trailing_zeros() as u8;
             let piece = self.mailbox[sq as usize];
 
-            // Pre-calculate the exact NNUE weight pointer rows for both perspectives
             white_indices[active_piece_count] = get_feature_index(w_king_sq, piece, sq, false);
             black_indices[active_piece_count] = get_feature_index(b_king_sq, piece, sq, true);
             
@@ -801,19 +792,20 @@ impl ChessBoard {
         }
 
         // --- LOOP 1: PROCESS WHITE PERSPECTIVE COMPLETELY ---
-        // Perfect auto-vectorization! The CPU fills all registers exclusively with White data.
         for &w_idx in white_indices.iter().take(active_piece_count) {
-            let w_row = &self.nnue_network.l1_weights[w_idx][..256];
+            // Use .0 if you adopted the Align128 wrapper; remove .0 if using Option A (manual padding)
+            let w_row: &[i16; 256] = (&self.nnue_network.l1_weights.0[w_idx][..256]).try_into().unwrap();
             
+            // Exact loop boundary + no branching = aggressive AVX auto-vectorization
             for i in 0..256 {
                 target_white[i] = target_white[i].wrapping_add(w_row[i]);
             }
         }
 
         // --- LOOP 2: PROCESS BLACK PERSPECTIVE COMPLETELY ---
-        // Perfect auto-vectorization! The CPU reuses those same registers exclusively for Black data.
         for &b_idx in black_indices.iter().take(active_piece_count) {
-            let b_row = &self.nnue_network.l1_weights[b_idx][..256];
+            // Use .0 if you adopted the Align128 wrapper; remove .0 if using Option A (manual padding)
+            let b_row: &[i16; 256] = (&self.nnue_network.l1_weights.0[b_idx][..256]).try_into().unwrap();
             
             for i in 0..256 {
                 target_black[i] = target_black[i].wrapping_add(b_row[i]);
@@ -834,78 +826,75 @@ impl ChessBoard {
             ),
         };
 
-        // --- STEP 0: ACCUMLATOR (Input -> Accumlator) ---
-        // The accumlator is maintained by the init / move functions
+        // --- STEP 0: ACCUMULATOR (Input -> Accumulator) ---
+        // The accumulator is maintained by the init / move functions
+        
+        // Coerce destination into exact fixed-size slices to completely eliminate bounds checks
+        let (l2_left, l2_right) = buffer.l2_inputs.split_at_mut(256);
+        let l2_left: &mut [i8; 256] = l2_left.try_into().unwrap();
+        let l2_right: &mut [i8; 256] = l2_right.try_into().unwrap();
+
+        let active_vals: &[i16; 256] = (&active_acc.vals).try_into().unwrap();
+        let opp_vals: &[i16; 256] = (&opp_acc.vals).try_into().unwrap();
 
         // --- STEP 1: CONCATENATION & ACTIVATION (L1 -> L2) ---
         for i in 0..256 {
-            buffer.l2_inputs[i] = active_acc.vals[i].clamp(0, 127) as i8;
+            l2_left[i] = active_vals[i].clamp(0, 127) as i8;
         }
-
         for i in 0..256 {
-            buffer.l2_inputs[i + 256] = opp_acc.vals[i].clamp(0, 127) as i8;
+            l2_right[i] = opp_vals[i].clamp(0, 127) as i8;
         }
 
         // --- STEP 2: HIDDEN LAYER 2 (256*2 -> 32) ---
-        // Input Scale (128) * Weight Scale (32) = Sum Scale (4096).
-        // Shift Down by >> 7 to Scale (32)
-        // Clamp at 32 to match Python's ReLU1 (1.0).
+        let l2_biases = &self.nnue_network.l2_biases.0;
+        let l2_inputs: &[i8; 512] = (&buffer.l2_inputs).try_into().unwrap();
+        let l3_inputs: &mut [i8; 32] = (&mut buffer.l3_inputs).try_into().unwrap();
+
         for neuron in 0..32 {
-            let bias = self.nnue_network.l2_biases[neuron];
-            let mut sum: i32 = bias;
+            let mut sum: i32 = l2_biases[neuron];
+            let row: &[i8; 512] = (&self.nnue_network.l2_weights.0[neuron]).try_into().unwrap();
 
-            let row = &self.nnue_network.l2_weights[neuron][..512];
-            let inputs = &buffer.l2_inputs[..512];
-
+            // 512 iterations with exact-size arrays: AVX2 handles this perfectly
             for i in 0..512 {
-                sum += (inputs[i] as i32) * (row[i] as i32);
+                sum += (l2_inputs[i] as i32) * (row[i] as i32);
             }
 
             let activated = sum >> 7;
-            buffer.l3_inputs[neuron] = activated.clamp(0, 32) as i8;
+            l3_inputs[neuron] = activated.clamp(0, 32) as i8;
         }
 
         // --- STEP 3: HIDDEN LAYER 3 (32 -> 32) ---
-        // Input Scale (32) * Weight Scale (32) = Sum Scale (1024).
-        // Shift Down by 5 to Scale (32)
-        // Clamp at 32 to match Python's ReLU1 (1.0).
-        for neuron in 0..32 {
-            let bias = self.nnue_network.l3_biases[neuron];
-            let mut sum: i32 = bias;
+        let l3_biases = &self.nnue_network.l3_biases.0;
+        let l4_inputs: &mut [i8; 32] = (&mut buffer.l4_inputs).try_into().unwrap();
 
-            let row = &self.nnue_network.l3_weights[neuron][..32];
-            let inputs = &buffer.l3_inputs[..32];
+        for neuron in 0..32 {
+            let mut sum: i32 = l3_biases[neuron];
+            let row: &[i8; 32] = (&self.nnue_network.l3_weights.0[neuron]).try_into().unwrap();
 
             for i in 0..32 {
-                sum += (inputs[i] as i32) * (row[i] as i32);
+                sum += (l3_inputs[i] as i32) * (row[i] as i32);
             }
 
             let activated = sum >> 5;
-            buffer.l4_inputs[neuron] = activated.clamp(0, 32) as i8;
+            l4_inputs[neuron] = activated.clamp(0, 32) as i8;
         }
 
         // --- STEP 4: OUTPUT LAYER (32 -> 1) ---
-        // Input Scale (32) * Weight Scale (128) = Sum Scale (4096).
-        // Shift Down by 5 to Scale (128)
-        let mut final_sum: i32 = self.nnue_network.output_bias[0];
+        let mut final_sum: i32 = self.nnue_network.output_bias.0[0];
+        let row: &[i8; 32] = (&self.nnue_network.output_weights.0[0]).try_into().unwrap();
 
-        let row = &self.nnue_network.output_weights[0][..32];
-        let inputs = &buffer.l4_inputs[..32];
         for i in 0..32 {
-            final_sum += (inputs[i] as i32) * (row[i] as i32);
+            final_sum += (l4_inputs[i] as i32) * (row[i] as i32);
         }
 
         let internal_pawns_scaled = final_sum >> 5;
 
-        // Shift by >> 7 remove remaining scale
+        // Shift by >> 7 to remove remaining scale
         ((internal_pawns_scaled * 100) >> 7) as i16
     }
 
     /// Progresses the network forward incrementally during move making
-    pub fn make_move(
-        &mut self, 
-        mv: ForwardMove,
-    ) {
+    pub fn make_move(&mut self, mv: ForwardMove) {
         // Retrieve King Squares
         let w_king_sq = self.kings[Side::WHITE as usize].trailing_zeros() as u8;
         let b_king_sq = self.kings[Side::BLACK as usize].trailing_zeros() as u8;
@@ -949,11 +938,11 @@ impl ChessBoard {
         let w_add = get_feature_index(w_king_sq, added_piece, mv.end_sq, false);
         let b_add = get_feature_index(b_king_sq, added_piece, mv.end_sq, true);
 
-        // Get basic rows
-        let w_rem_row = &self.nnue_network.l1_weights[w_remove][..256];
-        let b_rem_row = &self.nnue_network.l1_weights[b_remove][..256];
-        let w_add_row = &self.nnue_network.l1_weights[w_add][..256];
-        let b_add_row = &self.nnue_network.l1_weights[b_add][..256];
+        // Force network rows into fixed-size 256 array references
+        let w_rem_row: &[i16; 256] = (&self.nnue_network.l1_weights.0[w_remove]).try_into().unwrap();
+        let b_rem_row: &[i16; 256] = (&self.nnue_network.l1_weights.0[b_remove]).try_into().unwrap();
+        let w_add_row: &[i16; 256] = (&self.nnue_network.l1_weights.0[w_add]).try_into().unwrap();
+        let b_add_row: &[i16; 256] = (&self.nnue_network.l1_weights.0[b_add]).try_into().unwrap();
 
         // --- 4. High-Density Auto-Vectorized Parallel Loop Block ---
         let prev_ply = self.ply - 1;
@@ -962,19 +951,21 @@ impl ChessBoard {
         let prev_acc = &left[prev_ply];
         let curr_acc = &mut right[0];
 
-        // Slice both targets to exactly 256 to remove runtime bounds checking
-        let curr_white = &mut curr_acc.white.vals[..256];
-        let curr_black = &mut curr_acc.black.vals[..256];
+        // Coerce both target and source buffers into exact-size references
+        let curr_white: &mut [i16; 256] = (&mut curr_acc.white.vals).try_into().unwrap();
+        let curr_black: &mut [i16; 256] = (&mut curr_acc.black.vals).try_into().unwrap();
         
-        let prev_white = &prev_acc.white.vals[..256];
-        let prev_black = &prev_acc.black.vals[..256];
+        let prev_white: &[i16; 256] = (&prev_acc.white.vals).try_into().unwrap();
+        let prev_black: &[i16; 256] = (&prev_acc.black.vals).try_into().unwrap();
+
+        let l1_biases: &[i16; 256] = (&self.nnue_network.l1_biases).try_into().unwrap();
 
         if captured_piece != BoardPiece::NONE {
             let w_cap = get_feature_index(w_king_sq, captured_piece, captured_sq, false);
             let b_cap = get_feature_index(b_king_sq, captured_piece, captured_sq, true);
             
-            let w_cap_row = &self.nnue_network.l1_weights[w_cap][..256];
-            let b_cap_row = &self.nnue_network.l1_weights[b_cap][..256];
+            let w_cap_row: &[i16; 256] = (&self.nnue_network.l1_weights.0[w_cap]).try_into().unwrap();
+            let b_cap_row: &[i16; 256] = (&self.nnue_network.l1_weights.0[b_cap]).try_into().unwrap();
 
             // 1. Process White entirely in a clean, isolated memory pipeline
             for i in 0..256 {

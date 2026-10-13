@@ -37,7 +37,10 @@ pub const MATE_THRESHOLD: i16 = MATE_VALUE - ((MAX_DEPTH * 2) as i16);
 pub const NUM_THREADS: usize = 8;
 
 // Condon-Thompson Bucket Transposition Table
-pub const CACHE_SIZE: usize = 16;
+pub const CACHE_SIZE: usize = 1024;
+
+// Maximum Assumed Move
+pub const MAX_GAME_MOVES: usize = 1024;
 
 // Model path
 pub const MODEL_PATH: &str = "nnue-training/nnue_weights.bin";

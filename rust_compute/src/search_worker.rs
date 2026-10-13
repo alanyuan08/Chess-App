@@ -1,5 +1,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use crate::transposition_table::*;
+use crate::board_accumlator::*;
 use arrayvec::ArrayVec;
 use std::sync::Arc;
 use std::cmp;
@@ -10,6 +11,7 @@ use crate::lmr_table::*;
 
 use crate::parser::*;
 use crate::chess_board::*;
+use crate::chess_game::*;
 use crate::nnue_network::*;
 use crate::search_command::*;
 
@@ -18,18 +20,20 @@ pub struct SearchWorker  {
     transposition_table: Arc<TranspositionTable>,
     nodes_processed: usize,
 
-    history: [UndoMove; 512],
+    history: [UndoMove; MAX_GAME_MOVES],
     history_index: usize,
 
     chess_board: ChessBoard,
 
-    traversed_positions: [u64; 512],
+    traversed_positions: [u64; MAX_GAME_MOVES],
     position_stack_len: usize,
 
     killer_move_table: [[ForwardMove; 2]; 128],
     thread_id: usize,
 
     thread_buffer: NnueInferenceBuffer,
+    board_accumulator: AccumulatorHistory,
+    
     stop_signal: Arc<AtomicBool>
 }
 
@@ -41,7 +45,7 @@ impl SearchWorker {
         thread_id: usize
     ) -> Self {
         Self {
-            history: [UndoMove::NULL_UNDO_MOVE; 512],
+            history: [UndoMove::NULL_UNDO_MOVE; MAX_GAME_MOVES],
             history_index: 0,
 
             chess_board: {
@@ -53,7 +57,7 @@ impl SearchWorker {
             },
 
             traversed_positions: {
-                [0; 512]
+                [0; MAX_GAME_MOVES]
             },
             position_stack_len: 0, 
             
@@ -64,6 +68,8 @@ impl SearchWorker {
             thread_id,
 
             thread_buffer: NnueInferenceBuffer::default(),
+            accumulator_history: AccumulatorHistory::default(),
+
             stop_signal,
         }
     }
@@ -179,11 +185,11 @@ impl SearchWorker {
                 self.chess_board.make_move(forward_move);
             }
 
-            captured_piece = self.chess_board.execute_move(forward_move);
+            captured_piece = self.chess_board.execute_move(forward_move, &mut self.board_accumulator);
 
             // Forced Recompute due to King
             if is_king_or_castle {
-                self.chess_board.create_accumlator_from_scratch();
+                self.chess_board.create_accumlator_from_scratch(&mut self.board_accumulator);
             }
         }
 
@@ -305,7 +311,7 @@ impl SearchWorker {
     // Alpha - Best value a Maximizer can guarantee, hence true value is greater than or equal to this
     // Beta - Worst value a Minimizer can guarantee, hence true value is else than or equal to this
 
-    // Fail-Soft -> Return the first value that breaches alpha - beta -> Not Guaranteed to be best Value
+    // Fail-Soft -> Allows the function to return a value completely outside the [alpha, beta] window
     // Hard Cut-Off -> Once a value causes alpha >= beta, stop the search
     fn negamax(&mut self, depth: i8, ply: i16, mut alpha: i16, mut beta: i16, 
         mut pv_move_hint: ForwardMove, allow_null: bool) -> SearchResult {
@@ -359,7 +365,7 @@ impl SearchWorker {
                 else if tt_entry.flag == HashFlag::LOWERBOUND {
                     alpha = cmp::max(alpha, retrieved_score);
 
-                    // Fail-Soft Cutoff
+                    // Hard Cut-off
                     if alpha >= beta {
                         return SearchResult {
                             score: retrieved_score,
@@ -372,7 +378,7 @@ impl SearchWorker {
                 else if tt_entry.flag == HashFlag::UPPERBOUND {
                     beta = cmp::min(beta, retrieved_score);
 
-                    // Fail-Soft Cutoff
+                    // Hard Cut-off
                     if alpha >= beta {
                         return SearchResult {
                             score: retrieved_score,
@@ -603,7 +609,8 @@ impl SearchWorker {
     }
 
     // Quiescence Search -> Q-Search only uses Score and was_aborted. 
-    // Fail-Soft Framework 
+    // Fail-Soft -> Allows the function to return a value completely outside the [alpha, beta] window
+    // Hard Cut-Off -> Once a value causes alpha >= beta, stop the search
     fn quiescence_search(&mut self, mut alpha: i16, mut beta: i16, ply: i16) -> SearchResult {        
         // 1. Halt Signal
         if self.nodes_processed & 0x3FFF == 0 && self.stop_signal.load(Ordering::Relaxed) {
@@ -654,7 +661,7 @@ impl SearchWorker {
                 else if tt_entry.flag == HashFlag::LOWERBOUND {
                     alpha = cmp::max(alpha, retrieved_score);
 
-                    // Fail-Soft Cutoff
+                    // Hard Cut-off
                     if alpha >= beta {
                         return SearchResult {
                             score: retrieved_score,
@@ -667,7 +674,7 @@ impl SearchWorker {
                 else if tt_entry.flag == HashFlag::UPPERBOUND {
                     beta = cmp::min(beta, retrieved_score);
 
-                    // Fail-Soft Cutoff
+                    // Hard Cut-off
                     if alpha >= beta {
                         return SearchResult {
                             score: retrieved_score,
