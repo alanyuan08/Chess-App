@@ -103,6 +103,7 @@ impl SearchWorker {
         }
         
         self.age += 1;
+        println!("Increment age {:?}", self.thread_id);
         (best_move_overall, self.nodes_processed, self.thread_id)
     }
 
@@ -413,13 +414,9 @@ impl SearchWorker {
 
                 if beta == original_beta {
                     self.transposition_table.store(
-                        hash, 
-                        stored_score, 
-                        depth, 
-                        ply, 
-                        self.age,
-                        ForwardMove::NULL_MOVE, 
-                        HashFlag::LOWERBOUND
+                        hash, stored_score, 
+                        depth, ply, self.age,
+                        ForwardMove::NULL_MOVE, HashFlag::LOWERBOUND
                     );
                 }
 
