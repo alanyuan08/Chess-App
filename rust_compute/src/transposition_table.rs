@@ -1,27 +1,8 @@
-#![feature(integer_atomics)]
-
-use std::sync::atomic::{AtomicU128, Ordering};
+use portable_atomic::{AtomicU128, Ordering};
 
 use crate::move_command::*;
 use crate::chess_game::*;
 
-#[derive(Debug, Clone, Copy)]
-#[repr(C)]
-pub struct TTForwardMove {
-    pub start_sq: u8,        // 1 Byte
-    pub end_sq: u8,          // 1 Byte
-    pub move_type: MoveFlag, // 1 Byte
-}
-
-impl TTForwardMove {
-    pub const NULL_MOVE: Self = TTForwardMove {
-        start_sq: 0,
-        end_sq: 0,
-        move_type: MoveFlag::NULL,
-    };
-}
-
-// TT Entry Flag definitions
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum HashFlag {
@@ -36,11 +17,36 @@ pub enum HashFlag {
 #[repr(C, align(16))]
 pub struct TTEntry {
     pub key: u64,                       // 8 bytes
-    pub tt_forward_move: TTForwardMove, // 3 bytes
+
+     // --- Flattened Move Data ---
+    pub start_sq: u8,                   // 1 Byte
+    pub end_sq: u8,                     // 1 Byte
+    pub move_type: MoveFlag,            // 1 Byte
+
     pub score: i16,                     // 2 bytes
     pub depth: i8,                      // 1 byte
     pub flag: HashFlag,                 // 1 byte
     pub age: i8                         // 1 byte
+}
+
+#[derive(Debug)]
+pub struct TTResult {
+    pub score: i16,
+    pub depth: i8,
+    pub flag: HashFlag,
+    pub forward_move: ForwardMove,
+}
+
+impl TTResult {
+    /// Creates a default structure representing a total transposition cache miss.
+    pub fn empty() -> Self {
+        Self {
+            score: 0,
+            depth: 0,
+            flag: HashFlag::EMPTY,
+            forward_move: ForwardMove::NULL_MOVE,
+        }
+    }
 }
 
 // The TTEntry needs to be restructued as a AtomicU128 such that it can be used 
@@ -49,7 +55,9 @@ impl TTEntry {
     pub fn empty() -> Self {
         Self {
             key: 0,
-            tt_forward_move: TTForwardMove::NULL_MOVE,
+            start_sq: 0,
+            end_sq: 0,
+            move_type: MoveFlag::NULL,
             score: 0,
             depth: 0,
             flag: HashFlag::EXACT,
@@ -60,42 +68,47 @@ impl TTEntry {
     pub fn pack(&self) -> u128 {
         let key_bits = self.key as u128;
         
-        // Pack 3 bytes of move data
-        let move_raw: [u8; 3] = unsafe { std::mem::transmute_copy(&self.tt_forward_move) };
-        let move_bits = (move_raw[0] as u128) | ((move_raw[1] as u128) << 8) | ((move_raw[2] as u128) << 16);
+        let start_bits = (self.start_sq as u128) << 64;
+        let end_bits   = (self.end_sq as u128) << 72;
+        let type_bits  = (self.move_type as u128) << 80;
+        let score_bits = (self.score as u16 as u128) << 88;
+        let depth_bits = (self.depth as u8 as u128) << 104;
+        let flag_bits  = (self.flag as u8 as u128) << 112;
+        let age_bits   = (self.age as u8 as u128) << 120;
         
-        let score_bits = (self.score as u16 as u128) << 24;
-        let depth_bits = (self.depth as u128) << 40;
-        let flag_bits  = (self.flag as u8 as u128) << 48;
-        let age_bits   = (self.age as u8 as u128) << 56;
-        
-        let data_bits = move_bits | score_bits | depth_bits | flag_bits | age_bits;
-        key_bits | (data_bits << 64)
+        key_bits | start_bits | end_bits | type_bits | score_bits | depth_bits | flag_bits | age_bits
     }
 
     pub fn unpack(bits: u128) -> Self {
         let key = bits as u64;
-        let data_bits = (bits >> 64) as u64;
+        let start_sq  = (bits >> 64) as u8;
+        let end_sq    = (bits >> 72) as u8;
         
-        let move_raw = [
-            data_bits as u8,
-            (data_bits >> 8) as u8,
-            (data_bits >> 16) as u8,
-        ];
-        let tt_forward_move: TTForwardMove = unsafe { std::mem::transmute_copy(&move_raw) };
-        
-        let score = (data_bits >> 24) as i16;
-        let depth = (data_bits >> 40) as u8;
-        
-        let flag = match (data_bits >> 48) as u8 {
-            1 => HashFlag::Alpha,
-            2 => HashFlag::Beta,
-            _ => HashFlag::Exact,
+        let raw_type = (bits >> 80) as u8;
+        let move_type: MoveFlag = unsafe { 
+            if raw_type <= 10 {
+                std::mem::transmute(raw_type)
+            } else {
+                MoveFlag::NULL
+            }
         };
         
-        let age = (data_bits >> 56) as i8;
+        let score = (bits >> 88) as i16;
+        let depth = (bits >> 104) as i8;
+        
+        // Apply the same optimization to HashFlag (0..3)
+        let raw_flag = (bits >> 112) as u8;
+        let flag: HashFlag = unsafe {
+            if raw_flag <= 3 {
+                std::mem::transmute(raw_flag)
+            } else {
+                HashFlag::EMPTY
+            }
+        };
+        
+        let age = (bits >> 120) as i8;
 
-        Self { key, tt_forward_move, score, depth, flag, age }
+        Self { key, start_sq, end_sq, move_type, score, depth, flag, age }
     }
 }
 
@@ -165,7 +178,7 @@ impl TranspositionTable {
 
     // Transposition Table Entries are unique for every key 
     #[inline(always)]
-     pub fn probe(&self, key: u64, ply: i16) -> TTEntry {
+     pub fn probe(&self, key: u64, ply: i16) -> TTResult {
         let bucket_idx = (key as usize) & self.mask;
         let bucket = &self.buckets[bucket_idx];
 
@@ -177,17 +190,27 @@ impl TranspositionTable {
 
             let entry = TTEntry::unpack(bits);           
             if entry.key == key {
-                let mut returned_entry = entry;
+                let mut local_score = entry.score;
 
-                let is_pos_mate = returned_entry.score >= MATE_THRESHOLD;
-                let is_neg_mate = returned_entry.score <= -MATE_THRESHOLD;
-                returned_entry.score = returned_entry.score - (is_pos_mate as i16 * ply) + (is_neg_mate as i16 * ply);
+                let is_pos_mate = local_score >= MATE_THRESHOLD;
+                let is_neg_mate = local_score <= -MATE_THRESHOLD;
+                local_score = local_score - (is_pos_mate as i16 * ply) + (is_neg_mate as i16 * ply);
                 
-                return returned_entry;
+                return TTResult {
+                    score: local_score,
+                    depth: entry.depth,
+                    flag: entry.flag,
+                    forward_move: ForwardMove {
+                        start_sq: entry.start_sq,
+                        end_sq: entry.end_sq,
+                        move_type: entry.move_type,
+                        pv_score: 0,
+                    },
+                };
             }
         }
         
-        TTEntry::empty()
+        TTResult::empty()
     }
 
     // Key should be unique and is incremented once per move 
@@ -198,7 +221,7 @@ impl TranspositionTable {
     pub fn store(&self, 
         hash: u64, score: i16, 
         depth: i8, ply: i16, age: i8,
-        mv: TTForwardMove, flag: HashFlag, 
+        mv: ForwardMove, flag: HashFlag, 
     ) {
         let bucket_idx = (hash as usize) & self.mask;
         let bucket = &self.buckets[bucket_idx];
@@ -209,7 +232,16 @@ impl TranspositionTable {
         let adjusted_score = score + (is_pos_mate as i16 * ply) - (is_neg_mate as i16 * ply);
 
         // Ply should not be adjusted 
-        let new_entry = TTEntry { key: hash, tt_forward_move: mv, score: adjusted_score, depth, flag, age };
+       let new_entry = TTEntry { 
+            key: hash, 
+            start_sq: mv.start_sq,
+            end_sq: mv.end_sq,
+            move_type: mv.move_type,
+            score: adjusted_score, 
+            depth, 
+            flag, 
+            age 
+        };
         let packed_new = new_entry.pack();
 
         // --- PHASE 1: IF HASH EXISTS, REPLACE THAT ITEM ---

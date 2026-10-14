@@ -108,28 +108,6 @@ pub fn black_promotion_piece(promotion_flag: MoveFlag) -> BoardPiece {
     }
 }
 
-impl TryFrom<u8> for MoveFlag {
-    type Error = ();
-
-    fn try_from(v: u8) -> Result<Self, Self::Error> {
-        match v {
-            0 => Ok(MoveFlag::MOVE),
-            1 => Ok(MoveFlag::PAWNOPENMOVE),
-            2 => Ok(MoveFlag::QUEENSIDECASTLE),
-            3 => Ok(MoveFlag::KINGSIDECASTLE),
-            4 => Ok(MoveFlag::ENPASSANT),
-            5 => Ok(MoveFlag::CAPTURE),
-            6 => Ok(MoveFlag::NULL),
-
-            7 => Ok(MoveFlag::PROMOTIONQUEEN),
-            8 => Ok(MoveFlag::PROMOTIONROOK),
-            9 => Ok(MoveFlag::PROMOTIONBISHOP),
-            10 => Ok(MoveFlag::PROMOTIONKNIGHT),
-            _ => Err(()),
-        }
-    }
-}
-
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Side {

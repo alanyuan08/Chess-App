@@ -67,7 +67,7 @@ impl ChessBoard {
         }
     }
 
-    pub fn init_board(&mut self) {
+    pub fn init_board(&mut self, accumulators: &mut AccumulatorHistory) {
         for color in 0..2 {
             // Ranks: White = 0 & 1, Black = 6 & 7
             let piece_rank_offset = if color == 0 { 0 } else { 56 };
@@ -109,7 +109,7 @@ impl ChessBoard {
         }
 
         // Init Accumulator
-        self.create_accumlator_from_scratch();    
+        self.create_accumulator_from_scratch(accumulators);    
     }
 
     // Null Move Pruning Zugzwang
@@ -737,30 +737,31 @@ impl ChessBoard {
     }
 
     #[inline(always)]
-    pub fn null_move_accumulator(&mut self) {
-        let current_ply = self.ply;
-        let prev_ply = self.ply - 1; 
+    pub fn null_move_accumulator(&mut self, accumulators: &mut AccumulatorHistory) {
+        let curr_ply = self.ply as usize;
+        let prev_ply = curr_ply - 1; 
 
-        let prev_white_vals = self.accumulators[prev_ply].white.vals;
+        let (left, right) = accumulators.moves.split_at_mut(curr_ply);
+        let prev_frame = &left[prev_ply];
+        let curr_frame = &mut right[0];
 
-        self.accumulators[current_ply].white.vals = self.accumulators[prev_ply].black.vals;
-        self.accumulators[current_ply].black.vals = prev_white_vals;
+        curr_frame.white.copy_from_slice(&prev_frame.white);
+        curr_frame.black.copy_from_slice(&prev_frame.black);
     }
 
     // Create from Scratch
-    pub fn create_accumlator_from_scratch(&mut self) {
+    pub fn create_accumulator_from_scratch(&mut self, accumulators: &mut AccumulatorHistory) {
         // Retrieve King Squares
         let w_king_sq = self.kings[Side::WHITE as usize].trailing_zeros() as u8;
         let b_king_sq = self.kings[Side::BLACK as usize].trailing_zeros() as u8;
-
-        // Use .0 if you adopted the Align128 wrapper; remove .0 if using Option A (manual padding)
-        let biases = &self.nnue_network.l1_biases;
         
-        // Grab fixed-size 256-byte arrays to completely eliminate runtime bounds checks
-        let target_white: &mut [i16; 256] = (&mut self.accumulators[self.ply].white.vals[..256]).try_into().unwrap();
-        let target_black: &mut [i16; 256] = (&mut self.accumulators[self.ply].black.vals[..256]).try_into().unwrap();
+        // Grab current accumulator frame using explicit slice indexing on the Boxed array
+        let current_frame = &mut accumulators.moves[self.ply];
+        let target_white: &mut [i16; 256] = &mut current_frame.white;
+        let target_black: &mut [i16; 256] = &mut current_frame.black;
 
         // Initialize both sides with biases first
+        let biases = &self.nnue_network.l1_biases;
         for i in 0..256 {
             target_white[i] = biases[i] as i16;
             target_black[i] = biases[i] as i16;
@@ -792,11 +793,10 @@ impl ChessBoard {
         }
 
         // --- LOOP 1: PROCESS WHITE PERSPECTIVE COMPLETELY ---
+        // Exact [i16; 256] array sizing unlocks aggressive SIMD/AVX2 loop unrolling
         for &w_idx in white_indices.iter().take(active_piece_count) {
-            // Use .0 if you adopted the Align128 wrapper; remove .0 if using Option A (manual padding)
-            let w_row: &[i16; 256] = (&self.nnue_network.l1_weights.0[w_idx][..256]).try_into().unwrap();
+            let w_row: &[i16; 256] = &self.nnue_network.l1_weights[w_idx];
             
-            // Exact loop boundary + no branching = aggressive AVX auto-vectorization
             for i in 0..256 {
                 target_white[i] = target_white[i].wrapping_add(w_row[i]);
             }
@@ -804,8 +804,7 @@ impl ChessBoard {
 
         // --- LOOP 2: PROCESS BLACK PERSPECTIVE COMPLETELY ---
         for &b_idx in black_indices.iter().take(active_piece_count) {
-            // Use .0 if you adopted the Align128 wrapper; remove .0 if using Option A (manual padding)
-            let b_row: &[i16; 256] = (&self.nnue_network.l1_weights.0[b_idx][..256]).try_into().unwrap();
+            let b_row: &[i16; 256] = &self.nnue_network.l1_weights[b_idx];
             
             for i in 0..256 {
                 target_black[i] = target_black[i].wrapping_add(b_row[i]);
@@ -813,48 +812,45 @@ impl ChessBoard {
         }
     }
 
-    pub fn evaluate(&mut self, buffer: &mut NnueInferenceBuffer) -> i16 {
+    pub fn evaluate(&mut self, accumulators: &mut AccumulatorHistory, buffer: &mut NnueInferenceBuffer) -> i16 {
         // --- PERSPECTIVE ROUTING ---
         // Side to move (US) always fills the first 256 inputs.
         // Opponent (THEM) always fills the second 256 inputs.
         let (active_acc, opp_acc) = match self.active_player {
             Side::WHITE => (
-                &self.accumulators[self.ply].white, &self.accumulators[self.ply].black
+                &accumulators.moves[self.ply as usize].white, 
+                &accumulators.moves[self.ply as usize].black
             ),
             Side::BLACK => (
-                &self.accumulators[self.ply].black, &self.accumulators[self.ply].white
+                &accumulators.moves[self.ply as usize].black, 
+                &accumulators.moves[self.ply as usize].white
             ),
         };
 
         // --- STEP 0: ACCUMULATOR (Input -> Accumulator) ---
-        // The accumulator is maintained by the init / move functions
-        
         // Coerce destination into exact fixed-size slices to completely eliminate bounds checks
         let (l2_left, l2_right) = buffer.l2_inputs.split_at_mut(256);
         let l2_left: &mut [i8; 256] = l2_left.try_into().unwrap();
         let l2_right: &mut [i8; 256] = l2_right.try_into().unwrap();
 
-        let active_vals: &[i16; 256] = (&active_acc.vals).try_into().unwrap();
-        let opp_vals: &[i16; 256] = (&opp_acc.vals).try_into().unwrap();
-
-        // --- STEP 1: CONCATENATION & ACTIVATION (L1 -> L2) ---
+        // --- STEP 1: CONCATENATION & ACTIVATION (L1 -> L2 / Clipped ReLU) ---
         for i in 0..256 {
-            l2_left[i] = active_vals[i].clamp(0, 127) as i8;
+            l2_left[i] = active_acc[i].clamp(0, 127) as i8;
         }
         for i in 0..256 {
-            l2_right[i] = opp_vals[i].clamp(0, 127) as i8;
+            l2_right[i] = opp_acc[i].clamp(0, 127) as i8;
         }
 
-        // --- STEP 2: HIDDEN LAYER 2 (256*2 -> 32) ---
-        let l2_biases = &self.nnue_network.l2_biases.0;
+        // --- STEP 2: HIDDEN LAYER 2 (512 -> 32) ---
+        let l2_biases = &self.nnue_network.l2_biases;
         let l2_inputs: &[i8; 512] = (&buffer.l2_inputs).try_into().unwrap();
         let l3_inputs: &mut [i8; 32] = (&mut buffer.l3_inputs).try_into().unwrap();
 
         for neuron in 0..32 {
             let mut sum: i32 = l2_biases[neuron];
-            let row: &[i8; 512] = (&self.nnue_network.l2_weights.0[neuron]).try_into().unwrap();
+            let row: &[i8; 512] = &self.nnue_network.l2_weights[neuron];
 
-            // 512 iterations with exact-size arrays: AVX2 handles this perfectly
+            // 512 iterations with exact-size arrays: compiler unrolls this beautifully via SIMD/AVX2
             for i in 0..512 {
                 sum += (l2_inputs[i] as i32) * (row[i] as i32);
             }
@@ -864,12 +860,12 @@ impl ChessBoard {
         }
 
         // --- STEP 3: HIDDEN LAYER 3 (32 -> 32) ---
-        let l3_biases = &self.nnue_network.l3_biases.0;
+        let l3_biases = &self.nnue_network.l3_biases;
         let l4_inputs: &mut [i8; 32] = (&mut buffer.l4_inputs).try_into().unwrap();
 
         for neuron in 0..32 {
             let mut sum: i32 = l3_biases[neuron];
-            let row: &[i8; 32] = (&self.nnue_network.l3_weights.0[neuron]).try_into().unwrap();
+            let row: &[i8; 32] = &self.nnue_network.l3_weights[neuron];
 
             for i in 0..32 {
                 sum += (l3_inputs[i] as i32) * (row[i] as i32);
@@ -880,8 +876,8 @@ impl ChessBoard {
         }
 
         // --- STEP 4: OUTPUT LAYER (32 -> 1) ---
-        let mut final_sum: i32 = self.nnue_network.output_bias.0[0];
-        let row: &[i8; 32] = (&self.nnue_network.output_weights.0[0]).try_into().unwrap();
+        let mut final_sum: i32 = self.nnue_network.output_bias[0];
+        let row: &[i8; 32] = &self.nnue_network.output_weights[0];
 
         for i in 0..32 {
             final_sum += (l4_inputs[i] as i32) * (row[i] as i32);
@@ -889,12 +885,12 @@ impl ChessBoard {
 
         let internal_pawns_scaled = final_sum >> 5;
 
-        // Shift by >> 7 to remove remaining scale
+        // Shift by >> 7 to remove remaining scale context factors
         ((internal_pawns_scaled * 100) >> 7) as i16
     }
 
     /// Progresses the network forward incrementally during move making
-    pub fn make_move(&mut self, mv: ForwardMove) {
+    pub fn make_move(&mut self, mv: ForwardMove, accumulators: &mut AccumulatorHistory) {
         // Retrieve King Squares
         let w_king_sq = self.kings[Side::WHITE as usize].trailing_zeros() as u8;
         let b_king_sq = self.kings[Side::BLACK as usize].trailing_zeros() as u8;
@@ -919,79 +915,68 @@ impl ChessBoard {
             _ => {}
         }
 
-        // --- 2. Identify Captured Piece & Coordinate (Handles En Passant) ---
+         // --- 2. Identify Captured Piece & Coordinate (Handles En Passant) ---
         let (captured_sq, captured_piece) = if mv.move_type == MoveFlag::ENPASSANT {
-            let sq = if move_piece == BoardPiece::WPAWN {
-                mv.end_sq - 8 
-            } else {
-                mv.end_sq + 8 
-            };
+            let sq = if move_piece == BoardPiece::WPAWN { mv.end_sq - 8 } else { mv.end_sq + 8 };
             (sq, self.mailbox[sq as usize])
         } else {
             (mv.end_sq, self.mailbox[mv.end_sq as usize])
         };
 
-        // --- 3. Compute Sparse Feature Indices ---
+        // --- 3. Compute Sparse Feature Indices for the Moving Piece ---
         let w_remove = get_feature_index(w_king_sq, move_piece, mv.start_sq, false);
         let b_remove = get_feature_index(b_king_sq, move_piece, mv.start_sq, true);
 
         let w_add = get_feature_index(w_king_sq, added_piece, mv.end_sq, false);
         let b_add = get_feature_index(b_king_sq, added_piece, mv.end_sq, true);
 
-        // Force network rows into fixed-size 256 array references
-        let w_rem_row: &[i16; 256] = (&self.nnue_network.l1_weights.0[w_remove]).try_into().unwrap();
-        let b_rem_row: &[i16; 256] = (&self.nnue_network.l1_weights.0[b_remove]).try_into().unwrap();
-        let w_add_row: &[i16; 256] = (&self.nnue_network.l1_weights.0[w_add]).try_into().unwrap();
-        let b_add_row: &[i16; 256] = (&self.nnue_network.l1_weights.0[b_add]).try_into().unwrap();
+        let w_rem_row: &[i16; 256] = &self.nnue_network.l1_weights[w_remove];
+        let b_rem_row: &[i16; 256] = &self.nnue_network.l1_weights[b_remove];
+        let w_add_row: &[i16; 256] = &self.nnue_network.l1_weights[w_add];
+        let b_add_row: &[i16; 256] = &self.nnue_network.l1_weights[b_add];
 
-        // --- 4. High-Density Auto-Vectorized Parallel Loop Block ---
-        let prev_ply = self.ply - 1;
-        let (left, right) = self.accumulators.split_at_mut(self.ply);
-        
+        // --- 4. Setup Target and Source Frame Boundaries Safely ---
+        let curr_ply = self.ply;
+        let prev_ply = curr_ply - 1;
+
+        // Split the mutable array slice to satisfy the borrow checker cleanly
+        let (left, right) = accumulators.moves.split_at_mut(curr_ply);
         let prev_acc = &left[prev_ply];
         let curr_acc = &mut right[0];
 
-        // Coerce both target and source buffers into exact-size references
-        let curr_white: &mut [i16; 256] = (&mut curr_acc.white.vals).try_into().unwrap();
-        let curr_black: &mut [i16; 256] = (&mut curr_acc.black.vals).try_into().unwrap();
+        let curr_white: &mut [i16; 256] = &mut curr_acc.white;
+        let curr_black: &mut [i16; 256] = &mut curr_acc.black;
         
-        let prev_white: &[i16; 256] = (&prev_acc.white.vals).try_into().unwrap();
-        let prev_black: &[i16; 256] = (&prev_acc.black.vals).try_into().unwrap();
+        let prev_white: &[i16; 256] = &prev_acc.white;
+        let prev_black: &[i16; 256] = &prev_acc.black;
 
-        let l1_biases: &[i16; 256] = (&self.nnue_network.l1_biases).try_into().unwrap();
-
+        // --- 5. High-Density Auto-Vectorized Accumulation Pass ---
         if captured_piece != BoardPiece::NONE {
             let w_cap = get_feature_index(w_king_sq, captured_piece, captured_sq, false);
             let b_cap = get_feature_index(b_king_sq, captured_piece, captured_sq, true);
             
-            let w_cap_row: &[i16; 256] = (&self.nnue_network.l1_weights.0[w_cap]).try_into().unwrap();
-            let b_cap_row: &[i16; 256] = (&self.nnue_network.l1_weights.0[b_cap]).try_into().unwrap();
+            let w_cap_row: &[i16; 256] = &self.nnue_network.l1_weights[w_cap];
+            let b_cap_row: &[i16; 256] = &self.nnue_network.l1_weights[b_cap];
 
-            // 1. Process White entirely in a clean, isolated memory pipeline
+            // Single loop updates both perspectives at once, minimizing cache misses
             for i in 0..256 {
                 curr_white[i] = prev_white[i]
                     .wrapping_add(w_add_row[i])
                     .wrapping_sub(w_rem_row[i])
                     .wrapping_sub(w_cap_row[i]);
-            }
-
-            // 2. Process Black entirely in a clean, isolated memory pipeline
-            for i in 0..256 {
+                
                 curr_black[i] = prev_black[i]
                     .wrapping_add(b_add_row[i])
                     .wrapping_sub(b_rem_row[i])
                     .wrapping_sub(b_cap_row[i]);
             }
         } else {
-            // 1. Process White entirely
+            // Standard quiet move pattern: 1 addition, 1 subtraction
             for i in 0..256 {
                 curr_white[i] = prev_white[i]
                     .wrapping_add(w_add_row[i])
                     .wrapping_sub(w_rem_row[i]);
-            }
-
-            // 2. Process Black entirely
-            for i in 0..256 {
+                
                 curr_black[i] = prev_black[i]
                     .wrapping_add(b_add_row[i])
                     .wrapping_sub(b_rem_row[i]);
@@ -1001,11 +986,11 @@ impl ChessBoard {
 
     #[inline]
     pub fn unmake_move(&mut self) {
-        if self.ply > 0 {
-            self.ply -= 1; 
-        } else {
-            eprintln!("Warning: Attempted to unmake_move at ply 0!");
-        }
+        // 🛡️ Safe development check: verifies we never unroll past the root.
+        // It disappears completely in --release mode, leaving zero runtime overhead.
+        debug_assert!(self.ply > 0, "Catastrophic: Attempted to unmake_move at root ply 0!");
+
+        self.ply -= 1;
     }
 
     #[inline]

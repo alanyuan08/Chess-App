@@ -11,7 +11,6 @@ use crate::lmr_table::*;
 
 use crate::parser::*;
 use crate::chess_board::*;
-use crate::chess_game::*;
 use crate::nnue_network::*;
 use crate::search_command::*;
 
@@ -45,18 +44,16 @@ impl SearchWorker {
         stop_signal: Arc<AtomicBool>,
         thread_id: usize,
     ) -> Self {
+
+        let mut board_accumulator = AccumulatorHistory::default();
+        let mut chess_board = ChessBoard::new(nnue_network);
+        chess_board.init_board(&mut board_accumulator);
+
         Self {
             history: [UndoMove::NULL_UNDO_MOVE; MAX_GAME_MOVES],
             history_index: 0,
 
-            chess_board: {
-                let mut chess_board = ChessBoard::new(
-                    nnue_network
-                );
-                chess_board.init_board();
-                chess_board
-            },
-
+            chess_board,
             traversed_positions: {
                 [0; MAX_GAME_MOVES]
             },
@@ -69,7 +66,7 @@ impl SearchWorker {
             thread_id,
 
             thread_buffer: NnueInferenceBuffer::default(),
-            accumulator_history: AccumulatorHistory::default(),
+            board_accumulator: AccumulatorHistory::default(),
 
             stop_signal,
             age: 0,
@@ -178,21 +175,21 @@ impl SearchWorker {
 
         if forward_move.move_type == MoveFlag::NULL {
             self.chess_board.execute_move(forward_move); 
-            self.chess_board.null_move_accumulator();
+            self.chess_board.null_move_accumulator(&mut self.board_accumulator);
         } else {
             let move_piece = self.chess_board.mailbox_piece(forward_move.start_sq);
             let is_king_or_castle = (move_piece == BoardPiece::WKING || move_piece == BoardPiece::BKING)
                 || (forward_move.move_type == MoveFlag::KINGSIDECASTLE || forward_move.move_type == MoveFlag::QUEENSIDECASTLE);
 
             if !is_king_or_castle {
-                self.chess_board.make_move(forward_move);
+                self.chess_board.make_move(forward_move, &mut self.board_accumulator);
             }
 
-            captured_piece = self.chess_board.execute_move(forward_move, &mut self.board_accumulator);
+            captured_piece = self.chess_board.execute_move(forward_move);
 
             // Forced Recompute due to King
             if is_king_or_castle {
-                self.chess_board.create_accumlator_from_scratch(&mut self.board_accumulator);
+                self.chess_board.create_accumulator_from_scratch(&mut self.board_accumulator);
             }
         }
 
@@ -292,7 +289,7 @@ impl SearchWorker {
     // Static Eval
     #[inline]
     fn static_eval(&mut self) -> i16 {
-        self.chess_board.evaluate(&mut self.thread_buffer)
+        self.chess_board.evaluate(&mut self.board_accumulator, &mut self.thread_buffer)
     }
 
     // Process Negamax
@@ -352,7 +349,7 @@ impl SearchWorker {
             let retrieved_depth = tt_entry.depth;
             
             // Transposition Move > PV Hint
-            pv_move_hint = TTForwardMove::unpack_forward_move(tt_entry.tt_forward_move);
+            pv_move_hint = tt_entry.forward_move;
 
             if retrieved_depth >= depth {
                 // EXACT: The true minimax value was found; return it immediately.
@@ -476,7 +473,9 @@ impl SearchWorker {
 
                     if beta == original_beta {
                         self.transposition_table.store(
-                            hash, null_score, ply, ForwardMove::NULL_MOVE, depth, HashFlag::LOWERBOUND
+                            hash, null_score, 
+                            depth, ply, self.age,
+                            ForwardMove::NULL_MOVE, HashFlag::LOWERBOUND
                         );
                     }
 
@@ -653,7 +652,7 @@ impl SearchWorker {
             let retrieved_score = tt_entry.score;
             let retrieved_depth = tt_entry.depth;
             
-            pv_move_hint = TTForwardMove::unpack_forward_move(tt_entry.tt_forward_move);
+            pv_move_hint = tt_entry.forward_move;
 
             if retrieved_depth >= Q_DEPTH_MARKER {
                 // EXACT: The true minimax value was found; return it immediately.
@@ -707,7 +706,7 @@ impl SearchWorker {
             if best_score >= original_beta {
                 self.transposition_table.store(
                     hash, best_score, 
-                    ply, Q_DEPTH_MARKER, self.age, 
+                    Q_DEPTH_MARKER, ply, self.age, 
                     ForwardMove::NULL_MOVE, HashFlag::LOWERBOUND
                 );
                 return SearchResult {
@@ -723,7 +722,7 @@ impl SearchWorker {
                     if beta == original_beta {
                         self.transposition_table.store(
                             hash, best_score, 
-                            ply, Q_DEPTH_MARKER, self.age,
+                            Q_DEPTH_MARKER, ply, self.age,
                             ForwardMove::NULL_MOVE, HashFlag::LOWERBOUND
                         );
                     }
@@ -816,7 +815,9 @@ impl SearchWorker {
             };
 
             self.transposition_table.store(
-                hash, terminal_score, ply, ForwardMove::NULL_MOVE, Q_DEPTH_MARKER, HashFlag::EXACT
+                hash, terminal_score, 
+                Q_DEPTH_MARKER, ply, self.age,
+                ForwardMove::NULL_MOVE, HashFlag::EXACT
             );
 
             return SearchResult { 
