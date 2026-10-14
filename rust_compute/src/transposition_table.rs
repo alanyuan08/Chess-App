@@ -197,7 +197,7 @@ impl TranspositionTable {
     #[inline(always)]
     pub fn store(&self, 
         hash: u64, score: i16, 
-        depth: i8, age: i8,
+        depth: i8, ply: i16, age: i8,
         mv: TTForwardMove, flag: HashFlag, 
     ) {
         let bucket_idx = (hash as usize) & self.mask;

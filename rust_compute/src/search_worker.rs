@@ -34,7 +34,8 @@ pub struct SearchWorker  {
     thread_buffer: NnueInferenceBuffer,
     board_accumulator: AccumulatorHistory,
     
-    stop_signal: Arc<AtomicBool>
+    stop_signal: Arc<AtomicBool>,
+    age: i8,
 }
 
 impl SearchWorker {
@@ -42,7 +43,7 @@ impl SearchWorker {
         transposition_table: Arc<TranspositionTable>,
         nnue_network: &'static NnueNetwork,
         stop_signal: Arc<AtomicBool>,
-        thread_id: usize
+        thread_id: usize,
     ) -> Self {
         Self {
             history: [UndoMove::NULL_UNDO_MOVE; MAX_GAME_MOVES],
@@ -71,6 +72,7 @@ impl SearchWorker {
             accumulator_history: AccumulatorHistory::default(),
 
             stop_signal,
+            age: 0,
         }
     }
 
@@ -103,6 +105,7 @@ impl SearchWorker {
             depth += 1;
         }
         
+        self.age += 1;
         (best_move_overall, self.nodes_processed, self.thread_id)
     }
 
@@ -415,9 +418,10 @@ impl SearchWorker {
                     self.transposition_table.store(
                         hash, 
                         stored_score, 
-                        ply, 
-                        ForwardMove::NULL_MOVE, 
                         depth, 
+                        ply, 
+                        self.age,
+                        ForwardMove::NULL_MOVE, 
                         HashFlag::LOWERBOUND
                     );
                 }
@@ -563,8 +567,9 @@ impl SearchWorker {
             };
 
             self.transposition_table.store(
-                hash, terminal_score, ply, 
-                ForwardMove::NULL_MOVE, depth, HashFlag::EXACT
+                hash, terminal_score, 
+                depth, ply, self.age,
+                ForwardMove::NULL_MOVE, HashFlag::EXACT
             );
 
             return SearchResult { 
@@ -600,7 +605,9 @@ impl SearchWorker {
             HashFlag::UPPERBOUND
         };
         self.transposition_table.store(
-            hash, best_score, ply, best_move, depth, final_hash_flag
+            hash, best_score, 
+            depth, ply, self.age,
+            best_move, final_hash_flag
         );
         SearchResult { 
             score: best_score, 
@@ -699,7 +706,9 @@ impl SearchWorker {
             // Fail-Soft Standing Pat Cutoff: Return the actual score that broke beta
             if best_score >= original_beta {
                 self.transposition_table.store(
-                    hash, best_score, ply, ForwardMove::NULL_MOVE, Q_DEPTH_MARKER, HashFlag::LOWERBOUND
+                    hash, best_score, 
+                    ply, Q_DEPTH_MARKER, self.age, 
+                    ForwardMove::NULL_MOVE, HashFlag::LOWERBOUND
                 );
                 return SearchResult {
                     score: best_score, 
@@ -713,7 +722,9 @@ impl SearchWorker {
                 if alpha >= beta {
                     if beta == original_beta {
                         self.transposition_table.store(
-                            hash, best_score, ply, ForwardMove::NULL_MOVE, Q_DEPTH_MARKER, HashFlag::LOWERBOUND
+                            hash, best_score, 
+                            ply, Q_DEPTH_MARKER, self.age,
+                            ForwardMove::NULL_MOVE, HashFlag::LOWERBOUND
                         );
                     }
 
@@ -843,7 +854,9 @@ impl SearchWorker {
         };
 
         self.transposition_table.store(
-            hash, best_score, ply, best_move, Q_DEPTH_MARKER, final_hash_flag
+            hash, best_score, 
+            Q_DEPTH_MARKER, ply, self.age,
+            best_move, final_hash_flag
         );
 
         SearchResult { 
