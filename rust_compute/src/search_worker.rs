@@ -727,7 +727,7 @@ impl SearchWorker {
         } else {
             // Safe checkmate buffer baseline prevents the engine from masking mate strings
             best_score = -MATE_VALUE + ply;
-        }   
+        }
 
         // Generate strictly legal tactical moves directly onto the global stack
         let mut gen_moves = ArrayVec::<ForwardMove, 256>::new();

@@ -144,6 +144,25 @@ impl TranspositionTable {
         }
     }
 
+    // ========================================================================
+    // THE DISTANCE-TO-MATE CONVERSION
+    // ========================================================================
+    // Our search loop evaluates checkmates relative to the tree root, returning:
+    //   Winning Mate:  MATE_VALUE - total_search_ply
+    //   Losing Mate:  -MATE_VALUE + total_search_ply
+    //
+    // Transposition Table should store distance to mate, not total Ply. Suppose at ply_10
+    // 
+    //   Winning: (MATE_VALUE - 14) + ply_10  => MATE_VALUE - 4  (Mate is 4 steps)
+    //   Losing:  (-MATE_VALUE + 11) - ply_10 => -MATE_VALUE + 1 (Mate is 1 step)
+    //
+    // Probe -> Current Ply should be removed from the final score
+    // Store -> Current Ply should be added to the final score to find the absolute distance
+    // ========================================================================
+
+    // The engine may return a combined ply that is beyond search horizon, this may be risky for an engine to execute
+    // as Stockfish RL uses 80% Deep Search + 20% WLD. This will be kept for now, however we may need to revisit
+
     // Transposition Table Entries are unique for every key 
     #[inline(always)]
      pub fn probe(&self, key: u64, ply: i16) -> TTEntry {
@@ -160,10 +179,9 @@ impl TranspositionTable {
             if entry.key == key {
                 let mut returned_entry = entry;
 
-                // Assume Ply = 0 is assigned MATE_THRESHOLD
                 let is_pos_mate = returned_entry.score >= MATE_THRESHOLD;
                 let is_neg_mate = returned_entry.score <= -MATE_THRESHOLD;
-                returned_entry.score = returned_entry.score - (is_pos_mate * ply) + (is_neg_mate * ply);
+                returned_entry.score = returned_entry.score - (is_pos_mate as i16 * ply) + (is_neg_mate as i16 * ply);
                 
                 return returned_entry;
             }
@@ -179,18 +197,18 @@ impl TranspositionTable {
     #[inline(always)]
     pub fn store(&self, 
         hash: u64, score: i16, 
-        ply: i16, depth: i8, age: i8,
+        depth: i8, age: i8,
         mv: TTForwardMove, flag: HashFlag, 
     ) {
         let bucket_idx = (hash as usize) & self.mask;
         let bucket = &self.buckets[bucket_idx];
         let midpoint = SLOTS_PER_BUCKET / 2;
 
-        // Assume Ply = 0 is assigned MATE_THRESHOLD
         let is_pos_mate = score >= MATE_THRESHOLD;
         let is_neg_mate = score <= -MATE_THRESHOLD;
-        let adjusted_score = score + (is_pos_mate * ply) - (is_neg_mate * ply);
+        let adjusted_score = score + (is_pos_mate as i16 * ply) - (is_neg_mate as i16 * ply);
 
+        // Ply should not be adjusted 
         let new_entry = TTEntry { key: hash, tt_forward_move: mv, score: adjusted_score, depth, flag, age };
         let packed_new = new_entry.pack();
 
@@ -229,15 +247,13 @@ impl TranspositionTable {
             }
 
             let slot = TTEntry::unpack(bits);
-            let is_stale = slot.age != age;
-            
-            // Instant eviction if stale 
-            if is_stale {
+            if slot.age != age {
                 bucket.slots[i].store(packed_new, Ordering::Relaxed);
-                return;
+                return; // Claim stale slot instantly
             }
-            if slot_priority < lowest_priority {
-                lowest_priority = slot_priority;
+
+            if slot.depth < lowest_priority {
+                lowest_priority = slot.depth;
                 best_tier1_idx = i;
             }
         }
