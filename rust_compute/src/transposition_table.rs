@@ -225,13 +225,12 @@ impl TranspositionTable {
     ) {
         let bucket_idx = (hash as usize) & self.mask;
         let bucket = &self.buckets[bucket_idx];
-        let midpoint = SLOTS_PER_BUCKET / 2;
+        let midpoint = SLOTS_PER_BUCKET / 4;
 
         let is_pos_mate = score >= MATE_THRESHOLD;
         let is_neg_mate = score <= -MATE_THRESHOLD;
         let adjusted_score = score + (is_pos_mate as i16 * ply) - (is_neg_mate as i16 * ply);
 
-        // Ply should not be adjusted 
        let new_entry = TTEntry { 
             key: hash, 
             start_sq: mv.start_sq,
@@ -269,7 +268,7 @@ impl TranspositionTable {
         // --- STEP A: Depth First Search ---
         // Replace Stale then Shallow-Depth
         let mut best_tier1_idx = 0;
-        let mut lowest_priority = MAX_DEPTH * 2;
+        let mut lowest_priority = MAX_DEPTH;
 
         for i in 0..midpoint {
             let bits = bucket.slots[i].load(Ordering::Relaxed);

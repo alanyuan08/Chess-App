@@ -116,6 +116,8 @@ impl Default for NnueInferenceBuffer {
             l2_inputs: [0i8; 512],
             l3_inputs: [0i8; 32],
             l4_inputs: [0i8; 32],
+
+            #[cfg(target_arch = "aarch64")]
             _padding: [0u8; 64],
         }
     }

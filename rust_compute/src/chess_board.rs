@@ -812,7 +812,7 @@ impl ChessBoard {
         }
     }
 
-    pub fn evaluate(&mut self, accumulators: &mut AccumulatorHistory, buffer: &mut NnueInferenceBuffer) -> i16 {
+    pub fn evaluate(&mut self, accumulators: &AccumulatorHistory, buffer: &mut NnueInferenceBuffer) -> i16 {
         // --- PERSPECTIVE ROUTING ---
         // Side to move (US) always fills the first 256 inputs.
         // Opponent (THEM) always fills the second 256 inputs.

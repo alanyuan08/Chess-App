@@ -103,7 +103,6 @@ impl SearchWorker {
         }
         
         self.age += 1;
-        println!("Increment age {:?}", self.thread_id);
         (best_move_overall, self.nodes_processed, self.thread_id)
     }
 
@@ -412,7 +411,7 @@ impl SearchWorker {
                 // Guard condition: Verify that storing computed_val does not inject false bounds
                 let stored_score = if computed_val > MATE_THRESHOLD - 100 { beta } else { computed_val };
 
-                if beta == original_beta {
+                if !self.stop_signal.load(Ordering::Relaxed) && beta == original_beta {
                     self.transposition_table.store(
                         hash, stored_score, 
                         depth, ply, self.age,
@@ -487,7 +486,7 @@ impl SearchWorker {
 
         let mut legal_moves_played = 0;
         let mut best_move = ForwardMove::NULL_MOVE;   
-        let mut best_score = -INFINITY;
+        let mut best_score = -MATE_VALUE;
 
         let mut gen_moves = ArrayVec::<ForwardMove, 256>::new();
         self.chess_board.generate_moves(&mut gen_moves, pv_move_hint, 
@@ -562,16 +561,18 @@ impl SearchWorker {
                 0
             };
 
-            self.transposition_table.store(
-                hash, terminal_score, 
-                depth, ply, self.age,
-                ForwardMove::NULL_MOVE, HashFlag::EXACT
-            );
+            if !self.stop_signal.load(Ordering::Relaxed) {
+                self.transposition_table.store(
+                    hash, terminal_score, 
+                    depth, ply, self.age,
+                    ForwardMove::NULL_MOVE, HashFlag::EXACT
+                );
+            }
 
             return SearchResult { 
                 score: terminal_score, 
                 best_move: ForwardMove::NULL_MOVE,
-                was_aborted: false
+                was_aborted: self.stop_signal.load(Ordering::Relaxed)
             };
         }
 
@@ -669,7 +670,7 @@ impl SearchWorker {
                     if alpha >= beta {
                         return SearchResult {
                             score: retrieved_score,
-                            best_move: pv_move_hint,
+                            best_move: ForwardMove::NULL_MOVE,
                             was_aborted: false,
                         };
                     }
@@ -682,7 +683,7 @@ impl SearchWorker {
                     if alpha >= beta {
                         return SearchResult {
                             score: retrieved_score,
-                            best_move: pv_move_hint,
+                            best_move: ForwardMove::NULL_MOVE,
                             was_aborted: false,
                         };
                     }
@@ -811,16 +812,18 @@ impl SearchWorker {
                 0
             };
 
-            self.transposition_table.store(
-                hash, terminal_score, 
-                Q_DEPTH_MARKER, ply, self.age,
-                ForwardMove::NULL_MOVE, HashFlag::EXACT
-            );
+            if !self.stop_signal.load(Ordering::Relaxed) {
+                self.transposition_table.store(
+                    hash, terminal_score, 
+                    Q_DEPTH_MARKER, ply, self.age,
+                    ForwardMove::NULL_MOVE, HashFlag::EXACT
+                );
+            }
 
             return SearchResult { 
                 score: terminal_score,
                 best_move: ForwardMove::NULL_MOVE, 
-                was_aborted: false 
+                was_aborted: self.stop_signal.load(Ordering::Relaxed), 
             };
         }
 

@@ -39,7 +39,7 @@ pub const NUM_THREADS: usize = 8;
 // Condon-Thompson Bucket Transposition Table
 pub const CACHE_SIZE: usize = 1024;
 
-// Maximum Assumed Move
+// Max Game Moves
 pub const MAX_GAME_MOVES: usize = 1024;
 
 // Model path
