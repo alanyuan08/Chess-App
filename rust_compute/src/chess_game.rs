@@ -40,7 +40,7 @@ pub const NUM_THREADS: usize = 8;
 pub const CACHE_SIZE: usize = 1024;
 
 // Max Game Moves
-pub const MAX_GAME_MOVES: usize = 1024;
+pub const MAX_GAME_MOVES: usize = 256;
 
 // Model path
 pub const MODEL_PATH: &str = "nnue-training/nnue_weights.bin";
