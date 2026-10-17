@@ -312,7 +312,10 @@ impl SearchWorker {
     // Beta - Worst value a Minimizer can guarantee, hence true value is else than or equal to this
 
     // Fail-Soft -> Allows the function to return a value completely outside the [alpha, beta] window
-    // Hard Cut-Off -> Once a value causes alpha >= beta, stop the search
+    // Hard CutOff -> Once a value causes alpha >= beta, stop the search
+
+    // !self.stop_signal.load(Ordering::Relaxed) should be called prior to save as the search
+    // is likely incompelte
     fn negamax(&mut self, depth: i8, ply: i16, mut alpha: i16, mut beta: i16, 
         mut pv_move_hint: ForwardMove, allow_null: bool) -> SearchResult {
 
@@ -347,8 +350,6 @@ impl SearchWorker {
         if tt_entry.flag != HashFlag::EMPTY {
             let retrieved_score = tt_entry.score;
             let retrieved_depth = tt_entry.depth;
-            
-            // Transposition Move > PV Hint
             pv_move_hint = tt_entry.forward_move;
 
             if retrieved_depth >= depth {
@@ -361,31 +362,35 @@ impl SearchWorker {
                     };
                 }
                     
-                // LOWER BOUND: The true score is AT LEAST this high. 
+                // LOWER BOUND: There is a retrieved score higher than beta
+                // Stop search as the miminizer will not return retrieved_score
                 else if tt_entry.flag == HashFlag::LOWERBOUND {
+                    // Fail-Soft wants the true Value
+                    if retrieved_score >= beta {
+                        return SearchResult {
+                            score: retrieved_score,
+                            best_move: pv_move_hint,
+                            was_aborted: false,
+                        };
+                    }
+                    // True Value is at least this high, Maximizer is interested 
                     alpha = cmp::max(alpha, retrieved_score);
-
-                    // Hard Cut-off
-                    if alpha >= beta {
-                        return SearchResult {
-                            score: retrieved_score,
-                            best_move: pv_move_hint,
-                            was_aborted: false,
-                        };
-                    }
                 }
-                // UPPER BOUND: The true score is AT MOST this high.
-                else if tt_entry.flag == HashFlag::UPPERBOUND {
-                    beta = cmp::min(beta, retrieved_score);
 
-                    // Hard Cut-off
-                    if alpha >= beta {
+                // UPPER BOUND: There was a previous searched that searched all values
+                // and they are all below alpha 
+                else if tt_entry.flag == HashFlag::UPPERBOUND {
+                    // Fail-Soft wants the true Value
+                    if retrieved_score <= alpha {
                         return SearchResult {
                             score: retrieved_score,
                             best_move: pv_move_hint,
                             was_aborted: false,
                         };
                     }
+                    
+                    // True Vlaue is at most this high, Minimizer is interested
+                    beta = cmp::min(beta, retrieved_score);
                 }  
             }
         }
@@ -408,21 +413,26 @@ impl SearchWorker {
             let computed_val = static_eval - (rfp_margin as i16);
             
             if computed_val >= beta {
-                // Guard condition: Verify that storing computed_val does not inject false bounds
-                let stored_score = if computed_val > MATE_THRESHOLD - 100 { beta } else { computed_val };
+                let aborted = self.stop_signal.load(Ordering::Relaxed);
 
-                if !self.stop_signal.load(Ordering::Relaxed) && beta == original_beta {
+                let mut fail_soft_score = static_eval;
+
+                if fail_soft_score > MATE_THRESHOLD - 100 { 
+                    fail_soft_score = original_beta; 
+                }
+
+                if !aborted && beta == original_beta {
                     self.transposition_table.store(
-                        hash, stored_score, 
+                        hash, fail_soft_score, 
                         depth, ply, self.age,
                         ForwardMove::NULL_MOVE, HashFlag::LOWERBOUND
                     );
                 }
 
                 return SearchResult {
-                    score: stored_score,
+                    score: if aborted { 0 } else { fail_soft_score },
                     best_move: ForwardMove::NULL_MOVE,
-                    was_aborted: false,
+                    was_aborted: aborted,
                 };
             }
         }
@@ -434,7 +444,6 @@ impl SearchWorker {
             self.chess_board.has_major_pieces() && ply > 0 &&
             beta < MATE_THRESHOLD && beta > -MATE_THRESHOLD {
 
-            let static_eval = self.static_eval();
             if static_eval >= beta {
                 // Calculate Reduction
                 let reduction = self.calculate_nmp_reduction(depth, static_eval, beta);
@@ -459,7 +468,9 @@ impl SearchWorker {
                 
                 // True Fail-Soft NMP Break
                 if null_score >= beta {
-                    if self.stop_signal.load(Ordering::Relaxed) {
+                    let aborted = self.stop_signal.load(Ordering::Relaxed);
+
+                    if aborted {
                          return SearchResult { 
                             score: 0, 
                             best_move: ForwardMove::NULL_MOVE, 
@@ -553,30 +564,38 @@ impl SearchWorker {
             }
         }
 
+        let aborted = self.stop_signal.load(Ordering::Relaxed);
         // 4. Handle terminal nodes cleanly if no legal moves exist
         if legal_moves_played == 0 {
+            // Check if the search was halted BEFORE anything else
+            if aborted {
+                return SearchResult { 
+                    score: 0, 
+                    best_move: ForwardMove::NULL_MOVE, 
+                    was_aborted: true 
+                };
+            }
+
             let terminal_score = if king_in_check {
                 -MATE_VALUE + ply
             } else {
                 0
             };
 
-            if !self.stop_signal.load(Ordering::Relaxed) {
-                self.transposition_table.store(
-                    hash, terminal_score, 
-                    depth, ply, self.age,
-                    ForwardMove::NULL_MOVE, HashFlag::EXACT
-                );
-            }
+            self.transposition_table.store(
+                hash, terminal_score,
+                depth, ply, self.age,
+                ForwardMove::NULL_MOVE, HashFlag::EXACT
+            );
 
             return SearchResult { 
                 score: terminal_score, 
                 best_move: ForwardMove::NULL_MOVE,
-                was_aborted: self.stop_signal.load(Ordering::Relaxed)
+                was_aborted: false
             };
         }
 
-        if self.stop_signal.load(Ordering::Relaxed) {
+        if aborted {
             return SearchResult { 
                 score: 0, 
                 best_move: ForwardMove::NULL_MOVE, 
@@ -585,27 +604,20 @@ impl SearchWorker {
         }
 
         // Pure Fail-Soft TT Storage and Return Contract
-        let final_hash_flag = if best_score >= original_beta {
-            HashFlag::LOWERBOUND
-        } else if best_score > original_alpha {
-            // Fail-Soft / Hard-Cut off can only be 100% Certain if alpha / beta didn't change. 
-            if alpha != original_alpha || beta != original_beta {
-                if beta != original_beta { 
-                    HashFlag::LOWERBOUND 
-                } else { 
-                    HashFlag::UPPERBOUND 
-                }
-            } else {
-                HashFlag::EXACT
-            }
+        let final_hash_flag = if best_score <= original_alpha {
+            HashFlag::UPPERBOUND // Fail-Low: Checked everything, all moves sucked
+        } else if best_score >= original_beta {
+            HashFlag::LOWERBOUND // Fail-High: Pruned early, found a refutation
         } else {
-            HashFlag::UPPERBOUND
+            HashFlag::EXACT
         };
+        
         self.transposition_table.store(
             hash, best_score, 
             depth, ply, self.age,
             best_move, final_hash_flag
         );
+
         SearchResult { 
             score: best_score, 
             best_move, 
@@ -648,11 +660,9 @@ impl SearchWorker {
         let tt_entry = self.transposition_table.probe(hash, ply);
         if tt_entry.flag != HashFlag::EMPTY {
             let retrieved_score = tt_entry.score;
-            let retrieved_depth = tt_entry.depth;
-            
+    
             pv_move_hint = tt_entry.forward_move;
-
-            if retrieved_depth >= Q_DEPTH_MARKER {
+            if tt_entry.depth >= Q_DEPTH_MARKER {
                 // EXACT: The true minimax value was found; return it immediately.
                 if tt_entry.flag == HashFlag::EXACT {
                     return SearchResult { 
@@ -664,30 +674,29 @@ impl SearchWorker {
 
                 // LOWER BOUND: The true score is AT LEAST this high. 
                 else if tt_entry.flag == HashFlag::LOWERBOUND {
-                    alpha = cmp::max(alpha, retrieved_score);
-
                     // Hard Cut-off
-                    if alpha >= beta {
+                    if retrieved_score >= beta {
                         return SearchResult {
                             score: retrieved_score,
-                            best_move: ForwardMove::NULL_MOVE,
+                            best_move: pv_move_hint,
                             was_aborted: false,
                         };
                     }
+                    alpha = cmp::max(alpha, retrieved_score);
                 }
                 // UPPER BOUND: The true score is AT MOST this high.
                 else if tt_entry.flag == HashFlag::UPPERBOUND {
-                    beta = cmp::min(beta, retrieved_score);
-
                     // Hard Cut-off
-                    if alpha >= beta {
+                    if retrieved_score <= alpha {
                         return SearchResult {
                             score: retrieved_score,
-                            best_move: ForwardMove::NULL_MOVE,
+                            best_move: pv_move_hint,
                             was_aborted: false,
                         };
                     }
-                }  
+
+                    beta = cmp::min(beta, retrieved_score);
+                } 
             }
         }
 
@@ -701,36 +710,26 @@ impl SearchWorker {
             best_score = static_eval;
 
             // Fail-Soft Standing Pat Cutoff: Return the actual score that broke beta
-            if best_score >= original_beta {
-                self.transposition_table.store(
-                    hash, best_score, 
-                    Q_DEPTH_MARKER, ply, self.age, 
-                    ForwardMove::NULL_MOVE, HashFlag::LOWERBOUND
-                );
+            if best_score >= beta {
+                let aborted = self.stop_signal.load(Ordering::Relaxed);
+                
+                if !aborted {
+                    self.transposition_table.store(
+                        hash, best_score, 
+                        Q_DEPTH_MARKER, ply, self.age, 
+                        ForwardMove::NULL_MOVE, HashFlag::LOWERBOUND
+                    );
+                }
+
                 return SearchResult {
-                    score: best_score, 
+                    score: if aborted { 0 } else { best_score }, 
                     best_move: ForwardMove::NULL_MOVE,
-                    was_aborted: false,
+                    was_aborted: aborted,
                 };
             }
 
             if best_score > alpha {
                 alpha = best_score;
-                if alpha >= beta {
-                    if beta == original_beta {
-                        self.transposition_table.store(
-                            hash, best_score, 
-                            Q_DEPTH_MARKER, ply, self.age,
-                            ForwardMove::NULL_MOVE, HashFlag::LOWERBOUND
-                        );
-                    }
-
-                    return SearchResult {
-                        score: best_score,
-                        best_move: ForwardMove::NULL_MOVE,
-                        was_aborted: false,
-                    };
-                }
             }
         } else {
             // Safe checkmate buffer baseline prevents the engine from masking mate strings
@@ -769,7 +768,7 @@ impl SearchWorker {
             // Push move (handles UCI, board state, hash, and history internally)
             self.process_forward_move(*forward_move);
             
-            // Psuedo legal move exposes check, undo move
+            // Pseudo legal move exposes check, undo move
             if self.chess_board.is_previous_player_king_in_check() {
                 self.process_backward_move();
                 continue;
@@ -795,8 +794,6 @@ impl SearchWorker {
 
                 if score > alpha {
                     alpha = score;
-
-                    // Fail-Soft Cutoff Loop
                     if score >= beta { 
                         break;
                     }
@@ -804,30 +801,42 @@ impl SearchWorker {
             }
         }
 
+        let aborted = self.stop_signal.load(Ordering::Relaxed);
         // 6. Checkmate/Stalemate Terminal Node Resolutions
         if legal_moves_played == 0 {
-            let terminal_score = if king_in_check {
-                -MATE_VALUE + ply
-            } else {
-                0
-            };
+            // Check if the search was halted BEFORE processing or storing anything
 
-            if !self.stop_signal.load(Ordering::Relaxed) {
-                self.transposition_table.store(
-                    hash, terminal_score, 
-                    Q_DEPTH_MARKER, ply, self.age,
-                    ForwardMove::NULL_MOVE, HashFlag::EXACT
-                );
+            if aborted {
+                return SearchResult { 
+                    score: 0, 
+                    best_move: ForwardMove::NULL_MOVE, 
+                    was_aborted: true 
+                };
             }
 
-            return SearchResult { 
-                score: terminal_score,
-                best_move: ForwardMove::NULL_MOVE, 
-                was_aborted: self.stop_signal.load(Ordering::Relaxed), 
-            };
+            if king_in_check {
+                let terminal_score = if king_in_check {
+                    -MATE_VALUE + ply
+                } else {
+                    0
+                };
+
+                self.transposition_table.store(
+                    hash, terminal_score,
+                    Q_DEPTH_MARKER, ply, self.age,
+                    ForwardMove::NULL_MOVE, HashFlag::EXACT,
+                );
+
+                return SearchResult { 
+                    score: terminal_score,
+                    best_move: ForwardMove::NULL_MOVE, 
+                    was_aborted: false, 
+                };
+            }
         }
 
-        if self.stop_signal.load(Ordering::Relaxed) {
+        // Global halt catch before finalizing the Q-search node evaluation
+        if aborted {
             return SearchResult { 
                 score: 0, 
                 best_move: ForwardMove::NULL_MOVE, 
@@ -835,29 +844,19 @@ impl SearchWorker {
             };
         }
 
-        // 7. Pure Fail-Soft Transposition Storage and Return Contract
-        let final_hash_flag = if best_score >= original_beta {
-            // We found a Score that exceeds the original_beta - We also want to use original_beta not beta to set a tigher LowerBound
-            HashFlag::LOWERBOUND
-        } else if best_score > original_alpha {
-            // Fail-Soft / Hard-Cut off can only be 100% Certain if alpha / beta didn't change. 
-            if alpha != original_alpha || beta != original_beta {
-                if beta != original_beta { 
-                    HashFlag::LOWERBOUND 
-                } else { 
-                    HashFlag::UPPERBOUND 
-                }
-            } else {
-                HashFlag::EXACT
-            }
+        // Pure Fail-Soft TT Storage and Return Contract
+        let final_hash_flag = if best_score <= original_alpha {
+            HashFlag::UPPERBOUND // Fail-Low: Checked everything, all moves sucked
+        } else if best_score >= original_beta {
+            HashFlag::LOWERBOUND // Fail-High: Pruned early, found a refutation
         } else {
-            HashFlag::UPPERBOUND
+            HashFlag::EXACT
         };
 
         self.transposition_table.store(
-            hash, best_score, 
+            hash, best_score,
             Q_DEPTH_MARKER, ply, self.age,
-            best_move, final_hash_flag
+            ForwardMove::NULL_MOVE, final_hash_flag,
         );
 
         SearchResult { 

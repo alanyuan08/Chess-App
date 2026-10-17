@@ -177,6 +177,7 @@ impl TranspositionTable {
     // as Stockfish RL uses 80% Deep Search + 20% WLD. This will be kept for now, however we may need to revisit
 
     // Transposition Table Entries are unique for every key 
+    // The 1/4 of the buckets is depth-preferred - 3/4 is always-replace 
     #[inline(always)]
      pub fn probe(&self, key: u64, ply: i16) -> TTResult {
         let bucket_idx = (key as usize) & self.mask;

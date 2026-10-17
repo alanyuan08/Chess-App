@@ -760,11 +760,14 @@ impl ChessBoard {
         let target_white: &mut [i16; 256] = &mut current_frame.white;
         let target_black: &mut [i16; 256] = &mut current_frame.black;
 
-        // Initialize both sides with biases first
+        // Initialize both sides with biases first (casting i32 to i16)
         let biases = &self.nnue_network.l1_biases;
-        for i in 0..256 {
-            target_white[i] = biases[i] as i16;
-            target_black[i] = biases[i] as i16;
+
+        // Using zip allows the compiler to optimize the loop boundaries and apply SIMD
+        for (i, &bias) in biases.iter().enumerate().take(256) {
+            let casted_bias = bias as i16;
+            target_white[i] = casted_bias;
+            target_black[i] = casted_bias;
         }
 
         // Combine ALL piece bitboards

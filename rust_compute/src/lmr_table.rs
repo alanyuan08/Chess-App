@@ -12,7 +12,7 @@ pub static LMR_TABLE: LazyLock<[[i8; 64]; 64]> = LazyLock::new(|| {
                 continue;
             }
                          
-            let r = (depth as f64).ln() * (moves as f64).ln() / 2.3;
+            let r = (depth as f64).ln() * (moves as f64).ln() / 1.75;
             *cell = r.floor() as i8;
         }
     }
