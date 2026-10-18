@@ -226,7 +226,7 @@ impl TranspositionTable {
     ) {
         let bucket_idx = (hash as usize) & self.mask;
         let bucket = &self.buckets[bucket_idx];
-        let midpoint = SLOTS_PER_BUCKET / 4;
+        let midpoint = SLOTS_PER_BUCKET / 2;
 
         let is_pos_mate = score >= MATE_THRESHOLD;
         let is_neg_mate = score <= -MATE_THRESHOLD;

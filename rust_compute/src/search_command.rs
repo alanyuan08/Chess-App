@@ -5,7 +5,9 @@ pub enum SearchCommand {
         uci_move: String,
     },
     
-    StartSearch
+    StartSearch  {
+        age: i8,
+    },
 }
 
 #[derive(Clone, Copy)]

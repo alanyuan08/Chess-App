@@ -74,23 +74,29 @@ impl SearchWorker {
     }
 
     // Search Entry Point
-    pub fn root_search(&mut self) -> (ForwardMove, usize, usize){
+    pub fn root_search(&mut self, engine_age: i8) -> (ForwardMove, usize, usize){
         // Start the timer
         self.nodes_processed = 0;
 
+        // reset the age
+        self.age = engine_age;
+
         // --- ITERATIVE DEEPENING LOOP ---
         let mut best_move_overall: ForwardMove = ForwardMove::NULL_MOVE;
-        let mut depth = 1;
+        let mut depth = 0;
 
         while depth <= MAX_DEPTH {
             let result = self.negamax(depth, 0, -INFINITY, INFINITY, best_move_overall, true);
             
             if !self.stop_signal.load(Ordering::Relaxed){
                 if self.thread_id == 0 {
-                    best_move_overall = result.best_move;
-                    println!("[Master Thread] Completed Depth: {} | Best Move Score: {:?}", 
-                        depth, best_move_overall);
-                    if depth >= PV_DEPTH { 
+                    if !result.was_aborted {
+                        best_move_overall = result.best_move;
+                        println!("[Master Thread] Completed Depth: {} | Best Move Score: {:?}", 
+                            depth, best_move_overall);
+                    }
+
+                    if depth >= MAX_DEPTH { 
                         self.stop_signal.store(true, Ordering::Relaxed);
                         break;
                     }
@@ -102,7 +108,6 @@ impl SearchWorker {
             depth += 1;
         }
         
-        self.age += 1;
         (best_move_overall, self.nodes_processed, self.thread_id)
     }
 
@@ -398,7 +403,7 @@ impl SearchWorker {
         // Leaf Node Condition -> Drop into Quiescence Search
         // Q-Search uses Hard-Cut Off and the value is bounded between alpha - beta
         if depth == 0 {
-            return self.quiescence_search(alpha, beta, ply);
+            return self.quiescence_search(alpha, beta, ply, pv_move_hint);
         }
 
         let static_eval = self.static_eval();
@@ -418,7 +423,7 @@ impl SearchWorker {
                 let mut fail_soft_score = static_eval;
 
                 if fail_soft_score > MATE_THRESHOLD - 100 { 
-                    fail_soft_score = original_beta; 
+                    fail_soft_score = beta; 
                 }
 
                 if !aborted && beta == original_beta {
@@ -432,7 +437,7 @@ impl SearchWorker {
                 return SearchResult {
                     score: if aborted { 0 } else { fail_soft_score },
                     best_move: ForwardMove::NULL_MOVE,
-                    was_aborted: aborted,
+                    was_aborted: false,
                 };
             }
         }
@@ -528,7 +533,7 @@ impl SearchWorker {
                 negamax_result = self.negamax(reduced_depth, ply + 1, -alpha - 1, -alpha, ForwardMove::NULL_MOVE, true);
                 
                 // If the reduced search failed high, we must re-search at full depth
-                if !negamax_result.was_aborted && -negamax_result.score >= alpha {
+                if !negamax_result.was_aborted && -negamax_result.score > alpha {
                     negamax_result = self.negamax(depth - 1, ply + 1, -beta, -alpha, ForwardMove::NULL_MOVE, true);
                 }
             } else {
@@ -628,7 +633,7 @@ impl SearchWorker {
     // Quiescence Search -> Q-Search only uses Score and was_aborted. 
     // Fail-Soft -> Allows the function to return a value completely outside the [alpha, beta] window
     // Hard Cut-Off -> Once a value causes alpha >= beta, stop the search
-    fn quiescence_search(&mut self, mut alpha: i16, mut beta: i16, ply: i16) -> SearchResult {        
+    fn quiescence_search(&mut self, mut alpha: i16, beta: i16, ply: i16, mut pv_move_hint: ForwardMove) -> SearchResult {        
         // 1. Halt Signal
         if self.nodes_processed & 0x3FFF == 0 && self.stop_signal.load(Ordering::Relaxed) {
             return SearchResult { 
@@ -651,7 +656,6 @@ impl SearchWorker {
         }
 
         let hash = self.chess_board.zobrist_hash();
-        let mut pv_move_hint = ForwardMove::NULL_MOVE;
         const Q_DEPTH_MARKER: i8 = -1;
         let original_alpha = alpha;
         let original_beta = beta;
@@ -660,44 +664,40 @@ impl SearchWorker {
         let tt_entry = self.transposition_table.probe(hash, ply);
         if tt_entry.flag != HashFlag::EMPTY {
             let retrieved_score = tt_entry.score;
-    
+
             pv_move_hint = tt_entry.forward_move;
-            if tt_entry.depth >= Q_DEPTH_MARKER {
-                // EXACT: The true minimax value was found; return it immediately.
-                if tt_entry.flag == HashFlag::EXACT {
-                    return SearchResult { 
-                        score: retrieved_score, 
+            // EXACT: The true minimax value was found; return it immediately.
+            if tt_entry.flag == HashFlag::EXACT {
+                return SearchResult { 
+                    score: retrieved_score, 
+                    best_move: pv_move_hint,
+                    was_aborted: false,
+                };
+            }
+
+            // LOWER BOUND: The true score is AT LEAST this high. 
+            else if tt_entry.flag == HashFlag::LOWERBOUND {
+                // Hard Cut-off
+                if retrieved_score >= beta {
+                    return SearchResult {
+                        score: retrieved_score,
                         best_move: pv_move_hint,
                         was_aborted: false,
                     };
                 }
-
-                // LOWER BOUND: The true score is AT LEAST this high. 
-                else if tt_entry.flag == HashFlag::LOWERBOUND {
-                    // Hard Cut-off
-                    if retrieved_score >= beta {
-                        return SearchResult {
-                            score: retrieved_score,
-                            best_move: pv_move_hint,
-                            was_aborted: false,
-                        };
-                    }
-                    alpha = cmp::max(alpha, retrieved_score);
-                }
-                // UPPER BOUND: The true score is AT MOST this high.
-                else if tt_entry.flag == HashFlag::UPPERBOUND {
-                    // Hard Cut-off
-                    if retrieved_score <= alpha {
-                        return SearchResult {
-                            score: retrieved_score,
-                            best_move: pv_move_hint,
-                            was_aborted: false,
-                        };
-                    }
-
-                    beta = cmp::min(beta, retrieved_score);
-                } 
+                alpha = cmp::max(alpha, retrieved_score);
             }
+            // UPPER BOUND: The true score is AT MOST this high.
+            else if tt_entry.flag == HashFlag::UPPERBOUND {
+                // Hard Cut-off
+                if retrieved_score <= alpha {
+                    return SearchResult {
+                        score: retrieved_score,
+                        best_move: pv_move_hint,
+                        was_aborted: false,
+                    };
+                }
+            } 
         }
 
         // 4. Standing Pat 
@@ -775,7 +775,7 @@ impl SearchWorker {
             }
 
             legal_moves_played += 1;
-            let search_result = self.quiescence_search(-beta, -alpha, ply + 1);
+            let search_result = self.quiescence_search(-beta, -alpha, ply + 1, ForwardMove::NULL_MOVE);
             self.process_backward_move();
 
             if search_result.was_aborted {
@@ -856,7 +856,7 @@ impl SearchWorker {
         self.transposition_table.store(
             hash, best_score,
             Q_DEPTH_MARKER, ply, self.age,
-            ForwardMove::NULL_MOVE, final_hash_flag,
+            best_move, final_hash_flag,
         );
 
         SearchResult { 

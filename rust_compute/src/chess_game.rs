@@ -1,4 +1,4 @@
-use std::sync::atomic::{ AtomicBool, Ordering };
+use std::sync::atomic::{ AtomicBool, AtomicUsize, Ordering };
 use crossbeam_channel::{ unbounded, Sender, Receiver };
 use pyo3::prelude::*;
 use pyo3::types::PyString;
@@ -17,7 +17,6 @@ use crate::nnue_network::*;
 use crate::search_command::*;
 use crate::move_command::*;
 
-pub const PV_DEPTH: i8 = 18;
 pub const MAX_DEPTH: i8 = 22;
 
 // When a thread finishes, if it exceeds the time, it will send the 
@@ -52,7 +51,9 @@ pub struct ChessGame {
 
     worker_channels: Vec<Sender<SearchCommand>>, 
     search_result_channel: Receiver<WorkerSearchResult>,
+
     stop_signal: Arc<AtomicBool>, 
+    search_age: Arc<AtomicUsize>, 
 }
 
 #[pymethods]
@@ -73,10 +74,13 @@ impl ChessGame {
         let mut worker_channels = Vec::with_capacity(NUM_THREADS);
         let stop_signal = Arc::new(AtomicBool::new(false));
 
-        // 4. Main Thread Receiver
+        // 4. Search Age
+        let search_age = Arc::new(AtomicUsize::new(0));
+
+        // 5. Main Thread Receiver
         let (main_sender, main_reciever) = unbounded::<WorkerSearchResult>(); 
 
-        // 5. Create Worker Threads
+        // 6. Create Worker Threads
         for thread_id in 0..NUM_THREADS {
             // Create Worker Sender / Reciever
             let (worker_sender, worker_reciever) = unbounded::<SearchCommand>();
@@ -102,9 +106,9 @@ impl ChessGame {
                             // Incrementally update the worker's internal state/NNUE accumulators
                             search_worker.process_move(uci_move);
                         }
-                        SearchCommand::StartSearch => {
+                        SearchCommand::StartSearch { age } => {
                             let (thread_best_move, nodes_processed, thread_id) = 
-                                search_worker.root_search();
+                                search_worker.root_search(age);
 
                             let _ = main_sender_clone.send(
                                 WorkerSearchResult { nodes_processed, thread_best_move, thread_id }
@@ -121,6 +125,7 @@ impl ChessGame {
             worker_channels,
             search_result_channel: main_reciever,
             stop_signal,
+            search_age,
         }
     }
 
@@ -147,22 +152,31 @@ impl ChessGame {
         
         // 1. Reset the Start
         let mut total_nodes_processed = 0;
-        self.stop_signal.store(false, Ordering::Relaxed);
         let start_time = Instant::now();
+
+        let engine_age_reference = self.search_age.fetch_add(1, Ordering::Relaxed) + 1;
+        self.stop_signal.store(false, Ordering::Relaxed);
 
         // 2. Initiate Search
         for result_tx in &self.worker_channels {
-            let _ = result_tx.send(SearchCommand::StartSearch {});
+            let _ = result_tx.send(SearchCommand::StartSearch { age: engine_age_reference as i8 });
         }
 
         // 3. Initiate 20 second safety timer worker 
         let stop_signal_clone = Arc::clone(&self.stop_signal); 
+        let search_age_clone = Arc::clone(&self.search_age); 
+        
         thread::spawn(move || {
-            thread::sleep(Duration::from_secs(SEARCH_TIME_LIMIT));            
-            stop_signal_clone.store(true, Ordering::Relaxed);
+            thread::sleep(Duration::from_secs(SEARCH_TIME_LIMIT));
+
+            let live_engine_age = search_age_clone.load(Ordering::Relaxed);
+
+            if live_engine_age == engine_age_reference {       
+                stop_signal_clone.store(true, Ordering::Relaxed);
+            }
         });
 
-         // 3. Wait for all Threads to exit
+        // 4. Wait for all Threads to exit
         let mut best_move = String::new();
         for _ in 0..NUM_THREADS {
             match self.search_result_channel.recv() {
@@ -180,7 +194,7 @@ impl ChessGame {
             }
         }
 
-        // 4. Return to Python
+        // 5. Return to Python
         let elapsed_time = start_time.elapsed();
         println!("{} Nodes Procesed in {} milliseconds", 
             total_nodes_processed, elapsed_time.as_millis());
