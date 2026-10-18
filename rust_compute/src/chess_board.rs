@@ -817,8 +817,6 @@ impl ChessBoard {
 
     pub fn evaluate(&mut self, accumulators: &AccumulatorHistory, buffer: &mut NnueInferenceBuffer) -> i16 {
         // --- PERSPECTIVE ROUTING ---
-        // Side to move (US) always fills the first 256 inputs.
-        // Opponent (THEM) always fills the second 256 inputs.
         let (active_acc, opp_acc) = match self.active_player {
             Side::WHITE => (
                 &accumulators.moves[self.ply as usize].white, 
@@ -830,13 +828,12 @@ impl ChessBoard {
             ),
         };
 
-        // --- STEP 0: ACCUMULATOR (Input -> Accumulator) ---
-        // Coerce destination into exact fixed-size slices to completely eliminate bounds checks
+        // --- STEP 0: ACCUMULATOR ---
         let (l2_left, l2_right) = buffer.l2_inputs.split_at_mut(256);
         let l2_left: &mut [i8; 256] = l2_left.try_into().unwrap();
         let l2_right: &mut [i8; 256] = l2_right.try_into().unwrap();
 
-        // --- STEP 1: CONCATENATION & ACTIVATION (L1 -> L2 / Clipped ReLU) ---
+        // --- STEP 1: Clipped ReLU ---
         for i in 0..256 {
             l2_left[i] = active_acc[i].clamp(0, 127) as i8;
         }
@@ -853,13 +850,12 @@ impl ChessBoard {
             let mut sum: i32 = l2_biases[neuron];
             let row: &[i8; 512] = &self.nnue_network.l2_weights[neuron];
 
-            // 512 iterations with exact-size arrays: compiler unrolls this beautifully via SIMD/AVX2
             for i in 0..512 {
                 sum += (l2_inputs[i] as i32) * (row[i] as i32);
             }
 
-            let activated = sum >> 7;
-            l3_inputs[neuron] = activated.clamp(0, 32) as i8;
+            let activated = sum >> 6;
+            l3_inputs[neuron] = activated.clamp(0, 127) as i8;
         }
 
         // --- STEP 3: HIDDEN LAYER 3 (32 -> 32) ---
@@ -874,8 +870,8 @@ impl ChessBoard {
                 sum += (l3_inputs[i] as i32) * (row[i] as i32);
             }
 
-            let activated = sum >> 5;
-            l4_inputs[neuron] = activated.clamp(0, 32) as i8;
+            let activated = sum >> 6;
+            l4_inputs[neuron] = activated.clamp(0, 127) as i8;
         }
 
         // --- STEP 4: OUTPUT LAYER (32 -> 1) ---
@@ -886,10 +882,9 @@ impl ChessBoard {
             final_sum += (l4_inputs[i] as i32) * (row[i] as i32);
         }
 
-        let internal_pawns_scaled = final_sum >> 5;
+        let score_scaled = (final_sum * 100) >> 12;
 
-        // Shift by >> 7 to remove remaining scale context factors
-        ((internal_pawns_scaled * 100) >> 7) as i16
+        score_scaled as i16
     }
 
     /// Progresses the network forward incrementally during move making
@@ -989,7 +984,7 @@ impl ChessBoard {
 
     #[inline]
     pub fn unmake_move(&mut self) {
-        // 🛡️ Safe development check: verifies we never unroll past the root.
+        // Safe development check: verifies we never unroll past the root.
         // It disappears completely in --release mode, leaving zero runtime overhead.
         debug_assert!(self.ply > 0, "Catastrophic: Attempted to unmake_move at root ply 0!");
 

@@ -83,7 +83,7 @@ impl SearchWorker {
 
         // --- ITERATIVE DEEPENING LOOP ---
         let mut best_move_overall: ForwardMove = ForwardMove::NULL_MOVE;
-        let mut depth = 0;
+        let mut depth = 1;
 
         while depth <= MAX_DEPTH {
             let result = self.negamax(depth, 0, -INFINITY, INFINITY, best_move_overall, true);
@@ -664,8 +664,8 @@ impl SearchWorker {
         let tt_entry = self.transposition_table.probe(hash, ply);
         if tt_entry.flag != HashFlag::EMPTY {
             let retrieved_score = tt_entry.score;
-
             pv_move_hint = tt_entry.forward_move;
+
             // EXACT: The true minimax value was found; return it immediately.
             if tt_entry.flag == HashFlag::EXACT {
                 return SearchResult { 
@@ -677,7 +677,6 @@ impl SearchWorker {
 
             // LOWER BOUND: The true score is AT LEAST this high. 
             else if tt_entry.flag == HashFlag::LOWERBOUND {
-                // Hard Cut-off
                 if retrieved_score >= beta {
                     return SearchResult {
                         score: retrieved_score,
@@ -689,7 +688,6 @@ impl SearchWorker {
             }
             // UPPER BOUND: The true score is AT MOST this high.
             else if tt_entry.flag == HashFlag::UPPERBOUND {
-                // Hard Cut-off
                 if retrieved_score <= alpha {
                     return SearchResult {
                         score: retrieved_score,
@@ -804,8 +802,6 @@ impl SearchWorker {
         let aborted = self.stop_signal.load(Ordering::Relaxed);
         // 6. Checkmate/Stalemate Terminal Node Resolutions
         if legal_moves_played == 0 {
-            // Check if the search was halted BEFORE processing or storing anything
-
             if aborted {
                 return SearchResult { 
                     score: 0, 
@@ -846,9 +842,9 @@ impl SearchWorker {
 
         // Pure Fail-Soft TT Storage and Return Contract
         let final_hash_flag = if best_score <= original_alpha {
-            HashFlag::UPPERBOUND // Fail-Low: Checked everything, all moves sucked
+            HashFlag::UPPERBOUND
         } else if best_score >= original_beta {
-            HashFlag::LOWERBOUND // Fail-High: Pruned early, found a refutation
+            HashFlag::LOWERBOUND
         } else {
             HashFlag::EXACT
         };

@@ -17,7 +17,7 @@ use crate::nnue_network::*;
 use crate::search_command::*;
 use crate::move_command::*;
 
-pub const MAX_DEPTH: i8 = 22;
+pub const MAX_DEPTH: i8 = 20;
 
 // When a thread finishes, if it exceeds the time, it will send the 
 // termination signal to the other threads.
@@ -162,7 +162,7 @@ impl ChessGame {
             let _ = result_tx.send(SearchCommand::StartSearch { age: engine_age_reference as i8 });
         }
 
-        // 3. Initiate 20 second safety timer worker 
+        // 3. Initiate SEARCH_TIME_LIMIT second safety timer worker 
         let stop_signal_clone = Arc::clone(&self.stop_signal); 
         let search_age_clone = Arc::clone(&self.search_age); 
         
