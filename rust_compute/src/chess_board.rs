@@ -459,16 +459,8 @@ impl ChessBoard {
         // XOR the current State for Castle, En Passant and Side to Move
         self.zobrist_xor();
 
-        let mut remove_piece = BoardPiece::NONE;
-        // Store Removed Piece / No bitboard Operations
-        match move_command.move_type { 
-            MoveFlag::CAPTURE | MoveFlag::PROMOTIONQUEEN |
-            MoveFlag::PROMOTIONROOK | MoveFlag::PROMOTIONBISHOP | 
-            MoveFlag::PROMOTIONKNIGHT | MoveFlag::ENPASSANT => {
-                remove_piece = self.mailbox[move_command.capture_sq as usize];
-            },
-            _ => {},
-        }
+        // Remove the Capture Square
+        let remove_piece = self.mailbox[move_command.capture_sq as usize];
 
         // Clear the Previous En Passant
         self.en_passant = 64;
@@ -691,14 +683,7 @@ impl ChessBoard {
 
         // Restore Piece only if one was actually captured
         if undo_move_cmd.captured_piece != BoardPiece::NONE {
-            match undo_move_cmd.move_type { 
-                MoveFlag::CAPTURE | MoveFlag::PROMOTIONQUEEN | 
-                MoveFlag::PROMOTIONROOK | MoveFlag::PROMOTIONBISHOP | 
-                MoveFlag::PROMOTIONKNIGHT | MoveFlag::ENPASSANT => {
-                    self._place_piece(undo_move_cmd.capture_sq as usize, undo_move_cmd.captured_piece);
-                },
-                _ => {},
-            }
+            self._place_piece(undo_move_cmd.capture_sq as usize, undo_move_cmd.captured_piece);
         }
 
         // Restore En Passant

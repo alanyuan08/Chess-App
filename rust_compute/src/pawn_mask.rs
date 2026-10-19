@@ -320,7 +320,7 @@ pub fn black_pawn_moves(
             let target = double_move.trailing_zeros() as u8;
             moves.push(
                 ForwardMove { 
-                    start_sq: target + 8 * 2, 
+                    start_sq: target + 16, 
                     end_sq: target, 
                     capture_sq: target,
                     move_type: MoveFlag::PAWNOPENMOVE, 
