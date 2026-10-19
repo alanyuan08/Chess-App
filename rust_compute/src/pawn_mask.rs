@@ -466,27 +466,29 @@ pub fn black_pawn_moves(
         });
 
         // 2. Under-promotions: Pushed past 1000 so they are evaluated after quiet moves
-        moves.push(ForwardMove { 
-            start_sq: target + 7, 
-            end_sq: target, 
-            capture_sq: target,
-            move_type: MoveFlag::PROMOTIONROOK, 
-            pv_score: -500 
-        });
-        moves.push(ForwardMove { 
-            start_sq: target + 7, 
-            end_sq: target, 
-            capture_sq: target,
-            move_type: MoveFlag::PROMOTIONBISHOP, 
-            pv_score: -500 
-        });
-        moves.push(ForwardMove { 
-            start_sq: target + 7, 
-            end_sq: target, 
-            capture_sq: target,
-            move_type: MoveFlag::PROMOTIONKNIGHT, 
-            pv_score: -500 
-        });
+        if !only_tactical {
+            moves.push(ForwardMove { 
+                start_sq: target + 7, 
+                end_sq: target, 
+                capture_sq: target,
+                move_type: MoveFlag::PROMOTIONROOK, 
+                pv_score: -500 
+            });
+            moves.push(ForwardMove { 
+                start_sq: target + 7, 
+                end_sq: target, 
+                capture_sq: target,
+                move_type: MoveFlag::PROMOTIONBISHOP, 
+                pv_score: -500 
+            });
+            moves.push(ForwardMove { 
+                start_sq: target + 7, 
+                end_sq: target, 
+                capture_sq: target,
+                move_type: MoveFlag::PROMOTIONKNIGHT, 
+                pv_score: -500 
+            });
+        }
         right_capture_promotion &= right_capture_promotion - 1;
     }
 

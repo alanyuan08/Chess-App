@@ -20,13 +20,12 @@ impl ForwardMove {
 }
 
 // Custom PartialEq to exclude pv_score from equality checks
-// The capture_sq is excluded as start_sq / end_sq / move_type can uniquely
-// EN_PAssant for PV_HINT
 impl PartialEq for ForwardMove {
     fn eq(&self, other: &Self) -> bool {
         self.start_sq == other.start_sq 
             && self.end_sq == other.end_sq 
             && self.move_type == other.move_type
+            && self.capture_sq == other.capture_sq
     }
 }
 
