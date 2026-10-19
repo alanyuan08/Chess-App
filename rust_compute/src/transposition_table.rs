@@ -197,6 +197,15 @@ impl TranspositionTable {
                 let is_neg_mate = local_score <= -MATE_THRESHOLD;
                 local_score = local_score - (is_pos_mate as i16 * ply) + (is_neg_mate as i16 * ply);
                 
+                // En Passant Offset
+                const EP_OFFSET_LOOKUP: [i8; 2] = [8, -8];
+
+                let is_ep = (entry.move_type == MoveFlag::ENPASSANT) as i8;
+                let is_white = (entry.end_sq > entry.start_sq) as usize;
+                
+                let adjustment = is_ep * EP_OFFSET_LOOKUP[is_white];
+                let capture_sq = (entry.end_sq as i8 + adjustment) as u8;
+
                 return TTResult {
                     score: local_score,
                     depth: entry.depth,
@@ -204,7 +213,7 @@ impl TranspositionTable {
                     forward_move: ForwardMove {
                         start_sq: entry.start_sq,
                         end_sq: entry.end_sq,
-                        capture_sq: 0,
+                        capture_sq,
                         move_type: entry.move_type,
                         pv_score: 0,
                     },

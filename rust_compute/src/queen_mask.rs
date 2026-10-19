@@ -28,7 +28,7 @@ pub fn queen_moves(
                 moves.push(ForwardMove { 
                     start_sq: queen, 
                     end_sq: target, 
-                    capture_sq: 0,
+                    capture_sq: target,
                     move_type: MoveFlag::MOVE, 
                     pv_score: 0 
                 });

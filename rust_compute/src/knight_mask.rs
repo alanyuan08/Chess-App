@@ -54,7 +54,7 @@ pub fn knight_moves(
                     ForwardMove { 
                         start_sq: knight, 
                         end_sq: target, 
-                        capture_sq: 0,
+                        capture_sq: target,
                         move_type: MoveFlag::MOVE, 
                         pv_score: 0
                     }

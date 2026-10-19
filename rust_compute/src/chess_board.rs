@@ -26,7 +26,7 @@ pub struct ChessBoard {
 
     castling_rights: u8,
     en_passant: u8,
-    active_player: Side,
+    pub active_player: Side,
 
     zobrist_hash: u64,
     ply: usize,
@@ -887,12 +887,7 @@ impl ChessBoard {
         }
 
          // --- 2. Identify Captured Piece & Coordinate (Handles En Passant) ---
-        let (captured_sq, captured_piece) = if mv.move_type == MoveFlag::ENPASSANT {
-            let sq = if move_piece == BoardPiece::WPAWN { mv.end_sq - 8 } else { mv.end_sq + 8 };
-            (sq, self.mailbox[sq as usize])
-        } else {
-            (mv.end_sq, self.mailbox[mv.end_sq as usize])
-        };
+        let (captured_sq, captured_piece) = (mv.capture_sq, self.mailbox[mv.capture_sq as usize]);
 
         // --- 3. Compute Sparse Feature Indices for the Moving Piece ---
         let w_remove = get_feature_index(w_king_sq, move_piece, mv.start_sq, false);
