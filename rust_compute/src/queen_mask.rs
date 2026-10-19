@@ -26,7 +26,11 @@ pub fn queen_moves(
             while queen_moves != 0 {
                 let target = queen_moves.trailing_zeros() as u8;
                 moves.push(ForwardMove { 
-                    start_sq: queen, end_sq: target, move_type: MoveFlag::MOVE, pv_score: 0 
+                    start_sq: queen, 
+                    end_sq: target, 
+                    capture_sq: 0,
+                    move_type: MoveFlag::MOVE, 
+                    pv_score: 0 
                 });
                 queen_moves &= queen_moves - 1;
             }
@@ -42,6 +46,7 @@ pub fn queen_moves(
             moves.push(ForwardMove { 
                 start_sq: queen, 
                 end_sq: target, 
+                capture_sq: target,
                 move_type: MoveFlag::CAPTURE, 
                 pv_score 
             });

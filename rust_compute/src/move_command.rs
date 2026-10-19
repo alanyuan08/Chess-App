@@ -1,9 +1,10 @@
 #[derive(Debug, Clone, Copy)]
-#[repr(C)] // 5 Bytes
+#[repr(C)] // 6 Bytes
 pub struct ForwardMove {
-    pub pv_score: i16, // 2 Byte
-    pub start_sq: u8, // 1 Byte
-    pub end_sq: u8, // 1 Byte
+    pub pv_score: i16,       // 2 Byte
+    pub start_sq: u8,        // 1 Byte
+    pub end_sq: u8,          // 1 Byte
+    pub capture_sq: u8,       // 1 Byte
     pub move_type: MoveFlag, // 1 Byte
 }
 
@@ -12,12 +13,15 @@ impl ForwardMove {
     pub const NULL_MOVE: Self = ForwardMove {
         start_sq: 0,
         end_sq: 0,
+        capture_sq: 0,
         move_type: MoveFlag::NULL,
         pv_score: 0,
     };
 }
 
 // Custom PartialEq to exclude pv_score from equality checks
+// The capture_sq is excluded as start_sq / end_sq / move_type can uniquely
+// EN_PAssant for PV_HINT
 impl PartialEq for ForwardMove {
     fn eq(&self, other: &Self) -> bool {
         self.start_sq == other.start_sq 
@@ -31,19 +35,22 @@ impl Eq for ForwardMove {}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)] // 6 Bytes
 pub struct UndoMove {
-    pub start_sq: u8, // 1 Byte
-    pub end_sq: u8, // 1 Byte
-    pub prev_castle_rights: u8, // 1 Byte
-    pub prev_en_passant: u8, // 1 Byte
+    pub start_sq: u8,
+    pub end_sq: u8,
+
+    pub capture_sq: u8,
+    pub prev_castle_rights: u8,
+    pub prev_en_passant: u8,
     
-    pub move_type: MoveFlag, // 1 Byte
-    pub captured_piece: BoardPiece, // 1 Byte
+    pub move_type: MoveFlag, 
+    pub captured_piece: BoardPiece,
 }
 
 impl UndoMove {
     pub const NULL_UNDO_MOVE: Self = UndoMove {
         start_sq: 0,
         end_sq: 0,
+        capture_sq: 0,
         prev_castle_rights: 0,
         prev_en_passant: 64, 
         move_type: MoveFlag::NULL,

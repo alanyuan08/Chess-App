@@ -204,6 +204,7 @@ impl TranspositionTable {
                     forward_move: ForwardMove {
                         start_sq: entry.start_sq,
                         end_sq: entry.end_sq,
+                        capture_sq: 0,
                         move_type: entry.move_type,
                         pv_score: 0,
                     },

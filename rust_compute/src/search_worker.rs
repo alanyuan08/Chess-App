@@ -201,6 +201,7 @@ impl SearchWorker {
         let undo_state = UndoMove {
             start_sq: forward_move.start_sq,
             end_sq: forward_move.end_sq,
+            capture_sq: forward_move.capture_sq,
             prev_castle_rights,
             prev_en_passant,
             move_type,

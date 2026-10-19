@@ -228,6 +228,7 @@ pub fn bishop_moves(
                 moves.push(ForwardMove { 
                     start_sq: bishop, 
                     end_sq: target, 
+                    capture_sq: 0,
                     move_type: MoveFlag::MOVE, 
                     pv_score: 0
                 });
@@ -245,6 +246,7 @@ pub fn bishop_moves(
             moves.push(ForwardMove { 
                 start_sq: bishop, 
                 end_sq: target, 
+                capture_sq: target,
                 move_type: MoveFlag::CAPTURE, 
                 pv_score
             });

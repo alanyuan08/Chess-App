@@ -253,7 +253,8 @@ pub fn rook_moves(
                 let target = rook_moves.trailing_zeros() as u8;
                 moves.push(ForwardMove { 
                     start_sq: rook, 
-                    end_sq: target, 
+                    end_sq: target,
+                    capture_sq: 0, 
                     move_type: MoveFlag::MOVE, 
                     pv_score: 0 
                 });
@@ -271,8 +272,9 @@ pub fn rook_moves(
             moves.push(ForwardMove { 
                 start_sq: rook, 
                 end_sq: target, 
+                capture_sq: target,
                 move_type: MoveFlag::CAPTURE, 
-                    pv_score 
+                pv_score 
             });
             rook_captures &= rook_captures - 1;
         }

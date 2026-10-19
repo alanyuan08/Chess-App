@@ -464,20 +464,8 @@ impl ChessBoard {
         match move_command.move_type { 
             MoveFlag::CAPTURE | MoveFlag::PROMOTIONQUEEN |
             MoveFlag::PROMOTIONROOK | MoveFlag::PROMOTIONBISHOP | 
-            MoveFlag::PROMOTIONKNIGHT => {
-                if self.mailbox[move_command.end_sq as usize] != BoardPiece::NONE {
-                    remove_piece = self.mailbox[move_command.end_sq as usize];
-                }
-            },
-            MoveFlag::ENPASSANT => {
-                match self.active_player {
-                    Side::WHITE => {
-                        remove_piece = self.mailbox[(move_command.end_sq - 8) as usize];
-                    },
-                    Side::BLACK => {
-                        remove_piece = self.mailbox[(move_command.end_sq + 8) as usize];
-                    },
-                }
+            MoveFlag::PROMOTIONKNIGHT | MoveFlag::ENPASSANT => {
+                remove_piece = self.mailbox[move_command.capture_sq as usize];
             },
             _ => {},
         }
@@ -528,23 +516,23 @@ impl ChessBoard {
                 match self.active_player {
                     Side::WHITE => {
                         let king_move_cmd = ForwardMove { 
-                            start_sq: 4, end_sq: 6, move_type: MoveFlag::MOVE, pv_score: 0
+                            start_sq: 4, end_sq: 6, capture_sq: 0, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(king_move_cmd);
 
                         let rook_move_cmd = ForwardMove { 
-                            start_sq: 7, end_sq: 5, move_type: MoveFlag::MOVE, pv_score: 0
+                            start_sq: 7, end_sq: 5, capture_sq: 0, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(rook_move_cmd);
                     },
                     Side::BLACK => {
                         let king_move_cmd = ForwardMove { 
-                            start_sq: 60, end_sq: 62, move_type: MoveFlag::MOVE, pv_score: 0
+                            start_sq: 60, end_sq: 62, capture_sq: 0, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(king_move_cmd);
 
                         let rook_move_cmd = ForwardMove { 
-                            start_sq: 63, end_sq: 61, move_type: MoveFlag::MOVE, pv_score: 0
+                            start_sq: 63, end_sq: 61, capture_sq: 0, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(rook_move_cmd);
                     },
@@ -554,23 +542,23 @@ impl ChessBoard {
                 match self.active_player {
                     Side::WHITE => {
                         let king_move_cmd = ForwardMove { 
-                            start_sq: 4, end_sq: 2, move_type: MoveFlag::MOVE, pv_score: 0
+                            start_sq: 4, end_sq: 2, capture_sq: 0, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(king_move_cmd);
 
                         let rook_move_cmd = ForwardMove { 
-                            start_sq: 0, end_sq: 3, move_type: MoveFlag::MOVE, pv_score: 0
+                            start_sq: 0, end_sq: 3, capture_sq: 0, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(rook_move_cmd);
                     },
                     Side::BLACK => {
                         let king_move_cmd = ForwardMove { 
-                            start_sq: 60, end_sq: 58, move_type: MoveFlag::MOVE, pv_score: 0
+                            start_sq: 60, end_sq: 58, capture_sq: 0, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(king_move_cmd);
 
                         let rook_move_cmd = ForwardMove { 
-                            start_sq: 56, end_sq: 59, move_type: MoveFlag::MOVE, pv_score: 0
+                            start_sq: 56, end_sq: 59, capture_sq: 0, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(rook_move_cmd);
                     },
@@ -581,7 +569,7 @@ impl ChessBoard {
                 self._remove_piece(move_command.start_sq as usize);
 
                 if remove_piece != BoardPiece::NONE {
-                    self._remove_piece(move_command.end_sq as usize);
+                    self._remove_piece(move_command.capture_sq as usize);
                 }
 
                 match self.active_player {
@@ -597,19 +585,8 @@ impl ChessBoard {
                     },
                 }
             },
-            MoveFlag::ENPASSANT => {
-                self._move_piece(move_command);
-                match self.active_player {
-                    Side::WHITE => {
-                        self._remove_piece((move_command.end_sq - 8) as usize);
-                    },
-                    Side::BLACK => {
-                        self._remove_piece((move_command.end_sq + 8) as usize);
-                    },
-                }
-            },
-            MoveFlag::CAPTURE => {
-                self._remove_piece(move_command.end_sq as usize);
+            MoveFlag::CAPTURE | MoveFlag::ENPASSANT => {
+                self._remove_piece(move_command.capture_sq as usize);
                 self._move_piece(move_command);
             },
             MoveFlag::NULL => {},
@@ -633,10 +610,11 @@ impl ChessBoard {
         
         // Undo Move
         match undo_move_cmd.move_type {
-            MoveFlag::MOVE | MoveFlag::CAPTURE | MoveFlag::PAWNOPENMOVE | MoveFlag::ENPASSANT=> {
+            MoveFlag::MOVE | MoveFlag::CAPTURE | MoveFlag::PAWNOPENMOVE | MoveFlag::ENPASSANT => {
                 let undo_command = ForwardMove { 
                     start_sq: undo_move_cmd.end_sq, 
                     end_sq: undo_move_cmd.start_sq, 
+                    capture_sq: 0,
                     move_type: MoveFlag::MOVE, 
                     pv_score: 0,
                 };
@@ -647,23 +625,23 @@ impl ChessBoard {
                 match self.active_player {
                     Side::WHITE => {
                         let king_move_cmd = ForwardMove { 
-                            start_sq: 6, end_sq: 4, move_type: MoveFlag::MOVE, pv_score: 0
+                            start_sq: 6, end_sq: 4, capture_sq: 0, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(king_move_cmd);
 
                         let rook_move_cmd = ForwardMove { 
-                            start_sq: 5, end_sq: 7, move_type: MoveFlag::MOVE, pv_score: 0
+                            start_sq: 5, end_sq: 7, capture_sq: 0, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(rook_move_cmd);
                     },
                     Side::BLACK => {
                         let king_move_cmd = ForwardMove { 
-                            start_sq: 62, end_sq: 60, move_type: MoveFlag::MOVE, pv_score: 0
+                            start_sq: 62, end_sq: 60, capture_sq: 0, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(king_move_cmd);
 
                         let rook_move_cmd = ForwardMove { 
-                            start_sq: 61, end_sq: 63, move_type: MoveFlag::MOVE, pv_score: 0
+                            start_sq: 61, end_sq: 63, capture_sq: 0, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(rook_move_cmd);
                     },
@@ -673,23 +651,23 @@ impl ChessBoard {
                 match self.active_player {
                     Side::WHITE => {
                         let king_move_cmd = ForwardMove { 
-                            start_sq: 2, end_sq: 4, move_type: MoveFlag::MOVE, pv_score: 0
+                            start_sq: 2, end_sq: 4, capture_sq: 0, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(king_move_cmd);
 
                         let rook_move_cmd = ForwardMove { 
-                            start_sq: 3, end_sq: 0, move_type: MoveFlag::MOVE, pv_score: 0
+                            start_sq: 3, end_sq: 0, capture_sq: 0, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(rook_move_cmd);
                     },
                     Side::BLACK => {
                         let king_move_cmd = ForwardMove { 
-                            start_sq: 58, end_sq: 60, move_type: MoveFlag::MOVE, pv_score: 0
+                            start_sq: 58, end_sq: 60, capture_sq: 0, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(king_move_cmd);
 
                         let rook_move_cmd = ForwardMove { 
-                            start_sq: 59, end_sq: 56, move_type: MoveFlag::MOVE, pv_score: 0
+                            start_sq: 59, end_sq: 56, capture_sq: 0, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(rook_move_cmd);
                     },
@@ -716,13 +694,8 @@ impl ChessBoard {
             match undo_move_cmd.move_type { 
                 MoveFlag::CAPTURE | MoveFlag::PROMOTIONQUEEN | 
                 MoveFlag::PROMOTIONROOK | MoveFlag::PROMOTIONBISHOP | 
-                MoveFlag::PROMOTIONKNIGHT => {
-                    self._place_piece(undo_move_cmd.end_sq as usize, undo_move_cmd.captured_piece);
-                },
-                MoveFlag::ENPASSANT => {
-                    let ep_square = if self.active_player == Side::WHITE { 
-                        undo_move_cmd.end_sq - 8 } else { undo_move_cmd.end_sq + 8 };
-                    self._place_piece(ep_square as usize, undo_move_cmd.captured_piece);
+                MoveFlag::PROMOTIONKNIGHT | MoveFlag::ENPASSANT => {
+                    self._place_piece(undo_move_cmd.capture_sq as usize, undo_move_cmd.captured_piece);
                 },
                 _ => {},
             }
