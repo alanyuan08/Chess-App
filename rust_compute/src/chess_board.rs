@@ -490,16 +490,13 @@ impl ChessBoard {
             MoveFlag::PAWNOPENMOVE => {
                 // Update En Passant
                 let piece = self.mailbox[move_command.start_sq as usize];
-                if (piece == BoardPiece::WPAWN || piece == BoardPiece::BPAWN) && 
-                (move_command.start_sq as i8 - move_command.end_sq as i8).abs() == 16 {
-                    match self.active_player {
-                        Side::WHITE => {
-                            self.en_passant = move_command.start_sq + 8;
-                        },
-                        Side::BLACK => {
-                            self.en_passant = move_command.start_sq - 8;
-                        },
-                    }
+                match self.active_player {
+                    Side::WHITE => {
+                        self.en_passant = move_command.start_sq + 8;
+                    },
+                    Side::BLACK => {
+                        self.en_passant = move_command.start_sq - 8;
+                    },
                 }
                 
                 self._move_piece(move_command);
