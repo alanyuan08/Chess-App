@@ -39,12 +39,11 @@ pub fn parse_forward_move_with_board(uci: String, board: &ChessBoard) -> Forward
     let end_piece   = board.mailbox_piece(end_sq);
 
     let mut move_type = MoveFlag::MOVE;
-    let mut capture_sq = 0;
+    let mut capture_sq = end_sq;
 
     // --- Capture ---
     if is_some(end_piece) {
         move_type = MoveFlag::CAPTURE;
-        capture_sq = end_sq;
     }
 
     // --- Promotion ---
@@ -57,10 +56,6 @@ pub fn parse_forward_move_with_board(uci: String, board: &ChessBoard) -> Forward
             _   => MoveFlag::MOVE,
         };
 
-        // --- Promotion Capture ---
-        if is_some(end_piece) {
-            capture_sq = end_sq;
-        }
     }
 
     // --- Castling ---

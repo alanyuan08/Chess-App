@@ -339,7 +339,7 @@ pub fn black_pawn_moves(
         moves.push(ForwardMove { 
             start_sq: target + 8, 
             end_sq: target, 
-            capture_sq: 0,
+            capture_sq: target,
             move_type: MoveFlag::PROMOTIONQUEEN, 
             pv_score: 30_000 
         });

@@ -489,7 +489,6 @@ impl ChessBoard {
             },
             MoveFlag::PAWNOPENMOVE => {
                 // Update En Passant
-                let piece = self.mailbox[move_command.start_sq as usize];
                 match self.active_player {
                     Side::WHITE => {
                         self.en_passant = move_command.start_sq + 8;
@@ -498,7 +497,7 @@ impl ChessBoard {
                         self.en_passant = move_command.start_sq - 8;
                     },
                 }
-                
+            
                 self._move_piece(move_command);
             },
             MoveFlag::KINGSIDECASTLE => {
