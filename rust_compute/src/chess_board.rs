@@ -712,7 +712,7 @@ impl ChessBoard {
 
     #[inline(always)]
     pub fn null_move_accumulator(&mut self, accumulators: &mut AccumulatorHistory) {
-        let curr_ply = self.ply as usize;
+        let curr_ply = self.ply;
         let prev_ply = curr_ply - 1; 
 
         let (left, right) = accumulators.moves.split_at_mut(curr_ply);
@@ -792,12 +792,12 @@ impl ChessBoard {
         // --- PERSPECTIVE ROUTING ---
         let (active_acc, opp_acc) = match self.active_player {
             Side::WHITE => (
-                &accumulators.moves[self.ply as usize].white, 
-                &accumulators.moves[self.ply as usize].black
+                &accumulators.moves[self.ply].white, 
+                &accumulators.moves[self.ply].black
             ),
             Side::BLACK => (
-                &accumulators.moves[self.ply as usize].black, 
-                &accumulators.moves[self.ply as usize].white
+                &accumulators.moves[self.ply].black, 
+                &accumulators.moves[self.ply].white
             ),
             Side::NONE => panic!("Invalid Game State: active_player cannot be Side::NONE during NNUE accumulator fetching!"),
         };
@@ -817,8 +817,8 @@ impl ChessBoard {
 
         // --- STEP 2: HIDDEN LAYER 2 (512 -> 32) ---
         let l2_biases = &self.nnue_network.l2_biases;
-        let l2_inputs: &[i8; 512] = (&buffer.l2_inputs).try_into().unwrap();
-        let l3_inputs: &mut [i8; 32] = (&mut buffer.l3_inputs).try_into().unwrap();
+        let l2_inputs: &[i8; 512] = (&buffer.l2_inputs).try_into();
+        let l3_inputs: &mut [i8; 32] = (&mut buffer.l3_inputs).try_into();
 
         for neuron in 0..32 {
             let mut sum: i32 = l2_biases[neuron];

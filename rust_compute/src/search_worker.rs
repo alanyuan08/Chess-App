@@ -295,7 +295,7 @@ impl SearchWorker {
     // Static Eval
     #[inline]
     fn static_eval(&mut self) -> i16 {
-        self.chess_board.evaluate(&mut self.board_accumulator, &mut self.thread_buffer)
+        self.chess_board.evaluate(&self.board_accumulator, &mut self.thread_buffer)
     }
 
     // Process Negamax
@@ -445,9 +445,8 @@ impl SearchWorker {
         // 5. Pure Fail-Soft Null Move Pruning
         if allow_null && !king_in_check && depth >= 3 && 
             self.chess_board.has_major_pieces() && ply > 0 &&
-            beta < MATE_THRESHOLD && beta > -MATE_THRESHOLD {
-
-            if static_eval >= beta {
+            beta < MATE_THRESHOLD && beta > -MATE_THRESHOLD &&
+            static_eval >= beta {
                 // Calculate Reduction
                 let reduction = self.calculate_nmp_reduction(depth, static_eval, beta);
                 let next_depth = (depth - reduction).max(0); 
@@ -521,8 +520,8 @@ impl SearchWorker {
 
             // Late Move Reduction
             let mut lmr_eligibility = false;
-            if depth >= 3 && moves_tried > 4 && !king_in_check && matches!(forward_move.move_type, MoveFlag::MOVE) {
-                if !self.chess_board.is_in_check() {
+            if depth >= 3 && moves_tried > 4 && !king_in_check && matches!(forward_move.move_type, MoveFlag::MOVE) 
+                && !self.chess_board.is_in_check() {
                     lmr_eligibility = true;
                 }
             }
@@ -709,8 +708,7 @@ impl SearchWorker {
                 alpha = cmp::max(alpha, retrieved_score);
             }
             // UPPER BOUND: The true score is AT MOST this high.
-            else if tt_entry.flag == HashFlag::UPPERBOUND {
-                if retrieved_score <= alpha {
+            else if tt_entry.flag == HashFlag::UPPERBOUND && retrieved_score <= alpha {
                     return SearchResult {
                         score: retrieved_score,
                         best_move: pv_move_hint,
