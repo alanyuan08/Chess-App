@@ -39,7 +39,7 @@ else
 fi
 
 # 4. Run your main script
-RUST_BACKTRACE=1  python chessApp.py $1
+python chessApp.py $1
 
 # Rust Flame Graph
 # samply record python chessApp.py $1
