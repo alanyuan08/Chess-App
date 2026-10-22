@@ -74,20 +74,13 @@ pub enum MoveFlag {
     PROMOTIONKNIGHT = 10,
 }
 
-pub fn promotion_value(forward_move: ForwardMove, piece_captured: BoardPiece) -> i16 {
-    let base_promo_value = match forward_move.move_type {
+pub fn promotion_bonus(forward_move: ForwardMove) -> i16 {
+    match forward_move.move_type {
         MoveFlag::PROMOTIONQUEEN => 800,
         MoveFlag::PROMOTIONROOK => 400,
         MoveFlag::PROMOTIONBISHOP | MoveFlag::PROMOTIONKNIGHT => 200,
         _ => 0,
-    };
-
-    base_promo_value - piece_value(piece_captured)
-}
-
-pub fn is_promotion(forward_move: ForwardMove) -> bool {
-    matches!(forward_move.move_type, MoveFlag::PROMOTIONQUEEN | MoveFlag::PROMOTIONROOK | 
-        MoveFlag::PROMOTIONBISHOP | MoveFlag::PROMOTIONKNIGHT)
+    }
 }
 
 pub fn white_promotion_piece(promotion_flag: MoveFlag) -> BoardPiece {

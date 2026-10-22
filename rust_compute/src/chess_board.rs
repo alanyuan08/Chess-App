@@ -965,8 +965,7 @@ impl ChessBoard {
         self.ply += 1;
     }
 
-    pub fn compute_pinned_mask_with_occupancy(&self, custom_occupancy: u64) -> u64 {
-        let stm = self.player_index(self.active_player);
+    pub fn compute_pinned_mask_with_occupancy(&self, custom_occupancy: u64, stm: usize) -> u64 {
         let opponent_side = 1 - stm;
 
         let king_sq = self.kings[stm].trailing_zeros() as u8;
@@ -1007,7 +1006,7 @@ impl ChessBoard {
 
         pinned_mask
     }
-    
+
     #[inline(always)]
     pub fn aligned(p_sq: u8, target_sq: u8, king_sq: u8) -> bool {
         let p_rank = (p_sq >> 3) as i8;
@@ -1150,48 +1149,40 @@ impl ChessBoard {
     }
 
     // Static Exchange Evaluation (SEE)
-    pub fn static_exchange_evaluation(&self, forward_move: ForwardMove) -> i16 {
-        let from_sq = forward_move.start_sq;
+    pub fn static_exchange_evaluation_post_move(&self, forward_move: ForwardMove, original_victim: BoardPiece) -> i16 {
         let target_sq = forward_move.end_sq;
-        let capture_sq = forward_move.capture_sq;
 
-        let piece_moving = self.mailbox[from_sq as usize];
-        let piece_captured = self.mailbox[target_sq as usize];
-
-        let stm = self.player_index(self.active_player);
+        // Since process_forward_move already flipped the side to move,
+        // loop_stm naturally starts as the DEFENDER who is choosing a recapture.
+        let mut loop_stm = self.player_index(self.active_player);
         
         let mut capture_gain = [0i16; 32];
         let mut defender = 0;
 
-        // 1. Track changing board occupancies branchlessly
-        let mut occupancy = self.occupied;
-        occupancy &= !(1u64 << from_sq);
-        occupancy &= !(1u64 << capture_sq);
-        occupancy |= 1u64 << target_sq;  
-
-        // 2. Compute branchless values using the promotion_bonus offset
-        let base_captured_value = piece_value(piece_captured);
+        // 1. The initial move is already on the board! 
+        // Read the moving piece straight from its new landing pad.
+        let piece_moving = self.mailbox[target_sq as usize]; 
+        
+        // 2. We use the cached original_victim passed from the search loop
+        let base_captured_value = piece_value(original_victim);
         let mut current_piece_value = piece_value(piece_moving);
         
-        let promotion_bonus = promotion_value(forward_move, piece_captured);
+        let promotion_bonus = promotion_bonus(forward_move);
         
         capture_gain[defender] = base_captured_value + promotion_bonus;
         current_piece_value += promotion_bonus;
 
-        // 3. Construct initial pool of attackers targeting our destination square
+        // 3. Construct the initial pool of attackers using the live board occupancy
+        let mut occupancy = self.occupied;
         let mut attackers_pool = self.get_leaper_attacks_to(target_sq) 
             | self.get_slider_attackers(target_sq, occupancy);
 
         attackers_pool &= occupancy;
 
-        // Flip to the defending side to see if they can recapture
-        let mut loop_stm = 1 - stm;
-
+        // 4. Recapture Loop
         while attackers_pool != 0 {
             let defender_king_sq = self.kings[loop_stm].trailing_zeros() as u8;
-            
-            // FIXED: Passing 'occupancy' explicitly ensures pins update as pieces are captured!
-            let current_pinned_mask = self.compute_pinned_mask_with_occupancy(occupancy);
+            let current_pinned_mask = self.compute_pinned_mask_with_occupancy(occupancy, loop_stm);
 
             let (att_sq, att_piece) = self.get_least_valuable_attacker(
                 attackers_pool, 
