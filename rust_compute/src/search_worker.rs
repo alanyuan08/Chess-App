@@ -745,25 +745,19 @@ impl SearchWorker {
 
         // 5. Quiscence Search
         for forward_move in &gen_moves {
-            if !king_in_check {
-                // 1. Fetch victim value (0 if it's a quiet promotion)
-                let victim_type = self.chess_board.mailbox_piece(forward_move.end_sq);
-                let victim_value = if victim_type == BoardPiece::NONE { 0 } else { piece_value(victim_type) };
-                
-                // 2. Add the massive material bonus if a pawn transforms into a Queen
-                let promotion_bonus = if forward_move.move_type == MoveFlag::PROMOTIONQUEEN {
-                    800 
-                } else {
-                    0
-                };
+             if !king_in_check {
+                // 1. Calculate the exact, high-performance static transaction value
+                let exact_see_score = self.chess_board.static_exchange_evaluation(*forward_move);
 
-                // 3 Compute Gain
-                let max_possible_gain = victim_value + promotion_bonus;
-                if best_score + max_possible_gain + 200 < alpha {
+                // 2. Strict Tactical Gate: If the exchange immediately loses material, drop it
+                if exact_see_score < 0 {
                     continue; 
                 }
-            }
 
+                if best_score + exact_see_score + 200 < alpha {
+                    continue;
+                }
+            }
             // Push move (handles UCI, board state, hash, and history internally)
             self.process_forward_move(*forward_move);
             
@@ -811,25 +805,23 @@ impl SearchWorker {
                 };
             }
 
-            if king_in_check {
-                let terminal_score = if king_in_check {
-                    -MATE_VALUE + ply
-                } else {
-                    0
-                };
+            let terminal_score = if king_in_check {
+                -MATE_VALUE + ply
+            } else {
+                0
+            };
 
-                self.transposition_table.store(
-                    hash, terminal_score,
-                    Q_DEPTH_MARKER, ply, self.age,
-                    ForwardMove::NULL_MOVE, HashFlag::EXACT,
-                );
+            self.transposition_table.store(
+                hash, terminal_score,
+                Q_DEPTH_MARKER, ply, self.age,
+                ForwardMove::NULL_MOVE, HashFlag::EXACT,
+            );
 
-                return SearchResult { 
-                    score: terminal_score,
-                    best_move: ForwardMove::NULL_MOVE, 
-                    was_aborted: false, 
-                };
-            }
+            return SearchResult { 
+                score: terminal_score,
+                best_move: ForwardMove::NULL_MOVE, 
+                was_aborted: false, 
+            };
         }
 
         // Global halt catch before finalizing the Q-search node evaluation

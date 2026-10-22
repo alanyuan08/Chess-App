@@ -42,7 +42,7 @@ pub fn parse_forward_move_with_board(uci: String, board: &ChessBoard) -> Forward
     let mut capture_sq = end_sq;
 
     // --- Capture ---
-    if is_some(end_piece) {
+    if !is_none(end_piece) {
         move_type = MoveFlag::CAPTURE;
     }
 

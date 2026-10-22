@@ -154,7 +154,8 @@ pub fn king_moves(
                                     }
                                 );
                     }
-                }
+                },
+                Side::NONE => {},
             }
         }
 

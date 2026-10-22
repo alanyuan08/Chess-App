@@ -155,6 +155,9 @@ impl ChessBoard {
             },
             Side::BLACK => {
                 Side::WHITE
+            },
+            Side::NONE => {
+                Side::NONE
             }
         }
     }
@@ -168,6 +171,9 @@ impl ChessBoard {
             },
             Side::BLACK => {
                 1
+            },
+            Side::NONE => {
+                2
             }
         }
     }
@@ -182,6 +188,12 @@ impl ChessBoard {
     #[inline]
     pub fn en_passant(&self) -> u8 {   
         self.en_passant
+    }
+
+    // Return En Passant as a board
+    #[inline]
+    pub fn en_passant_board(&self) -> u64 {   
+         1u64 <<  self.en_passant
     }
 
     // Return Zobrist Hash
@@ -292,7 +304,8 @@ impl ChessBoard {
             },
             Side::BLACK => {
                 black_pawn_moves(self, player_index, opp_index, gen_moves, only_tactical);
-            }
+            },
+            Side::NONE => {},
         }
         
         if ply_idx < 128 {
@@ -358,7 +371,7 @@ impl ChessBoard {
                 self.kings[player_index] ^= 1u64 << move_command.end_sq;
             },
             BoardPiece::NONE => {
-                println!("Tried to move empty");
+                return;
             },
         }
 
@@ -401,7 +414,7 @@ impl ChessBoard {
                 self.kings[player_index] ^= 1u64 << remove_sq;
             },
             BoardPiece::NONE => {
-                println!("Tried to remove empty");
+                return;
             },
         }
 
@@ -439,7 +452,9 @@ impl ChessBoard {
             BoardPiece::WKING | BoardPiece::BKING=> {
                 self.kings[player_index] ^= 1u64 << place_sq;
             },
-            BoardPiece::NONE => {},
+            BoardPiece::NONE => {
+                return;
+            },
         }
 
         self.mailbox[place_sq] = piece_type;
@@ -496,6 +511,7 @@ impl ChessBoard {
                     Side::BLACK => {
                         self.en_passant = move_command.start_sq - 8;
                     },
+                    Side::NONE => {},
                 }
             
                 self._move_piece(move_command);
@@ -524,6 +540,7 @@ impl ChessBoard {
                         };
                         self._move_piece(rook_move_cmd);
                     },
+                    Side::NONE => {},
                 }
             },
             MoveFlag::QUEENSIDECASTLE => {
@@ -550,6 +567,7 @@ impl ChessBoard {
                         };
                         self._move_piece(rook_move_cmd);
                     },
+                    Side::NONE => {},
                 }
             },
             MoveFlag::PROMOTIONQUEEN | MoveFlag::PROMOTIONROOK |
@@ -571,6 +589,7 @@ impl ChessBoard {
                             black_promotion_piece(move_command.move_type)
                         );
                     },
+                    Side::NONE => {},
                 }
             },
             MoveFlag::CAPTURE | MoveFlag::ENPASSANT => {
@@ -633,6 +652,7 @@ impl ChessBoard {
                         };
                         self._move_piece(rook_move_cmd);
                     },
+                    Side::NONE => {},
                 }
             },
             MoveFlag::QUEENSIDECASTLE => {
@@ -659,6 +679,7 @@ impl ChessBoard {
                         };
                         self._move_piece(rook_move_cmd);
                     },
+                    Side::NONE => {},
                 }
             },
             MoveFlag::PROMOTIONQUEEN | MoveFlag::PROMOTIONROOK | 
@@ -672,15 +693,14 @@ impl ChessBoard {
                     Side::BLACK => {
                         self._place_piece(undo_move_cmd.start_sq as usize, BoardPiece::BPAWN);
                     },
+                    Side::NONE => {},
                 }
             },
             MoveFlag::NULL => {},
         }
 
-        // Restore Piece only if one was actually captured
-        if undo_move_cmd.captured_piece != BoardPiece::NONE {
-            self._place_piece(undo_move_cmd.capture_sq as usize, undo_move_cmd.captured_piece);
-        }
+        // Restore Captured Piece
+        self._place_piece(undo_move_cmd.capture_sq as usize, undo_move_cmd.captured_piece);
 
         // Restore En Passant
         self.en_passant = undo_move_cmd.prev_en_passant;
@@ -726,7 +746,6 @@ impl ChessBoard {
 
         // Combine ALL piece bitboards
         let mut pieces_bitboard = (self.pawns[0] | self.pawns[1])
-
             | (self.knights[0] | self.knights[1])
             | (self.bishops[0] | self.bishops[1])
             | (self.rooks[0] | self.rooks[1])
@@ -780,6 +799,7 @@ impl ChessBoard {
                 &accumulators.moves[self.ply as usize].black, 
                 &accumulators.moves[self.ply as usize].white
             ),
+            Side::NONE => panic!("Invalid Game State: active_player cannot be Side::NONE during NNUE accumulator fetching!"),
         };
 
         // --- STEP 0: ACCUMULATOR ---
@@ -944,5 +964,270 @@ impl ChessBoard {
     pub fn increment_ply(&mut self) {
         self.ply += 1;
     }
-}
 
+    pub fn compute_pinned_mask_with_occupancy(&self, custom_occupancy: u64) -> u64 {
+        let stm = self.player_index(self.active_player);
+        let opponent_side = 1 - stm;
+
+        let king_sq = self.kings[stm].trailing_zeros() as u8;
+        if king_sq >= 64 { return 0; }
+
+        let friendly_pieces = self.all_pieces[stm];
+
+        // 1. Gather all sliding pinners using X-ray lookups matching the custom simulated layout
+        let friendly_blockers_ortho = rook_attack_paths(king_sq, custom_occupancy) & friendly_pieces;
+        let orthogonal_pinners = rook_attack_paths(king_sq, custom_occupancy ^ friendly_blockers_ortho) 
+            & (self.rooks[opponent_side] | self.queens[opponent_side]);
+
+        let friendly_blockers_diag = bishop_attack_paths(king_sq, custom_occupancy) & friendly_pieces;
+        let diagonal_pinners = bishop_attack_paths(king_sq, custom_occupancy ^ friendly_blockers_diag) 
+            & (self.bishops[opponent_side] | self.queens[opponent_side]);
+
+        let active_pinners = orthogonal_pinners | diagonal_pinners;
+        let mut pinned_mask = 0u64;
+
+        // 2. Identify which internal friendly blockers sit perfectly online with active threats
+        let mut potential_pieces = friendly_blockers_ortho | friendly_blockers_diag;
+        while potential_pieces != 0 {
+            let p_sq = potential_pieces.trailing_zeros() as u8;
+            let single_friendly_piece = 1u64 << p_sq;
+
+            // Loop through active pinners to confirm alignment match
+            let mut pinners = active_pinners;
+            while pinners != 0 {
+                let pinner_sq = pinners.trailing_zeros() as u8;
+                if Self::aligned(p_sq, pinner_sq, king_sq) {
+                    pinned_mask |= single_friendly_piece;
+                    break;
+                }
+                pinners &= pinners - 1;
+            }
+            potential_pieces &= potential_pieces - 1;
+        }
+
+        pinned_mask
+    }
+    
+    #[inline(always)]
+    pub fn aligned(p_sq: u8, target_sq: u8, king_sq: u8) -> bool {
+        let p_rank = (p_sq >> 3) as i8;
+        let p_file = (p_sq & 7) as i8;
+        
+        let t_rank = (target_sq >> 3) as i8;
+        let t_file = (target_sq & 7) as i8;
+        
+        let k_rank = (king_sq >> 3) as i8;
+        let k_file = (king_sq & 7) as i8;
+
+        // Isolate vectors from the King to the Pinned piece and Target square
+        let dr_p = p_rank - k_rank;
+        let df_p = p_file - k_file;
+        
+        let dr_t = t_rank - k_rank;
+        let df_t = t_file - k_file;
+
+        // 1. Check if all three squares are colinear: (dy_p / dx_p) == (dy_t / dx_t)
+        // Cross-multiplying avoids division entirely: dy_p * dx_t == dy_t * dx_p
+        let colinear = (dr_p * df_t) == (dr_t * df_p);
+
+        // 2. Check if the line is a valid chess ray orientation (orthogonal or perfect diagonal)
+        // A vector is valid if it lies on a rank (dr == 0), file (df == 0), or diagonal (dr.abs() == df.abs())
+        // Squaring both sides avoids branching or abs() calls entirely: dr^2 == df^2
+        let valid_ray = (dr_p == 0) | (df_p == 0) | ((dr_p * dr_p) == (df_p * df_p));
+
+        colinear & valid_ray
+    }
+
+    /// Generates sliding attacks on the fly using your engine's ray paths.
+    fn get_slider_attackers(&self, target_sq: u8, occupied: u64) -> u64 {
+        let mut attackers = 0u64;
+
+        // Bishop-like attacks (Bishops and Queens from both sides)
+        let bishop_rays = bishop_attack_paths(target_sq, occupied);
+        let diagonal_pieces = self.bishops[0] | self.bishops[1] | self.queens[0] | self.queens[1];
+        attackers |= bishop_rays & diagonal_pieces;
+
+        // Rook-like attacks (Rooks and Queens from both sides)
+        let rook_rays = rook_attack_paths(target_sq, occupied);
+        let orthogonal_pieces = self.rooks[0] | self.rooks[1] | self.queens[0] | self.queens[1];
+        attackers |= rook_rays & orthogonal_pieces;
+
+        attackers
+    }
+
+    /// Pulls the least valuable piece out of the attacker pool for the active side to move (stm).
+    /// Disqualifies absolutely pinned pieces unless they capture along their existing pin ray.
+    pub fn get_least_valuable_attacker(
+        &self, 
+        attackers_pool: u64, 
+        pinned_mask: u64, 
+        king_sq: u8, 
+        target_sq: u8,
+        stm: usize
+    ) -> (u8, BoardPiece) {
+        let mut pool = attackers_pool;
+
+        // --- PIN FILTRATION ---
+        let pinned_attackers = pool & pinned_mask;
+        if pinned_attackers != 0 {
+            let mut temp = pinned_attackers;
+            while temp != 0 {
+                let p_sq = temp.trailing_zeros() as u8;
+                
+                // If the pinned piece attempts to move off its pin line, eliminate it from this turn's pool
+                if !Self::aligned(p_sq, target_sq, king_sq) {
+                    pool &= !(1u64 << p_sq);
+                }
+                temp &= temp - 1;
+            }
+        }
+
+        // --- LEAST VALUABLE PIECE CHECKS ---
+        let pawns = pool & self.pawns[stm];
+        if pawns != 0 {
+            return (pawns.trailing_zeros() as u8, if stm == 0 { BoardPiece::WPAWN } else { BoardPiece::BPAWN });
+        }
+
+        let knights = pool & self.knights[stm];
+        if knights != 0 {
+            return (knights.trailing_zeros() as u8, if stm == 0 { BoardPiece::WKNIGHT } else { BoardPiece::BKNIGHT });
+        }
+
+        let bishops = pool & self.bishops[stm];
+        if bishops != 0 {
+            return (bishops.trailing_zeros() as u8, if stm == 0 { BoardPiece::WBISHOP } else { BoardPiece::BBISHOP });
+        }
+
+        let rooks = pool & self.rooks[stm];
+        if rooks != 0 {
+            return (rooks.trailing_zeros() as u8, if stm == 0 { BoardPiece::WROOK } else { BoardPiece::BROOK });
+        }
+
+        let queens = pool & self.queens[stm];
+        if queens != 0 {
+            return (queens.trailing_zeros() as u8, if stm == 0 { BoardPiece::WQUEEN } else { BoardPiece::BQUEEN });
+        }
+
+        let kings = pool & self.kings[stm];
+        if kings != 0 {
+            return (kings.trailing_zeros() as u8, if stm == 0 { BoardPiece::WKING } else { BoardPiece::BKING });
+        }
+
+        (0, BoardPiece::NONE)
+    }
+
+    /// Aggregates non-sliding attackers targeting a square using your native function hooks.
+    pub fn get_leaper_attacks_to(&self, target_sq: u8) -> u64 {
+        let mut leapers = 0u64;
+        let target_bb = 1u64 << target_sq;
+
+        // Knights and Kings lookups
+        leapers |= KNIGHT_ATTACKS[target_sq as usize] & (self.knights[0] | self.knights[1]);
+        leapers |= KING_ATTACKS[target_sq as usize] & (self.kings[0] | self.kings[1]);
+
+        // -----------------------------------------------------------------
+        // White Pawns attacking TO target_sq (moving up the board)
+        // -----------------------------------------------------------------
+        // Target is up-left from pawn -> pawn is down-right -> pawn cannot be on the A-file.
+        // Since NOT_A_FILE is 0 on the A-file and 1 everywhere else, we bitwise AND directly.
+        let w_pawn_from_right = (target_bb >> 7) & NOT_A_FILE;
+        
+        // Target is up-right from pawn -> pawn is down-left -> pawn cannot be on the H-file.
+        let w_pawn_from_left = (target_bb >> 9) & NOT_H_FILE;
+        leapers |= (w_pawn_from_right | w_pawn_from_left) & self.pawns[0];
+
+        // -----------------------------------------------------------------
+        // Black Pawns attacking TO target_sq (moving down the board)
+        // -----------------------------------------------------------------
+        // Target is down-left from pawn -> pawn is up-right -> pawn cannot be on the A-file.
+        let b_pawn_from_right = (target_bb << 9) & NOT_A_FILE;
+        
+        // Target is down-right from pawn -> pawn is up-left -> pawn cannot be on the H-file.
+        let b_pawn_from_left = (target_bb << 7) & NOT_H_FILE;
+        leapers |= (b_pawn_from_right | b_pawn_from_left) & self.pawns[1];
+
+        leapers
+    }
+
+    // Static Exchange Evaluation (SEE)
+    pub fn static_exchange_evaluation(&self, forward_move: ForwardMove) -> i16 {
+        let from_sq = forward_move.start_sq;
+        let target_sq = forward_move.end_sq;
+        let capture_sq = forward_move.capture_sq;
+
+        let piece_moving = self.mailbox[from_sq as usize];
+        let piece_captured = self.mailbox[target_sq as usize];
+
+        let stm = self.player_index(self.active_player);
+        
+        let mut capture_gain = [0i16; 32];
+        let mut defender = 0;
+
+        // 1. Track changing board occupancies branchlessly
+        let mut occupancy = self.occupied;
+        occupancy &= !(1u64 << from_sq);
+        occupancy &= !(1u64 << capture_sq);
+        occupancy |= 1u64 << target_sq;  
+
+        // 2. Compute branchless values using the promotion_bonus offset
+        let base_captured_value = piece_value(piece_captured);
+        let mut current_piece_value = piece_value(piece_moving);
+        
+        let promotion_bonus = promotion_value(forward_move, piece_captured);
+        
+        capture_gain[defender] = base_captured_value + promotion_bonus;
+        current_piece_value += promotion_bonus;
+
+        // 3. Construct initial pool of attackers targeting our destination square
+        let mut attackers_pool = self.get_leaper_attacks_to(target_sq) 
+            | self.get_slider_attackers(target_sq, occupancy);
+
+        attackers_pool &= occupancy;
+
+        // Flip to the defending side to see if they can recapture
+        let mut loop_stm = 1 - stm;
+
+        while attackers_pool != 0 {
+            let defender_king_sq = self.kings[loop_stm].trailing_zeros() as u8;
+            
+            // FIXED: Passing 'occupancy' explicitly ensures pins update as pieces are captured!
+            let current_pinned_mask = self.compute_pinned_mask_with_occupancy(occupancy);
+
+            let (att_sq, att_piece) = self.get_least_valuable_attacker(
+                attackers_pool, 
+                current_pinned_mask, 
+                defender_king_sq, 
+                target_sq,
+                loop_stm
+            );
+
+            if att_piece == BoardPiece::NONE {
+                break; 
+            }
+
+            defender += 1;
+            capture_gain[defender] = current_piece_value - capture_gain[defender - 1];
+            
+            // Update the target square piece value to the attacker that just landed on it
+            current_piece_value = piece_value(att_piece);
+
+            // Safe bitwise clear for the attacker's square
+            occupancy &= !(1u64 << att_sq);
+
+            // Re-calculate attacks under the modified occupancy matrix
+            attackers_pool = self.get_leaper_attacks_to(target_sq) 
+                | self.get_slider_attackers(target_sq, occupancy);
+            attackers_pool &= occupancy;
+
+            loop_stm = 1 - loop_stm;
+        }
+
+        // Minimax back up the choice path
+        while defender > 0 {
+            capture_gain[defender - 1] = std::cmp::max(-capture_gain[defender], capture_gain[defender - 1]);
+            defender -= 1;
+        }
+
+        capture_gain[0]
+    }
+}

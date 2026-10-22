@@ -74,6 +74,22 @@ pub enum MoveFlag {
     PROMOTIONKNIGHT = 10,
 }
 
+pub fn promotion_value(forward_move: ForwardMove, piece_captured: BoardPiece) -> i16 {
+    let base_promo_value = match forward_move.move_type {
+        MoveFlag::PROMOTIONQUEEN => 800,
+        MoveFlag::PROMOTIONROOK => 400,
+        MoveFlag::PROMOTIONBISHOP | MoveFlag::PROMOTIONKNIGHT => 200,
+        _ => 0,
+    };
+
+    base_promo_value - piece_value(piece_captured)
+}
+
+pub fn is_promotion(forward_move: ForwardMove) -> bool {
+    matches!(forward_move.move_type, MoveFlag::PROMOTIONQUEEN | MoveFlag::PROMOTIONROOK | 
+        MoveFlag::PROMOTIONBISHOP | MoveFlag::PROMOTIONKNIGHT)
+}
+
 pub fn white_promotion_piece(promotion_flag: MoveFlag) -> BoardPiece {
     match promotion_flag {
         MoveFlag::PROMOTIONQUEEN => {
@@ -89,7 +105,7 @@ pub fn white_promotion_piece(promotion_flag: MoveFlag) -> BoardPiece {
             BoardPiece::WKNIGHT
         },
         _ => {
-            panic!("Invalid Promotion Flag");
+            BoardPiece::NONE
         },
     }
 }
@@ -109,7 +125,7 @@ pub fn black_promotion_piece(promotion_flag: MoveFlag) -> BoardPiece {
             BoardPiece::BKNIGHT
         },
         _ => {
-            panic!("Invalid Promotion Flag");
+            BoardPiece::NONE
         },
     }
 }
@@ -119,6 +135,7 @@ pub fn black_promotion_piece(promotion_flag: MoveFlag) -> BoardPiece {
 pub enum Side {
     WHITE = 0,
     BLACK = 1,
+    NONE = 2,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -184,10 +201,6 @@ pub fn is_king(piece: BoardPiece) -> bool {
     matches!(piece, BoardPiece::WKING | BoardPiece::BKING)
 }
 
-pub fn is_some(piece: BoardPiece) -> bool {
-    !matches!(piece, BoardPiece::NONE)
-}
-
 pub fn is_none(piece: BoardPiece) -> bool {
     matches!(piece, BoardPiece::NONE)
 }
@@ -211,7 +224,7 @@ pub fn piece_value(piece_type: BoardPiece) -> i16 {
             20000
         },
         BoardPiece::NONE => {
-            panic!("Passed None");
+            0
         },
     }
 }
@@ -229,7 +242,7 @@ pub fn piece_player(piece_type: BoardPiece) -> Side {
             Side::BLACK
         },
         BoardPiece::NONE => {
-            panic!("Passed None");
+            Side::NONE
         },
     }
 }

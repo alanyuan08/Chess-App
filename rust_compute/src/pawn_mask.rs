@@ -2,8 +2,8 @@ use crate::move_command::*;
 use arrayvec::ArrayVec;
 use crate::chess_board::*;
 
-const NOT_A_FILE: u64 = 0xFEFE_FEFE_FEFE_FEFE;
-const NOT_H_FILE: u64 = 0x7F7F_7F7F_7F7F_7F7F;
+pub const NOT_A_FILE: u64 = 0xFEFE_FEFE_FEFE_FEFE;
+pub const NOT_H_FILE: u64 = 0x7F7F_7F7F_7F7F_7F7F;
 
 const RANK_1: u64 = 0x0000_0000_0000_00FF;
 const RANK_2: u64 = 0x0000_0000_0000_FF00;
@@ -30,6 +30,37 @@ pub fn black_pawn_attacks(black_pawns: u64) -> u64 {
     let captures_right = (black_pawns >> 7) & NOT_A_FILE;
     
     captures_left | captures_right
+}
+
+// Return Squares that can be captured via En Passant
+pub fn white_en_passant_attacks(white_pawns: u64, en_passant_sq: u8) -> u64 {
+    // Convert Square to board
+    let en_passant_board = 1u64 << en_passant_sq;
+
+    // Left / Right Capture points
+    let attacks_left = (white_pawns << 7) & NOT_A_FILE;
+    let attacks_right = (white_pawns << 9) & NOT_H_FILE;
+
+    let all_pawn_attacks = attacks_left | attacks_right;
+    
+    // en_passant_board stores the attack destination 
+    let valid_destination = all_pawn_attacks & en_passant_board;
+    valid_destination >> 8
+}
+
+// Return Squares that can be captured via En Passant
+pub fn black_en_passant_attacks(black_pawns: u64, en_passant_sq: u8) -> u64 {
+    // Convert Square to board
+    let en_passant_board = 1u64 << en_passant_sq;
+
+    // Left / Right Capture points
+    let attacks_left = (black_pawns >> 9) & NOT_H_FILE;
+    let attacks_right = (black_pawns >> 7) & NOT_A_FILE;
+    
+    let all_pawn_attacks = attacks_left | attacks_right;
+    
+    let valid_destination = all_pawn_attacks & en_passant_board;
+    valid_destination << 8
 }
 
 pub fn white_pawn_moves(
