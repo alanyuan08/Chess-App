@@ -76,9 +76,9 @@ pub enum MoveFlag {
 
 pub fn promotion_bonus(forward_move: ForwardMove) -> i16 {
     match forward_move.move_type {
-        MoveFlag::PROMOTIONQUEEN => 800,
-        MoveFlag::PROMOTIONROOK => 400,
-        MoveFlag::PROMOTIONBISHOP | MoveFlag::PROMOTIONKNIGHT => 200,
+        MoveFlag::PROMOTIONQUEEN => 900,
+        MoveFlag::PROMOTIONROOK => 500,
+        MoveFlag::PROMOTIONBISHOP | MoveFlag::PROMOTIONKNIGHT => 300,
         _ => 0,
     }
 }

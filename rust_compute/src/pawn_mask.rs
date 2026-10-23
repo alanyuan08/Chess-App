@@ -12,22 +12,24 @@ const RANK_7: u64 = 0x00FF_0000_0000_0000;
 const RANK_8: u64 = 0xFF00_0000_0000_0000;
 
 // Return Squares that could be attacked / Used for King Safety
+#[inline(always)]
 pub fn white_pawn_attacks(white_pawns: u64) -> u64 {
-    // Left capture (North-West): shift 7, but only if not on A-file
-    let captures_left = (white_pawns << 7) & NOT_H_FILE;
+    // Left capture (North-West): shift 7, source pawns cannot be on the A-file
+    let captures_left = (white_pawns & NOT_A_FILE) << 7;
     
-    // Right capture (North-East): shift 9, but only if not on H-file
-    let captures_right = (white_pawns << 9) & NOT_A_FILE;
+    // Right capture (North-East): shift 9, source pawns cannot be on the H-file
+    let captures_right = (white_pawns & NOT_H_FILE) << 9;
     
     captures_left | captures_right
 }
 
+#[inline(always)]
 pub fn black_pawn_attacks(black_pawns: u64) -> u64 {
-    // Left capture (South-West): shift 7, but only if not on A-file
-    let captures_left = (black_pawns >> 9) & NOT_H_FILE;
+    // Left capture (South-West): shift 9, source pawns cannot be on the A-file
+    let captures_left = (black_pawns & NOT_A_FILE) >> 9;
     
-    // Right capture (South-East): shift 9, but only if not on H-file
-    let captures_right = (black_pawns >> 7) & NOT_A_FILE;
+    // Right capture (South-East): shift 7, source pawns cannot be on the H-file
+    let captures_right = (black_pawns & NOT_H_FILE) >> 7;
     
     captures_left | captures_right
 }

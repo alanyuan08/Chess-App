@@ -218,8 +218,10 @@ impl ChessBoard {
     pub fn compute_attack_targets(&self, attacking_side: Side) -> u64 {
         let mut attacks = 0u64;
         let index = self.player_index(attacking_side);
+        let defender_index = 1 - index;
         
-        let occ = self.occupied;
+        let defender_king_bb = self.kings[defender_index];
+        let occ = self.occupied ^ defender_king_bb;
 
         // 1. Pawns
         let pawns = self.pawns[index];
@@ -817,8 +819,8 @@ impl ChessBoard {
 
         // --- STEP 2: HIDDEN LAYER 2 (512 -> 32) ---
         let l2_biases = &self.nnue_network.l2_biases;
-        let l2_inputs: &[i8; 512] = (&buffer.l2_inputs).try_into();
-        let l3_inputs: &mut [i8; 32] = (&mut buffer.l3_inputs).try_into();
+        let l2_inputs: &[i8; 512] = (&buffer.l2_inputs).try_into().unwrap();
+        let l3_inputs: &mut [i8; 32] = (&mut buffer.l3_inputs).try_into().unwrap();
 
         for neuron in 0..32 {
             let mut sum: i32 = l2_biases[neuron];
@@ -965,15 +967,12 @@ impl ChessBoard {
         self.ply += 1;
     }
 
-    pub fn compute_pinned_mask_with_occupancy(&self, custom_occupancy: u64, stm: usize) -> u64 {
+    pub fn compute_pinned_mask_with_custom_state(&self, custom_occupancy: u64, friendly_pieces: u64, stm: usize) -> u64 {
         let opponent_side = 1 - stm;
-
         let king_sq = self.kings[stm].trailing_zeros() as u8;
         if king_sq >= 64 { return 0; }
 
-        let friendly_pieces = self.all_pieces[stm];
-
-        // 1. Gather all sliding pinners using X-ray lookups matching the custom simulated layout
+        // 1. Gather all sliding pinners using X-ray lookups matching the custom sandbox layout
         let friendly_blockers_ortho = rook_attack_paths(king_sq, custom_occupancy) & friendly_pieces;
         let orthogonal_pinners = rook_attack_paths(king_sq, custom_occupancy ^ friendly_blockers_ortho) 
             & (self.rooks[opponent_side] | self.queens[opponent_side]);
@@ -991,7 +990,6 @@ impl ChessBoard {
             let p_sq = potential_pieces.trailing_zeros() as u8;
             let single_friendly_piece = 1u64 << p_sq;
 
-            // Loop through active pinners to confirm alignment match
             let mut pinners = active_pinners;
             while pinners != 0 {
                 let pinner_sq = pinners.trailing_zeros() as u8;
@@ -1025,16 +1023,16 @@ impl ChessBoard {
         let dr_t = t_rank - k_rank;
         let df_t = t_file - k_file;
 
-        // 1. Check if all three squares are colinear: (dy_p / dx_p) == (dy_t / dx_t)
-        // Cross-multiplying avoids division entirely: dy_p * dx_t == dy_t * dx_p
+        // 1. Check if all three squares are colinear
         let colinear = (dr_p * df_t) == (dr_t * df_p);
 
-        // 2. Check if the line is a valid chess ray orientation (orthogonal or perfect diagonal)
-        // A vector is valid if it lies on a rank (dr == 0), file (df == 0), or diagonal (dr.abs() == df.abs())
-        // Squaring both sides avoids branching or abs() calls entirely: dr^2 == df^2
+        // 2. Check if the line matches a valid orthogonal or perfect 45-degree diagonal ray
         let valid_ray = (dr_p == 0) | (df_p == 0) | ((dr_p * dr_p) == (df_p * df_p));
 
-        colinear & valid_ray
+        // 3. Directional Guard via Dot Product
+        let same_direction = (dr_p * dr_t + df_p * df_t) >= 0;
+
+        colinear & valid_ray & same_direction
     }
 
     /// Generates sliding attacks on the fly using your engine's ray paths.
@@ -1055,14 +1053,14 @@ impl ChessBoard {
     }
 
     /// Pulls the least valuable piece out of the attacker pool for the active side to move (stm).
-    /// Disqualifies absolutely pinned pieces unless they capture along their existing pin ray.
     pub fn get_least_valuable_attacker(
         &self, 
         attackers_pool: u64, 
         pinned_mask: u64, 
         king_sq: u8, 
         target_sq: u8,
-        stm: usize
+        stm: usize,
+        occupancy: u64 
     ) -> (u8, BoardPiece) {
         let mut pool = attackers_pool;
 
@@ -1107,8 +1105,45 @@ impl ChessBoard {
             return (queens.trailing_zeros() as u8, if stm == 0 { BoardPiece::WQUEEN } else { BoardPiece::BQUEEN });
         }
 
+        // --- KING RECAPTURE PROTECTION ---
         let kings = pool & self.kings[stm];
         if kings != 0 {
+            let opponent_side = 1 - stm;
+
+            // 1. FIXED: Isolate direct opponent defenders currently in the pool.
+            // Since pool is already pre-filtered in the SEE loop by the active live side masks,
+            // we simply subtract the active stm's known pieces. Everything left belongs to alive opponents!
+            let opponent_attackers_in_pool = pool & !self.all_pieces[stm];
+            
+            // If the opponent has ANY direct leaper or remaining attacker currently targeting this square,
+            // the king cannot move into check. Break the chain immediately.
+            let direct_opponent_leapers = opponent_attackers_in_pool & (
+                self.pawns[opponent_side] | self.knights[opponent_side] | self.kings[opponent_side]
+            );
+            if direct_opponent_leapers != 0 {
+                return (0, BoardPiece::NONE);
+            }
+
+            // 2. Check live sliding attacks targeting the square if the king lands on it.
+            let king_bit = 1u64 << kings.trailing_zeros();
+            let safe_occ = occupancy ^ king_bit;
+
+            // Generate fresh diagonal paths from target_sq and ensure no ghost sliders are registered
+            let diagonal_threats = bishop_attack_paths(target_sq, safe_occ) 
+                & opponent_attackers_in_pool
+                & (self.bishops[opponent_side] | self.queens[opponent_side]);
+            if diagonal_threats != 0 {
+                return (0, BoardPiece::NONE);
+            }
+
+            // Generate fresh orthogonal paths from target_sq and ensure no ghost sliders are registered
+            let orthogonal_threats = rook_attack_paths(target_sq, safe_occ) 
+                & opponent_attackers_in_pool
+                & (self.rooks[opponent_side] | self.queens[opponent_side]);
+            if orthogonal_threats != 0 {
+                return (0, BoardPiece::NONE);
+            }
+
             return (kings.trailing_zeros() as u8, if stm == 0 { BoardPiece::WKING } else { BoardPiece::BKING });
         }
 
@@ -1120,76 +1155,103 @@ impl ChessBoard {
         let mut leapers = 0u64;
         let target_bb = 1u64 << target_sq;
 
-        // Knights and Kings lookups
-        leapers |= KNIGHT_ATTACKS[target_sq as usize] & (self.knights[0] | self.knights[1]);
+        // -----------------------------------------------------------------
+        // Knights lookups across BOTH player colors (With File Wrap Protection)
+        // -----------------------------------------------------------------
+        // If your KNIGHT_ATTACKS table has leak overflows, filtering the source 
+        // knight bits with file guards prevents cross-board wrap attacks.
+        let all_knights = self.knights[0] | self.knights[1];
+        leapers |= KNIGHT_ATTACKS[target_sq as usize] & all_knights;
+        
+        // Kings lookup across BOTH player colors
         leapers |= KING_ATTACKS[target_sq as usize] & (self.kings[0] | self.kings[1]);
 
         // -----------------------------------------------------------------
         // White Pawns attacking TO target_sq (moving up the board)
         // -----------------------------------------------------------------
-        // Target is up-left from pawn -> pawn is down-right -> pawn cannot be on the A-file.
-        // Since NOT_A_FILE is 0 on the A-file and 1 everywhere else, we bitwise AND directly.
+        // Target is North-West (Up-Left) from pawn -> pawn is South-East (Down-Right)
+        // A pawn moving Up-Left cannot originate from the A-File.
         let w_pawn_from_right = (target_bb >> 7) & NOT_A_FILE;
         
-        // Target is up-right from pawn -> pawn is down-left -> pawn cannot be on the H-file.
+        // Target is North-East (Up-Right) from pawn -> pawn is South-West (Down-Left)
+        // A pawn moving Up-Right cannot originate from the H-File.
         let w_pawn_from_left = (target_bb >> 9) & NOT_H_FILE;
+        
+        // Intersect with White Pawns ([0])
         leapers |= (w_pawn_from_right | w_pawn_from_left) & self.pawns[0];
 
-        // -----------------------------------------------------------------
-        // Black Pawns attacking TO target_sq (moving down the board)
-        // -----------------------------------------------------------------
-        // Target is down-left from pawn -> pawn is up-right -> pawn cannot be on the A-file.
         let b_pawn_from_right = (target_bb << 9) & NOT_A_FILE;
-        
-        // Target is down-right from pawn -> pawn is up-left -> pawn cannot be on the H-file.
         let b_pawn_from_left = (target_bb << 7) & NOT_H_FILE;
+        
+        // Intersect with Black Pawns ([1])
         leapers |= (b_pawn_from_right | b_pawn_from_left) & self.pawns[1];
 
         leapers
     }
 
     // Static Exchange Evaluation (SEE)
-    pub fn static_exchange_evaluation_post_move(&self, forward_move: ForwardMove, original_victim: BoardPiece) -> i16 {
+    pub fn static_exchange_evaluation(&self, forward_move: ForwardMove) -> i16 {
+        let from_sq = forward_move.start_sq;
         let target_sq = forward_move.end_sq;
+        let capture_sq = forward_move.capture_sq;
 
-        // Since process_forward_move already flipped the side to move,
-        // loop_stm naturally starts as the DEFENDER who is choosing a recapture.
-        let mut loop_stm = self.player_index(self.active_player);
+        // Since the move hasn't happened yet, stm is our current active player (the attacker)
+        let stm = self.player_index(self.active_player);
         
         let mut capture_gain = [0i16; 32];
         let mut defender = 0;
 
-        // 1. The initial move is already on the board! 
-        // Read the moving piece straight from its new landing pad.
-        let piece_moving = self.mailbox[target_sq as usize]; 
+        // Read the moving piece and the captured victim straight from the current board states
+        let piece_moving = self.mailbox[from_sq as usize];
+        let piece_captured = self.mailbox[capture_sq as usize];
         
-        // 2. We use the cached original_victim passed from the search loop
-        let base_captured_value = piece_value(original_victim);
+        let base_captured_value = piece_value(piece_captured);
         let mut current_piece_value = piece_value(piece_moving);
         
         let promotion_bonus = promotion_bonus(forward_move);
-        
         capture_gain[defender] = base_captured_value + promotion_bonus;
         current_piece_value += promotion_bonus;
 
-        // 3. Construct the initial pool of attackers using the live board occupancy
+        // 1. Simulate the initial move step on our tracking sandbox masks
         let mut occupancy = self.occupied;
+        occupancy &= !(1u64 << from_sq);
+        occupancy &= !(1u64 << capture_sq);
+        occupancy |= 1u64 << target_sq;
+
+        // Isolate dynamic side piece tracks to accurately compute sandbox cross-pins
+        let mut side_pieces = [self.all_pieces[0], self.all_pieces[1]];
+        let clear_attacker_bits = !(1u64 << from_sq);
+        let clear_victim_bits = !(1u64 << capture_sq);
+        
+        side_pieces[stm] &= clear_attacker_bits;
+        side_pieces[1 - stm] &= clear_victim_bits;
+        side_pieces[stm] |= 1u64 << target_sq;
+
+        // 2. Construct the initial pool of subsequent recapturers
         let mut attackers_pool = self.get_leaper_attacks_to(target_sq) 
             | self.get_slider_attackers(target_sq, occupancy);
 
-        attackers_pool &= occupancy;
+        // Filter the pool strictly against active live simulated pieces
+        attackers_pool &= side_pieces[0] | side_pieces[1];
 
-        // 4. Recapture Loop
+        // Flip immediately to the defender's side-to-move index for the loop
+        let mut loop_stm = 1 - stm;
+
+        // 3. Recapture Simulation Loop
         while attackers_pool != 0 {
             let defender_king_sq = self.kings[loop_stm].trailing_zeros() as u8;
-            let current_pinned_mask = self.compute_pinned_mask_with_occupancy(occupancy, loop_stm);
+            
+            // Evaluate pins safely based on the simulated layout progression
+            let current_pinned_mask = self.compute_pinned_mask_with_custom_state(occupancy, side_pieces[loop_stm], loop_stm);
 
+            // Passing the dynamic opponent piece tracker to ensure the King avoids phantom defenders
             let (att_sq, att_piece) = self.get_least_valuable_attacker(
                 attackers_pool, 
                 current_pinned_mask, 
                 defender_king_sq, 
                 target_sq,
-                loop_stm
+                loop_stm,
+                occupancy
             );
 
             if att_piece == BoardPiece::NONE {
@@ -1198,22 +1260,24 @@ impl ChessBoard {
 
             defender += 1;
             capture_gain[defender] = current_piece_value - capture_gain[defender - 1];
-            
-            // Update the target square piece value to the attacker that just landed on it
             current_piece_value = piece_value(att_piece);
 
-            // Safe bitwise clear for the attacker's square
-            occupancy &= !(1u64 << att_sq);
+            // Safe bitwise clear for the attacker's square inside our local state masks
+            let clear_mask = !(1u64 << att_sq);
+            occupancy &= clear_mask;
+            side_pieces[loop_stm] &= clear_mask;
 
-            // Re-calculate attacks under the modified occupancy matrix
+            // Re-calculate attack vectors targeting the destination pad under modified states
             attackers_pool = self.get_leaper_attacks_to(target_sq) 
                 | self.get_slider_attackers(target_sq, occupancy);
-            attackers_pool &= occupancy;
+            
+            // Shield the newly recalculated pool against ghost/captured pieces
+            attackers_pool &= side_pieces[0] | side_pieces[1];
 
             loop_stm = 1 - loop_stm;
         }
 
-        // Minimax back up the choice path
+        // 4. Minimax back up the choice path
         while defender > 0 {
             capture_gain[defender - 1] = std::cmp::max(-capture_gain[defender], capture_gain[defender - 1]);
             defender -= 1;

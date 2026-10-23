@@ -74,26 +74,48 @@ impl SearchWorker {
     }
 
     // Search Entry Point
-    pub fn root_search(&mut self, engine_age: i8) -> (ForwardMove, usize, usize){
+    pub fn root_search(&mut self, engine_age: i8) -> (ForwardMove, usize, usize) {
         // Start the timer
         self.nodes_processed = 0;
 
-        // reset the age
+        // Reset the age
         self.age = engine_age;
 
         // --- ITERATIVE DEEPENING LOOP ---
         let mut best_move_overall: ForwardMove = ForwardMove::NULL_MOVE;
         let mut depth = 1;
 
+        // Aspiration window configuration
+        let mut alpha = -INFINITY;
+        let mut beta = INFINITY;
+        let window_delta = 50;
+
         while depth <= MAX_DEPTH {
-            let result = self.negamax(depth, 0, -INFINITY, INFINITY, best_move_overall, true);
+            let mut result = self.negamax(depth, 0, alpha, beta, best_move_overall, true);
+
+            // Check for fail-low or fail-high (if search wasn't aborted)
+            if !result.was_aborted && !self.stop_signal.load(Ordering::Relaxed) {
+                if result.score <= alpha {
+                    // Fail-low: The true score is worse than expected. Open window to minus infinity.
+                    alpha = -INFINITY;
+                    result = self.negamax(depth, 0, alpha, beta, best_move_overall, true);
+                } else if result.score >= beta {
+                    // Fail-high: The true score is better than expected. Open window to infinity.
+                    beta = INFINITY;
+                    result = self.negamax(depth, 0, alpha, beta, best_move_overall, true);
+                }
+            }
             
-            if !self.stop_signal.load(Ordering::Relaxed){
+            if !self.stop_signal.load(Ordering::Relaxed) {
                 if self.thread_id == 0 {
                     if !result.was_aborted {
                         best_move_overall = result.best_move;
-                        println!("[Master Thread] Completed Depth: {} | Best Move Score: {:?}", 
-                            depth, best_move_overall);
+                        println!("[Master Thread] Completed Depth: {} | Best Move Score: {:?} | Evaluation: {}", 
+                            depth, best_move_overall, result.score);
+                        
+                        // Set up the aspiration window for the next depth around the found score
+                        alpha = result.score - window_delta;
+                        beta = result.score + window_delta;
                     }
 
                     if depth >= MAX_DEPTH { 
@@ -295,7 +317,7 @@ impl SearchWorker {
     // Static Eval
     #[inline]
     fn static_eval(&mut self) -> i16 {
-        self.chess_board.evaluate(&self.board_accumulator, &mut self.thread_buffer)
+        self.chess_board.evaluate(&mut self.board_accumulator, &mut self.thread_buffer)
     }
 
     // Process Negamax
@@ -437,7 +459,7 @@ impl SearchWorker {
                 return SearchResult {
                     score: if aborted { 0 } else { fail_soft_score },
                     best_move: ForwardMove::NULL_MOVE,
-                    was_aborted: false,
+                    was_aborted: aborted,
                 };
             }
         }
@@ -445,8 +467,9 @@ impl SearchWorker {
         // 5. Pure Fail-Soft Null Move Pruning
         if allow_null && !king_in_check && depth >= 3 && 
             self.chess_board.has_major_pieces() && ply > 0 &&
-            beta < MATE_THRESHOLD && beta > -MATE_THRESHOLD &&
-            static_eval >= beta {
+            beta < MATE_THRESHOLD && beta > -MATE_THRESHOLD {
+
+            if static_eval >= beta {
                 // Calculate Reduction
                 let reduction = self.calculate_nmp_reduction(depth, static_eval, beta);
                 let next_depth = (depth - reduction).max(0); 
@@ -469,16 +492,6 @@ impl SearchWorker {
                 }
                 
                 if null_score >= beta {
-                    let aborted = self.stop_signal.load(Ordering::Relaxed);
-
-                    if aborted {
-                         return SearchResult { 
-                            score: 0, 
-                            best_move: ForwardMove::NULL_MOVE, 
-                            was_aborted: true 
-                        };
-                    }
-
                     if beta == original_beta {
                         self.transposition_table.store(
                             hash, null_score, 
@@ -509,7 +522,7 @@ impl SearchWorker {
         for forward_move in &gen_moves {
             self.process_forward_move(*forward_move);
 
-            // Psuedo legal move exposes check, undo move
+            // Pseudo legal move exposes check, undo move
             if self.chess_board.is_previous_player_king_in_check() {    
                 self.process_backward_move();
                 continue;
@@ -518,50 +531,10 @@ impl SearchWorker {
             legal_moves_played += 1;
             moves_tried += 1;
 
-            // Late Move Reduction
-            let mut lmr_eligibility = false;
-            if depth >= 3 && moves_tried > 4 && !king_in_check && matches!(forward_move.move_type, MoveFlag::MOVE) 
-                && !self.chess_board.is_in_check() {
-                    lmr_eligibility = true;
-                }
-            }
-
             let mut score;
 
-            if lmr_eligibility {
-                let reduced_depth = self.get_reduced_depth(depth, moves_tried);
-
-                let search_result = self.negamax(reduced_depth, ply + 1, -alpha - 1, -alpha, ForwardMove::NULL_MOVE, true);
-                score = -search_result.score;
-
-                if search_result.was_aborted {
-                    self.process_backward_move();
-                    return SearchResult { score: 0, best_move: ForwardMove::NULL_MOVE, was_aborted: true };
-                }
-
-                if score > alpha && reduced_depth < depth - 1 {
-                    let research_result = self.negamax(depth - 1, ply + 1, -alpha - 1, -alpha, ForwardMove::NULL_MOVE, true);
-                    score = -research_result.score;
-
-                    if research_result.was_aborted {
-                        self.process_backward_move();
-                        return SearchResult { score: 0, best_move: ForwardMove::NULL_MOVE, was_aborted: true };
-                    }
-                }
-            } else if legal_moves_played > 1 {
-                // Non-PV Move Node: Scout with a narrow null-window search tracking alpha
-                let search_result = self.negamax(depth - 1, ply + 1, -alpha - 1, -alpha, ForwardMove::NULL_MOVE, true);
-                score = -search_result.score;
-
-                if search_result.was_aborted {
-                    self.process_backward_move();
-                    return SearchResult { score: 0, best_move: ForwardMove::NULL_MOVE, was_aborted: true };
-                }
-            } else {
-                score = -MATE_VALUE;
-            }
-
-            if legal_moves_played == 1 || (score > alpha && score < beta) {
+            // 1. FIRST MOVE (PV Move): Search with full window immediately
+            if legal_moves_played == 1 {
                 let search_result = self.negamax(depth - 1, ply + 1, -beta, -alpha, ForwardMove::NULL_MOVE, true);
                 score = -search_result.score;
 
@@ -569,8 +542,58 @@ impl SearchWorker {
                     self.process_backward_move();
                     return SearchResult { score: 0, best_move: ForwardMove::NULL_MOVE, was_aborted: true };
                 }
+            } else {
+                // 2. SUBSEQUENT MOVES: Run LMR or Scout verification
+                let mut lmr_eligibility = false;
+                if depth >= 3 && moves_tried > 4 && !king_in_check && matches!(forward_move.move_type, MoveFlag::MOVE) {
+                    if !self.chess_board.is_in_check() {
+                        lmr_eligibility = true;
+                    }
+                }
+
+                if lmr_eligibility {
+                    let reduced_depth = self.get_reduced_depth(depth, moves_tried);
+                    let search_result = self.negamax(reduced_depth, ply + 1, -alpha - 1, -alpha, ForwardMove::NULL_MOVE, true);
+                    score = -search_result.score;
+
+                    if search_result.was_aborted {
+                        self.process_backward_move();
+                        return SearchResult { score: 0, best_move: ForwardMove::NULL_MOVE, was_aborted: true };
+                    }
+
+                    if score > alpha && reduced_depth < depth - 1 {
+                        let research_result = self.negamax(depth - 1, ply + 1, -alpha - 1, -alpha, ForwardMove::NULL_MOVE, true);
+                        score = -research_result.score;
+
+                        if research_result.was_aborted {
+                            self.process_backward_move();
+                            return SearchResult { score: 0, best_move: ForwardMove::NULL_MOVE, was_aborted: true };
+                        }
+                    }
+                } else {
+                    // Non-PV Move Node: Scout with a narrow null-window search tracking alpha
+                    let search_result = self.negamax(depth - 1, ply + 1, -alpha - 1, -alpha, ForwardMove::NULL_MOVE, true);
+                    score = -search_result.score;
+
+                    if search_result.was_aborted {
+                        self.process_backward_move();
+                        return SearchResult { score: 0, best_move: ForwardMove::NULL_MOVE, was_aborted: true };
+                    }
+                }
+
+                // If a scout/LMR search reveals a better move, research with the full window
+                if score > alpha && score < beta {
+                    let search_result = self.negamax(depth - 1, ply + 1, -beta, -alpha, ForwardMove::NULL_MOVE, true);
+                    score = -search_result.score;
+
+                    if search_result.was_aborted {
+                        self.process_backward_move();
+                        return SearchResult { score: 0, best_move: ForwardMove::NULL_MOVE, was_aborted: true };
+                    }
+                }
             }
 
+            // Always undo the move exactly once per iteration at the bottom of the loop lifecycle
             self.process_backward_move();
 
             if score > best_score {
@@ -708,7 +731,8 @@ impl SearchWorker {
                 alpha = cmp::max(alpha, retrieved_score);
             }
             // UPPER BOUND: The true score is AT MOST this high.
-            else if tt_entry.flag == HashFlag::UPPERBOUND && retrieved_score <= alpha {
+            else if tt_entry.flag == HashFlag::UPPERBOUND {
+                if retrieved_score <= alpha {
                     return SearchResult {
                         score: retrieved_score,
                         best_move: pv_move_hint,
@@ -722,11 +746,13 @@ impl SearchWorker {
         let king_in_check = self.chess_board.is_in_check(); 
         let mut best_score;
         let mut best_move = ForwardMove::NULL_MOVE;
+        let pruning_baseline; 
 
         if !king_in_check {
             // Evaluated relative to the side-to-move
             let static_eval = self.static_eval();
             best_score = static_eval;
+            pruning_baseline = static_eval;
 
             if best_score >= beta {
                 let aborted = self.stop_signal.load(Ordering::Relaxed);
@@ -752,6 +778,7 @@ impl SearchWorker {
         } else {
             // Evasion baseline tracking bounds prevents masking mate strings
             best_score = -MATE_VALUE + ply;
+            pruning_baseline = alpha - 200; 
         }
 
         // Generate strictly legal tactical moves directly onto the global stack
@@ -764,12 +791,24 @@ impl SearchWorker {
 
         // 5. Quiscence Search
         for forward_move in &gen_moves {
-            let original_victim = self.chess_board.mailbox_piece(forward_move.capture_sq);
+            // --- PRE-MOVE TACTICAL PRUNING GATES ---
+            if !king_in_check {
+                // Calculate the exact transaction value from our current perspective (pre-move)
+                let exact_see_score = self.chess_board.static_exchange_evaluation(*forward_move);
 
-            // Push move (handles UCI, board state, hash, and history internally)
+                // 1. Strict Tactical Gate: If the exchange immediately loses material, drop it
+                if exact_see_score < 0 {
+                    continue; 
+                }
+
+                // 2. Delta Pruning Gate using check-safe baseline
+                if pruning_baseline + exact_see_score + 200 < alpha {
+                    continue; 
+                }
+            }
+
+            // --- STATE COMMITMENT & LEGALITY FILTER ---
             self.process_forward_move(*forward_move);
-            
-            // Pseudo legal move exposes check, undo move
             if self.chess_board.is_previous_player_king_in_check() {
                 self.process_backward_move();
                 continue;
@@ -777,25 +816,7 @@ impl SearchWorker {
 
             legal_moves_played += 1;
 
-             if !king_in_check {
-                // 1. Calculate the exact, high-performance static transaction value
-                let defender_see_score = 
-                    self.chess_board.static_exchange_evaluation_post_move(*forward_move, original_victim);
-
-                let exact_see_score = -defender_see_score;
-
-                // 2. Strict Tactical Gate: If the exchange immediately loses material, drop it
-                if exact_see_score < 0 {
-                    self.process_backward_move();
-                    continue; 
-                }
-
-                if best_score + exact_see_score + 200 < alpha {
-                    self.process_backward_move();
-                    continue;
-                }
-            }
-
+            // --- RECURSIVE SEARCH CASCADE ---
             let search_result = self.quiescence_search(-beta, -alpha, ply + 1, ForwardMove::NULL_MOVE);
             self.process_backward_move();
 
@@ -807,6 +828,7 @@ impl SearchWorker {
                 };
             }
 
+            // Bring child score back to our perspective
             let score = -search_result.score;
             
             if score > best_score {
@@ -816,10 +838,11 @@ impl SearchWorker {
                 if score > alpha {
                     alpha = score;
                     if score >= beta { 
-                        break;
+                        break; // Beta cutoff triggered cleanly
                     }
                 }
             }
+
         }
 
         let aborted = self.stop_signal.load(Ordering::Relaxed);

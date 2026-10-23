@@ -1,7 +1,7 @@
 # Model
 from modelComponent.chessBoardModel import ChessBoardModel
 from modelComponent.moveCommand import MoveCommand, move_command_to_uci
-from modelComponent.openingMoveProtocal import OpeningMoveNodeProtocal
+from modelComponent.openingMoveNodeProtocal import OpeningMoveNodeProtocal
 
 # Enum
 from appEnums import Player, GameState, MoveCommandType
@@ -76,9 +76,10 @@ class ChessGameModel():
 
     # Take Opponent Turn
     def computeBestMove(self) -> MoveCommand:
+        # 1. Look for book moves first
         if self.currOpeningMove and self.currOpeningMove.hasSubsequentCmd():
             return self.currOpeningMove.randomSubsequentCmd()
         
-        # Rust Compute Next Move
+        # 2. Fallback to Rust Engine Compute if we're out of the opening handbook
         uci_move = self.game_engine.compute_next_move()
         return self.chessBoard.uci_to_move_command(uci_move)

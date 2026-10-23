@@ -17,7 +17,7 @@ use crate::nnue_network::*;
 use crate::search_command::*;
 use crate::move_command::*;
 
-pub const MAX_DEPTH: i8 = 25;
+pub const MAX_DEPTH: i8 = 30;
 
 // When a thread finishes, if it exceeds the time, it will send the 
 // termination signal to the other threads.
