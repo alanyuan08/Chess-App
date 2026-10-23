@@ -805,9 +805,10 @@ impl ChessBoard {
         };
 
         // --- STEP 0: ACCUMULATOR ---
-        let (l2_left, l2_right) = buffer.l2_inputs.split_at_mut(256);
-        let l2_left: &mut [i8; 256] = l2_left.try_into().unwrap();
-        let l2_right: &mut [i8; 256] = l2_right.try_into().unwrap();
+        let l2_left: &mut [i8; 256] = 
+            unsafe { &mut *buffer.l2_inputs.as_mut_ptr().cast::<[i8; 256]>() };
+        let l2_right: &mut [i8; 256] = 
+            unsafe { &mut *buffer.l2_inputs.as_mut_ptr().add(256).cast::<[i8; 256]>() };
 
         // --- STEP 1: Clipped ReLU ---
         for i in 0..256 {
@@ -819,8 +820,10 @@ impl ChessBoard {
 
         // --- STEP 2: HIDDEN LAYER 2 (512 -> 32) ---
         let l2_biases = &self.nnue_network.l2_biases;
-        let l2_inputs: &[i8; 512] = (&buffer.l2_inputs).try_into().unwrap();
-        let l3_inputs: &mut [i8; 32] = (&mut buffer.l3_inputs).try_into().unwrap();
+        let l2_inputs: &[i8; 512] = 
+            unsafe { &*buffer.l2_inputs.as_ptr().cast::<[i8; 512]>() };
+        let l3_inputs: &mut [i8; 32] = 
+            unsafe { &mut *buffer.l3_inputs.as_mut_ptr().cast::<[i8; 32]>() };
 
         for neuron in 0..32 {
             let mut sum: i32 = l2_biases[neuron];
@@ -836,7 +839,8 @@ impl ChessBoard {
 
         // --- STEP 3: HIDDEN LAYER 3 (32 -> 32) ---
         let l3_biases = &self.nnue_network.l3_biases;
-        let l4_inputs: &mut [i8; 32] = (&mut buffer.l4_inputs).try_into().unwrap();
+        let l4_inputs: &mut [i8; 32] = 
+            unsafe { &mut *buffer.l4_inputs.as_mut_ptr().cast::<[i8; 32]>() };
 
         for neuron in 0..32 {
             let mut sum: i32 = l3_biases[neuron];

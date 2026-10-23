@@ -317,7 +317,7 @@ impl SearchWorker {
     // Static Eval
     #[inline]
     fn static_eval(&mut self) -> i16 {
-        self.chess_board.evaluate(&mut self.board_accumulator, &mut self.thread_buffer)
+        self.chess_board.evaluate(&self.board_accumulator, &mut self.thread_buffer)
     }
 
     // Process Negamax
@@ -467,45 +467,44 @@ impl SearchWorker {
         // 5. Pure Fail-Soft Null Move Pruning
         if allow_null && !king_in_check && depth >= 3 && 
             self.chess_board.has_major_pieces() && ply > 0 &&
-            beta < MATE_THRESHOLD && beta > -MATE_THRESHOLD {
+            beta < MATE_THRESHOLD && beta > -MATE_THRESHOLD && 
+            static_eval >= beta {
 
-            if static_eval >= beta {
-                // Calculate Reduction
-                let reduction = self.calculate_nmp_reduction(depth, static_eval, beta);
-                let next_depth = (depth - reduction).max(0); 
+            // Calculate Reduction
+            let reduction = self.calculate_nmp_reduction(depth, static_eval, beta);
+            let next_depth = (depth - reduction).max(0); 
 
-                // Make the null move (switch sides, update en-passant/hash keys)
-                let null_move = ForwardMove::NULL_MOVE;
-                self.process_forward_move(null_move);
-                
-                let null_result = self.negamax(next_depth, ply + 1, -beta, -beta + 1, ForwardMove::NULL_MOVE, false);
-                let null_score = -null_result.score;
-                
-                self.process_backward_move();
+            // Make the null move (switch sides, update en-passant/hash keys)
+            let null_move = ForwardMove::NULL_MOVE;
+            self.process_forward_move(null_move);
+            
+            let null_result = self.negamax(next_depth, ply + 1, -beta, -beta + 1, ForwardMove::NULL_MOVE, false);
+            let null_score = -null_result.score;
+            
+            self.process_backward_move();
 
-                if null_result.was_aborted {
-                    return SearchResult { 
-                        score: 0, 
-                        best_move: ForwardMove::NULL_MOVE, 
-                        was_aborted: true 
-                    };
+            if null_result.was_aborted {
+                return SearchResult { 
+                    score: 0, 
+                    best_move: ForwardMove::NULL_MOVE, 
+                    was_aborted: true 
+                };
+            }
+            
+            if null_score >= beta {
+                if beta == original_beta {
+                    self.transposition_table.store(
+                        hash, null_score, 
+                        depth, ply, self.age,
+                        ForwardMove::NULL_MOVE, HashFlag::LOWERBOUND
+                    );
                 }
-                
-                if null_score >= beta {
-                    if beta == original_beta {
-                        self.transposition_table.store(
-                            hash, null_score, 
-                            depth, ply, self.age,
-                            ForwardMove::NULL_MOVE, HashFlag::LOWERBOUND
-                        );
-                    }
 
-                    return SearchResult { 
-                        score: null_score, 
-                        best_move: ForwardMove::NULL_MOVE, 
-                        was_aborted: false 
-                    };
-                }
+                return SearchResult { 
+                    score: null_score, 
+                    best_move: ForwardMove::NULL_MOVE, 
+                    was_aborted: false 
+                };
             }
         }
 
@@ -545,10 +544,10 @@ impl SearchWorker {
             } else {
                 // 2. SUBSEQUENT MOVES: Run LMR or Scout verification
                 let mut lmr_eligibility = false;
-                if depth >= 3 && moves_tried > 4 && !king_in_check && matches!(forward_move.move_type, MoveFlag::MOVE) {
-                    if !self.chess_board.is_in_check() {
-                        lmr_eligibility = true;
-                    }
+                if depth >= 3 && moves_tried > 4 && !king_in_check && matches!(forward_move.move_type, MoveFlag::MOVE)
+                    && !self.chess_board.is_in_check() {
+                    
+                    lmr_eligibility = true;
                 }
 
                 if lmr_eligibility {
@@ -731,14 +730,14 @@ impl SearchWorker {
                 alpha = cmp::max(alpha, retrieved_score);
             }
             // UPPER BOUND: The true score is AT MOST this high.
-            else if tt_entry.flag == HashFlag::UPPERBOUND {
-                if retrieved_score <= alpha {
-                    return SearchResult {
-                        score: retrieved_score,
-                        best_move: pv_move_hint,
-                        was_aborted: false,
-                    };
-                }
+            else if tt_entry.flag == HashFlag::UPPERBOUND &&
+                retrieved_score <= alpha {
+
+                return SearchResult {
+                    score: retrieved_score,
+                    best_move: pv_move_hint,
+                    was_aborted: false,
+                };
             } 
         }
 

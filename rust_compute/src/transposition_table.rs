@@ -87,7 +87,7 @@ impl TTEntry {
         let raw_type = (bits >> 80) as u8;
         let move_type: MoveFlag = unsafe { 
             if raw_type <= 10 {
-                std::mem::transmute(raw_type)
+                std::mem::transmute::<u8, MoveFlag>(raw_type)
             } else {
                 MoveFlag::NULL
             }
@@ -100,7 +100,7 @@ impl TTEntry {
         let raw_flag = (bits >> 112) as u8;
         let flag: HashFlag = unsafe {
             if raw_flag <= 3 {
-                std::mem::transmute(raw_flag)
+                std::mem::transmute::<u8, HashFlag>(raw_flag)
             } else {
                 HashFlag::EMPTY
             }
@@ -229,6 +229,7 @@ impl TranspositionTable {
     // Depth-Preferred -> Replace if it defeats the deepest position
     // Always-Replace -> Randomly replace an entry 
     #[inline(always)]
+    #[allow(clippy::too_many_arguments)]
     pub fn store(&self, 
         hash: u64, score: i16, 
         depth: i8, ply: i16, age: i8,
