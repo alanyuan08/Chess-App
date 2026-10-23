@@ -3,7 +3,8 @@ name = "chessApp"
 version = "0.1.0"
 dependencies = [
     "PySide6",
-    "py-spy"
+    "py-spy",
+    "chess"
 ]
 
 [build-system]

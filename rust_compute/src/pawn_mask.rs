@@ -2,8 +2,8 @@ use crate::move_command::*;
 use arrayvec::ArrayVec;
 use crate::chess_board::*;
 
-const NOT_A_FILE: u64 = 0xFEFE_FEFE_FEFE_FEFE;
-const NOT_H_FILE: u64 = 0x7F7F_7F7F_7F7F_7F7F;
+pub const NOT_A_FILE: u64 = 0xFEFE_FEFE_FEFE_FEFE;
+pub const NOT_H_FILE: u64 = 0x7F7F_7F7F_7F7F_7F7F;
 
 const RANK_1: u64 = 0x0000_0000_0000_00FF;
 const RANK_2: u64 = 0x0000_0000_0000_FF00;
@@ -12,24 +12,57 @@ const RANK_7: u64 = 0x00FF_0000_0000_0000;
 const RANK_8: u64 = 0xFF00_0000_0000_0000;
 
 // Return Squares that could be attacked / Used for King Safety
+#[inline(always)]
 pub fn white_pawn_attacks(white_pawns: u64) -> u64 {
-    // Left capture (North-West): shift 7, but only if not on A-file
-    let captures_left = (white_pawns << 7) & NOT_H_FILE;
+    // Left capture (North-West): shift 7, source pawns cannot be on the A-file
+    let captures_left = (white_pawns & NOT_A_FILE) << 7;
     
-    // Right capture (North-East): shift 9, but only if not on H-file
-    let captures_right = (white_pawns << 9) & NOT_A_FILE;
+    // Right capture (North-East): shift 9, source pawns cannot be on the H-file
+    let captures_right = (white_pawns & NOT_H_FILE) << 9;
     
     captures_left | captures_right
 }
 
+#[inline(always)]
 pub fn black_pawn_attacks(black_pawns: u64) -> u64 {
-    // Left capture (South-West): shift 7, but only if not on A-file
-    let captures_left = (black_pawns >> 9) & NOT_H_FILE;
+    // Left capture (South-West): shift 9, source pawns cannot be on the A-file
+    let captures_left = (black_pawns & NOT_A_FILE) >> 9;
     
-    // Right capture (South-East): shift 9, but only if not on H-file
-    let captures_right = (black_pawns >> 7) & NOT_A_FILE;
+    // Right capture (South-East): shift 7, source pawns cannot be on the H-file
+    let captures_right = (black_pawns & NOT_H_FILE) >> 7;
     
     captures_left | captures_right
+}
+
+// Return Squares that can be captured via En Passant
+pub fn white_en_passant_attacks(white_pawns: u64, en_passant_sq: u8) -> u64 {
+    // Convert Square to board
+    let en_passant_board = 1u64 << en_passant_sq;
+
+    // Left / Right Capture points
+    let attacks_left = (white_pawns << 7) & NOT_A_FILE;
+    let attacks_right = (white_pawns << 9) & NOT_H_FILE;
+
+    let all_pawn_attacks = attacks_left | attacks_right;
+    
+    // en_passant_board stores the attack destination 
+    let valid_destination = all_pawn_attacks & en_passant_board;
+    valid_destination >> 8
+}
+
+// Return Squares that can be captured via En Passant
+pub fn black_en_passant_attacks(black_pawns: u64, en_passant_sq: u8) -> u64 {
+    // Convert Square to board
+    let en_passant_board = 1u64 << en_passant_sq;
+
+    // Left / Right Capture points
+    let attacks_left = (black_pawns >> 9) & NOT_H_FILE;
+    let attacks_right = (black_pawns >> 7) & NOT_A_FILE;
+    
+    let all_pawn_attacks = attacks_left | attacks_right;
+    
+    let valid_destination = all_pawn_attacks & en_passant_board;
+    valid_destination << 8
 }
 
 pub fn white_pawn_moves(
@@ -58,6 +91,7 @@ pub fn white_pawn_moves(
                 ForwardMove { 
                     start_sq: target - 8, 
                     end_sq: target, 
+                    capture_sq: target,
                     move_type: MoveFlag::MOVE, 
                     pv_score: 0 
                 }
@@ -74,6 +108,7 @@ pub fn white_pawn_moves(
                 ForwardMove { 
                     start_sq: target - 16, 
                     end_sq: target, 
+                    capture_sq: target,
                     move_type: MoveFlag::PAWNOPENMOVE, 
                     pv_score: 0
                 }
@@ -90,28 +125,34 @@ pub fn white_pawn_moves(
         moves.push(ForwardMove { 
             start_sq: target - 8, 
             end_sq: target, 
+            capture_sq: target,
             move_type: MoveFlag::PROMOTIONQUEEN, 
-            pv_score: 90_000 
+            pv_score: 30_000 
         });
 
-        moves.push(ForwardMove { 
-            start_sq: target - 8, 
-            end_sq: target, 
-            move_type: MoveFlag::PROMOTIONROOK, 
-            pv_score: -500 
-        });
-        moves.push(ForwardMove { 
-            start_sq: target - 8, 
-            end_sq: target, 
-            move_type: MoveFlag::PROMOTIONBISHOP, 
-            pv_score: -500 
-        });
-        moves.push(ForwardMove { 
-            start_sq: target - 8, 
-            end_sq: target, 
-            move_type: MoveFlag::PROMOTIONKNIGHT, 
-            pv_score: -500 
-        });
+        if !only_tactical {
+            moves.push(ForwardMove { 
+                start_sq: target - 8, 
+                end_sq: target, 
+                capture_sq: target,
+                move_type: MoveFlag::PROMOTIONROOK, 
+                pv_score: -500 
+            });
+            moves.push(ForwardMove { 
+                start_sq: target - 8, 
+                end_sq: target, 
+                capture_sq: target,
+                move_type: MoveFlag::PROMOTIONBISHOP, 
+                pv_score: -500 
+            });
+            moves.push(ForwardMove { 
+                start_sq: target - 8, 
+                end_sq: target, 
+                capture_sq: target,
+                move_type: MoveFlag::PROMOTIONKNIGHT, 
+                pv_score: -500 
+            });
+        }
 
         promotion_move &= promotion_move - 1;
     }
@@ -131,6 +172,7 @@ pub fn white_pawn_moves(
             ForwardMove { 
                 start_sq: target - 7, 
                 end_sq: target, 
+                capture_sq: target,
                 move_type: MoveFlag::CAPTURE, 
                 pv_score 
             }
@@ -149,6 +191,7 @@ pub fn white_pawn_moves(
             ForwardMove { 
                 start_sq: target - 9, 
                 end_sq: target, 
+                capture_sq: target,
                 move_type: MoveFlag::CAPTURE, 
                 pv_score 
             }
@@ -163,29 +206,35 @@ pub fn white_pawn_moves(
         moves.push(ForwardMove { 
             start_sq: target - 7, 
             end_sq: target, 
+            capture_sq: target,
             move_type: MoveFlag::PROMOTIONQUEEN, 
-            pv_score: 95_000 
+            pv_score: 30_000 
         });
 
         // Under-promotions: Pushed past 1000 so they are evaluated after quiet moves
-        moves.push(ForwardMove { 
-            start_sq: target - 7, 
-            end_sq: target, 
-            move_type: MoveFlag::PROMOTIONROOK, 
-            pv_score: -500 
-        });
-        moves.push(ForwardMove { 
-            start_sq: target - 7, 
-            end_sq: target, 
-            move_type: MoveFlag::PROMOTIONBISHOP, 
-            pv_score: -500 
-        });
-        moves.push(ForwardMove { 
-            start_sq: target - 7, 
-            end_sq: target, 
-            move_type: MoveFlag::PROMOTIONKNIGHT, 
-            pv_score: -500 
-        });
+        if !only_tactical {
+            moves.push(ForwardMove { 
+                start_sq: target - 7, 
+                end_sq: target, 
+                capture_sq: target,
+                move_type: MoveFlag::PROMOTIONROOK, 
+                pv_score: -500 
+            });
+            moves.push(ForwardMove { 
+                start_sq: target - 7, 
+                end_sq: target, 
+                capture_sq: target,
+                move_type: MoveFlag::PROMOTIONBISHOP, 
+                pv_score: -500 
+            });
+            moves.push(ForwardMove { 
+                start_sq: target - 7, 
+                end_sq: target, 
+                capture_sq: target,
+                move_type: MoveFlag::PROMOTIONKNIGHT, 
+                pv_score: -500 
+            });
+        }
         left_capture_promotion &= left_capture_promotion - 1;
     }
 
@@ -195,33 +244,41 @@ pub fn white_pawn_moves(
         moves.push(ForwardMove { 
             start_sq: target - 9, 
             end_sq: target, 
+            capture_sq: target,
             move_type: MoveFlag::PROMOTIONQUEEN, 
-            pv_score: 95_000 
+            pv_score: 30_000 
         });
 
         // Under-promotions: Pushed past 1000 so they are evaluated after quiet moves
-        moves.push(ForwardMove { 
-            start_sq: target - 9, 
-            end_sq: target, 
-            move_type: MoveFlag::PROMOTIONROOK, 
-            pv_score: -500 
-        });
-        moves.push(ForwardMove { 
-            start_sq: target - 9, 
-            end_sq: target, 
-            move_type: MoveFlag::PROMOTIONBISHOP, 
-            pv_score: -500 
-        });
-        moves.push(ForwardMove { 
-            start_sq: target - 9, 
-            end_sq: target, 
-            move_type: MoveFlag::PROMOTIONKNIGHT, 
-            pv_score: -500 
-        });
+        if !only_tactical {
+            moves.push(ForwardMove { 
+                start_sq: target - 9, 
+                end_sq: target, 
+                capture_sq: target,
+                move_type: MoveFlag::PROMOTIONROOK, 
+                pv_score: -500 
+            });
+            moves.push(ForwardMove { 
+                start_sq: target - 9, 
+                end_sq: target, 
+                capture_sq: target,
+                move_type: MoveFlag::PROMOTIONBISHOP, 
+                pv_score: -500 
+            });
+            moves.push(ForwardMove { 
+                start_sq: target - 9, 
+                end_sq: target, 
+                capture_sq: target,
+                move_type: MoveFlag::PROMOTIONKNIGHT, 
+                pv_score: -500 
+            });
+        }
         right_capture_promotion &= right_capture_promotion - 1;
     }
 
     // --- Aggregating En Passant
+    // NOTE - move_piece is the heaviest operation, start_sq / end_sq should be the 
+    // start / end location of the pawn being moved 
     let mut left_attackers = (en_passant_board >> 9) & NOT_H_FILE & white_pawns;
     while left_attackers != 0 {
         let from = left_attackers.trailing_zeros() as u8;
@@ -230,6 +287,7 @@ pub fn white_pawn_moves(
             ForwardMove { 
                 start_sq: from, 
                 end_sq: from + 9, 
+                capture_sq: from + 1, 
                 move_type: MoveFlag::ENPASSANT, 
                 pv_score 
             }
@@ -245,6 +303,7 @@ pub fn white_pawn_moves(
             ForwardMove { 
                 start_sq: from, 
                 end_sq: from + 7, 
+                capture_sq: from - 1,
                 move_type: MoveFlag::ENPASSANT, 
                 pv_score 
             }
@@ -279,6 +338,7 @@ pub fn black_pawn_moves(
                 ForwardMove { 
                     start_sq: target + 8, 
                     end_sq: target, 
+                    capture_sq: target,
                     move_type: MoveFlag::MOVE, 
                     pv_score: 0
                 }
@@ -293,8 +353,9 @@ pub fn black_pawn_moves(
             let target = double_move.trailing_zeros() as u8;
             moves.push(
                 ForwardMove { 
-                    start_sq: target + 8 * 2, 
+                    start_sq: target + 16, 
                     end_sq: target, 
+                    capture_sq: target,
                     move_type: MoveFlag::PAWNOPENMOVE, 
                     pv_score: 0 
                 }
@@ -311,29 +372,35 @@ pub fn black_pawn_moves(
         moves.push(ForwardMove { 
             start_sq: target + 8, 
             end_sq: target, 
+            capture_sq: target,
             move_type: MoveFlag::PROMOTIONQUEEN, 
-            pv_score: 90_000 
+            pv_score: 30_000 
         });
 
         // 2. Under-promotions: Pushed past 1000 so they are evaluated after quiet moves
-        moves.push(ForwardMove { 
-            start_sq: target + 8, 
-            end_sq: target, 
-            move_type: MoveFlag::PROMOTIONROOK, 
-            pv_score: -500 
-        });
-        moves.push(ForwardMove { 
-            start_sq: target + 8, 
-            end_sq: target, 
-            move_type: MoveFlag::PROMOTIONBISHOP, 
-            pv_score: -500 
-        });
-        moves.push(ForwardMove { 
-            start_sq: target + 8, 
-            end_sq: target, 
-            move_type: MoveFlag::PROMOTIONKNIGHT, 
-            pv_score: -500 
-        });
+        if !only_tactical {
+            moves.push(ForwardMove { 
+                start_sq: target + 8, 
+                end_sq: target, 
+                capture_sq: target,
+                move_type: MoveFlag::PROMOTIONROOK, 
+                pv_score: -500 
+            });
+            moves.push(ForwardMove { 
+                start_sq: target + 8, 
+                end_sq: target, 
+                capture_sq: target,
+                move_type: MoveFlag::PROMOTIONBISHOP, 
+                pv_score: -500 
+            });
+            moves.push(ForwardMove { 
+                start_sq: target + 8, 
+                end_sq: target, 
+                capture_sq: target,
+                move_type: MoveFlag::PROMOTIONKNIGHT, 
+                pv_score: -500 
+            });
+        }
         promotion_move &= promotion_move - 1;
     }
 
@@ -352,6 +419,7 @@ pub fn black_pawn_moves(
             ForwardMove { 
                 start_sq: target + 9, 
                 end_sq: target, 
+                capture_sq: target,
                 move_type: MoveFlag::CAPTURE, 
                 pv_score 
             }
@@ -370,6 +438,7 @@ pub fn black_pawn_moves(
             ForwardMove { 
                 start_sq: target + 7, 
                 end_sq: target, 
+                capture_sq: target,
                 move_type: MoveFlag::CAPTURE, 
                 pv_score 
             }
@@ -385,29 +454,35 @@ pub fn black_pawn_moves(
         moves.push(ForwardMove { 
             start_sq: target + 9, 
             end_sq: target, 
+            capture_sq: target,
             move_type: MoveFlag::PROMOTIONQUEEN, 
-            pv_score: 95_000 
+            pv_score: 30_000 
         });
 
         // 2. Under-promotions: Pushed past 1000 so they are evaluated after quiet moves
-        moves.push(ForwardMove { 
-            start_sq: target + 9, 
-            end_sq: target, 
-            move_type: MoveFlag::PROMOTIONROOK, 
-            pv_score: -500 
-        });
-        moves.push(ForwardMove { 
-            start_sq: target + 9, 
-            end_sq: target, 
-            move_type: MoveFlag::PROMOTIONBISHOP, 
-            pv_score: -500 
-        });
-        moves.push(ForwardMove { 
-            start_sq: target + 9, 
-            end_sq: target, 
-            move_type: MoveFlag::PROMOTIONKNIGHT, 
-            pv_score: -500 
-        });
+        if !only_tactical {
+            moves.push(ForwardMove { 
+                start_sq: target + 9, 
+                end_sq: target, 
+                capture_sq: target,
+                move_type: MoveFlag::PROMOTIONROOK, 
+                pv_score: -500 
+            });
+            moves.push(ForwardMove { 
+                start_sq: target + 9, 
+                end_sq: target, 
+                capture_sq: target,
+                move_type: MoveFlag::PROMOTIONBISHOP, 
+                pv_score: -500 
+            });
+            moves.push(ForwardMove { 
+                start_sq: target + 9, 
+                end_sq: target, 
+                capture_sq: target,
+                move_type: MoveFlag::PROMOTIONKNIGHT, 
+                pv_score: -500 
+            });
+        }
         left_capture_promotion &= left_capture_promotion - 1;
     }
 
@@ -418,42 +493,49 @@ pub fn black_pawn_moves(
         moves.push(ForwardMove { 
             start_sq: target + 7, 
             end_sq: target, 
+            capture_sq: target,
             move_type: MoveFlag::PROMOTIONQUEEN, 
-            pv_score: 95_000 
+            pv_score: 30_000 
         });
 
         // 2. Under-promotions: Pushed past 1000 so they are evaluated after quiet moves
-        moves.push(ForwardMove { 
-            start_sq: target + 7, 
-            end_sq: target, 
-            move_type: MoveFlag::PROMOTIONROOK, 
-            pv_score: -500 
-        });
-        moves.push(ForwardMove { 
-            start_sq: target + 7, 
-            end_sq: target, 
-            move_type: MoveFlag::PROMOTIONBISHOP, 
-            pv_score: -500 
-        });
-        moves.push(ForwardMove { 
-            start_sq: target + 7, 
-            end_sq: target, 
-            move_type: MoveFlag::PROMOTIONKNIGHT, 
-            pv_score: -500 
-        });
+        if !only_tactical {
+            moves.push(ForwardMove { 
+                start_sq: target + 7, 
+                end_sq: target, 
+                capture_sq: target,
+                move_type: MoveFlag::PROMOTIONROOK, 
+                pv_score: -500 
+            });
+            moves.push(ForwardMove { 
+                start_sq: target + 7, 
+                end_sq: target, 
+                capture_sq: target,
+                move_type: MoveFlag::PROMOTIONBISHOP, 
+                pv_score: -500 
+            });
+            moves.push(ForwardMove { 
+                start_sq: target + 7, 
+                end_sq: target, 
+                capture_sq: target,
+                move_type: MoveFlag::PROMOTIONKNIGHT, 
+                pv_score: -500 
+            });
+        }
         right_capture_promotion &= right_capture_promotion - 1;
     }
 
     // --- Aggregating En Passant
     let mut left_attackers = (en_passant_board << 7) & NOT_H_FILE & black_pawns;
     while left_attackers != 0 {
-        let target = left_attackers.trailing_zeros() as u8;
+        let from = left_attackers.trailing_zeros() as u8;
         let pv_score = 10_900; 
 
         moves.push(
             ForwardMove { 
-                start_sq: target, 
-                end_sq: target - 7, 
+                start_sq: from, 
+                end_sq: from - 7, 
+                capture_sq: from + 1,
                 move_type: MoveFlag::ENPASSANT, 
                 pv_score  
             }
@@ -463,13 +545,14 @@ pub fn black_pawn_moves(
 
     let mut right_attackers = (en_passant_board << 9) & NOT_A_FILE & black_pawns;
     while right_attackers != 0 {
-        let target = right_attackers.trailing_zeros() as u8;
+        let from = right_attackers.trailing_zeros() as u8;
         let pv_score = 10_900; 
 
         moves.push(
             ForwardMove { 
-                start_sq: target, 
-                end_sq: target - 9, 
+                start_sq: from, 
+                end_sq: from - 9, 
+                capture_sq: from - 1,
                 move_type: MoveFlag::ENPASSANT, 
                 pv_score   
             }

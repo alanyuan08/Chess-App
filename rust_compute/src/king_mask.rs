@@ -88,6 +88,7 @@ pub fn king_moves(
                 moves.push(ForwardMove { 
                     start_sq: king, 
                     end_sq: target, 
+                    capture_sq: target,
                     move_type: MoveFlag::MOVE, 
                     pv_score: 0
                 });
@@ -104,6 +105,7 @@ pub fn king_moves(
                                     ForwardMove { 
                                         start_sq: king, 
                                         end_sq: king + 2, 
+                                        capture_sq: king + 2,
                                         move_type: MoveFlag::KINGSIDECASTLE, 
                                         pv_score: 0
                                     }
@@ -117,6 +119,7 @@ pub fn king_moves(
                                     ForwardMove { 
                                         start_sq: king, 
                                         end_sq: king - 2, 
+                                        capture_sq: king - 2,
                                         move_type: MoveFlag::QUEENSIDECASTLE, 
                                         pv_score: 0
                                     }
@@ -131,6 +134,7 @@ pub fn king_moves(
                                     ForwardMove { 
                                         start_sq: king, 
                                         end_sq: king + 2, 
+                                        capture_sq: king + 2,
                                         move_type: MoveFlag::KINGSIDECASTLE, 
                                         pv_score: 0 
                                     }
@@ -144,12 +148,14 @@ pub fn king_moves(
                                     ForwardMove { 
                                         start_sq: king, 
                                         end_sq: king - 2, 
+                                        capture_sq: king - 2,
                                         move_type: MoveFlag::QUEENSIDECASTLE, 
                                         pv_score: 0 
                                     }
                                 );
                     }
-                }
+                },
+                Side::NONE => {},
             }
         }
 
@@ -163,6 +169,7 @@ pub fn king_moves(
             moves.push(ForwardMove { 
                 start_sq: king, 
                 end_sq: target, 
+                capture_sq: target,
                 move_type: MoveFlag::CAPTURE, 
                 pv_score
             });

@@ -1,41 +1,19 @@
 #[derive(Debug, Clone, Copy)]
-#[repr(C)] // Ensures a predictable layout in memory
+#[repr(C)] // 6 Bytes
 pub struct ForwardMove {
-    pub pv_score: i32,       // 32 bits | Move ordering score
-    pub start_sq: u8,        //  8 bits | 0 to 63
-    pub end_sq: u8,          //  8 bits | 0 to 63
-    pub move_type: MoveFlag, //  8 bits | Enum marked with #[repr(u8)]
+    pub pv_score: i16,       // 2 Byte
+    pub start_sq: u8,        // 1 Byte
+    pub end_sq: u8,          // 1 Byte
+    pub capture_sq: u8,       // 1 Byte
+    pub move_type: MoveFlag, // 1 Byte
 }
 
 // Packs the move into a single u16 for the Transposition Table
 impl ForwardMove {
-    // Packs the move into a single u16 for the Transposition Table
-    pub fn pack(&self) -> u16 {
-        (self.start_sq as u16) | ((self.end_sq as u16) << 6) | ((self.move_type as u16) << 12)
-    }
-
-    // Unpacks the u16 back into our 64-bit struct safely with zero overhead
-    pub fn unpack(packed: u16) -> Self {
-        // Extract the 4-bit move type flag (bits 12 to 15)
-        let raw_flag = ((packed >> 12) & 0x0F) as u8;
-        
-        // Map the raw integer back to your exact enum variants safely
-        let move_type = match MoveFlag::try_from(raw_flag) {
-            Ok(flag) => flag,
-            Err(_) => MoveFlag::NULL,
-        };
-
-        Self {
-            start_sq: (packed & 0x3F) as u8,
-            end_sq: ((packed >> 6) & 0x3F) as u8,
-            move_type,
-            pv_score: 0,
-        }
-    }
-
     pub const NULL_MOVE: Self = ForwardMove {
         start_sq: 0,
         end_sq: 0,
+        capture_sq: 0,
         move_type: MoveFlag::NULL,
         pv_score: 0,
     };
@@ -47,27 +25,31 @@ impl PartialEq for ForwardMove {
         self.start_sq == other.start_sq 
             && self.end_sq == other.end_sq 
             && self.move_type == other.move_type
+            && self.capture_sq == other.capture_sq
     }
 }
 
 impl Eq for ForwardMove {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(C, align(16))]
+#[repr(C)] // 6 Bytes
 pub struct UndoMove {
-    pub start_sq: u8,               // 8 bits | 0 to 63
-    pub end_sq: u8,                 // 8 bits | 0 to 63
-    pub prev_castle_rights: u8,     // 8 bits | Packed bitmask
-    pub prev_en_passant: u8,     // 8 bits | Square index (0-63), or 64 for None
+    pub start_sq: u8,
+    pub end_sq: u8,
+
+    pub capture_sq: u8,
+    pub prev_castle_rights: u8,
+    pub prev_en_passant: u8,
     
-    pub move_type: MoveFlag,        // 8 bits | (Requires #[repr(u8)] on MoveFlag)
-    pub captured_piece: BoardPiece, // 8 bits | (Requires #[repr(u8)] on BoardPiece)
+    pub move_type: MoveFlag, 
+    pub captured_piece: BoardPiece,
 }
 
 impl UndoMove {
     pub const NULL_UNDO_MOVE: Self = UndoMove {
         start_sq: 0,
         end_sq: 0,
+        capture_sq: 0,
         prev_castle_rights: 0,
         prev_en_passant: 64, 
         move_type: MoveFlag::NULL,
@@ -92,6 +74,15 @@ pub enum MoveFlag {
     PROMOTIONKNIGHT = 10,
 }
 
+pub fn promotion_bonus(forward_move: ForwardMove) -> i16 {
+    match forward_move.move_type {
+        MoveFlag::PROMOTIONQUEEN => 900,
+        MoveFlag::PROMOTIONROOK => 500,
+        MoveFlag::PROMOTIONBISHOP | MoveFlag::PROMOTIONKNIGHT => 300,
+        _ => 0,
+    }
+}
+
 pub fn white_promotion_piece(promotion_flag: MoveFlag) -> BoardPiece {
     match promotion_flag {
         MoveFlag::PROMOTIONQUEEN => {
@@ -107,7 +98,7 @@ pub fn white_promotion_piece(promotion_flag: MoveFlag) -> BoardPiece {
             BoardPiece::WKNIGHT
         },
         _ => {
-            panic!("Invalid Promotion Flag");
+            BoardPiece::NONE
         },
     }
 }
@@ -127,30 +118,8 @@ pub fn black_promotion_piece(promotion_flag: MoveFlag) -> BoardPiece {
             BoardPiece::BKNIGHT
         },
         _ => {
-            panic!("Invalid Promotion Flag");
+            BoardPiece::NONE
         },
-    }
-}
-
-impl TryFrom<u8> for MoveFlag {
-    type Error = ();
-
-    fn try_from(v: u8) -> Result<Self, Self::Error> {
-        match v {
-            0 => Ok(MoveFlag::MOVE),
-            1 => Ok(MoveFlag::PAWNOPENMOVE),
-            2 => Ok(MoveFlag::QUEENSIDECASTLE),
-            3 => Ok(MoveFlag::KINGSIDECASTLE),
-            4 => Ok(MoveFlag::ENPASSANT),
-            5 => Ok(MoveFlag::CAPTURE),
-            6 => Ok(MoveFlag::NULL),
-
-            7 => Ok(MoveFlag::PROMOTIONQUEEN),
-            8 => Ok(MoveFlag::PROMOTIONROOK),
-            9 => Ok(MoveFlag::PROMOTIONBISHOP),
-            10 => Ok(MoveFlag::PROMOTIONKNIGHT),
-            _ => Err(()),
-        }
     }
 }
 
@@ -159,6 +128,7 @@ impl TryFrom<u8> for MoveFlag {
 pub enum Side {
     WHITE = 0,
     BLACK = 1,
+    NONE = 2,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -224,15 +194,11 @@ pub fn is_king(piece: BoardPiece) -> bool {
     matches!(piece, BoardPiece::WKING | BoardPiece::BKING)
 }
 
-pub fn is_some(piece: BoardPiece) -> bool {
-    !matches!(piece, BoardPiece::NONE)
-}
-
 pub fn is_none(piece: BoardPiece) -> bool {
     matches!(piece, BoardPiece::NONE)
 }
 
-pub fn piece_value(piece_type: BoardPiece) -> i32 {
+pub fn piece_value(piece_type: BoardPiece) -> i16 {
     match piece_type {
         BoardPiece::WPAWN | BoardPiece::BPAWN => {
             100
@@ -251,7 +217,7 @@ pub fn piece_value(piece_type: BoardPiece) -> i32 {
             20000
         },
         BoardPiece::NONE => {
-            panic!("Passed None");
+            0
         },
     }
 }
@@ -269,7 +235,7 @@ pub fn piece_player(piece_type: BoardPiece) -> Side {
             Side::BLACK
         },
         BoardPiece::NONE => {
-            panic!("Passed None");
+            Side::NONE
         },
     }
 }

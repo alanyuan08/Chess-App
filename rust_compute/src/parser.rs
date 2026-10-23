@@ -39,9 +39,10 @@ pub fn parse_forward_move_with_board(uci: String, board: &ChessBoard) -> Forward
     let end_piece   = board.mailbox_piece(end_sq);
 
     let mut move_type = MoveFlag::MOVE;
+    let mut capture_sq = end_sq;
 
     // --- Capture ---
-    if is_some(end_piece) {
+    if !is_none(end_piece) {
         move_type = MoveFlag::CAPTURE;
     }
 
@@ -54,6 +55,7 @@ pub fn parse_forward_move_with_board(uci: String, board: &ChessBoard) -> Forward
             'n' => MoveFlag::PROMOTIONKNIGHT,
             _   => MoveFlag::MOVE,
         };
+
     }
 
     // --- Castling ---
@@ -76,20 +78,27 @@ pub fn parse_forward_move_with_board(uci: String, board: &ChessBoard) -> Forward
         let start_file = start_sq % 8;
         let end_file   = end_sq % 8;
 
-        // Pawn moved diagonally but target square is empty → en passant
-        if start_file != end_file && is_none(end_piece) {
-            move_type = MoveFlag::ENPASSANT;
-        }
-
         // Double pawn push
         if (start_rank as i32 - end_rank as i32).abs() == 2 {
             move_type = MoveFlag::PAWNOPENMOVE;
+        }
+
+        // Pawn moved diagonally but target square is empty → en passant
+        if start_file != end_file && is_none(end_piece) {
+            move_type = MoveFlag::ENPASSANT;
+
+            if end_file > start_file {
+                capture_sq = start_sq + 1;
+            } else {
+                capture_sq = start_sq - 1;
+            }
         }
     }
 
     ForwardMove {
         start_sq,
         end_sq,
+        capture_sq,
         move_type,
         pv_score: 0,
     }

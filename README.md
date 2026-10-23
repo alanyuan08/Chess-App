@@ -6,7 +6,7 @@
   
 - **Compute Engine:** Rust Maturin for Adversarial Search - Negamax with Quiescence Search with advanced pruning techniques such as Killer Move Heuristics, Late Move Reduction, Principal Variation Search, and Null-Move Pruning.
 
-  The engine processes 17+ million nodes per second on Apple M4 Pro (8 Performance Threads) and averages 14+ depth on 15 second search. 
+  The engine processes 22+ million nodes per second on Apple M4 Pro (8 Performance Threads) and averages 22+ depth on 15 second search. 
 
 - **Move Generation:** BitBoard for board representation and BitBoard Magic Number to calculate moves for sliding pieces. 
 
@@ -24,7 +24,7 @@
 
 - **Move Validation:** Enforces legal moves and coordinates state synchronization with the rust compute engine
 
-- **Opening Handbook:** Integrates a built-in opening book containing standard opening lines
+- **Opening Handbook:** Uses an opening handbook provided by [Chris Whittington](https://github.com/ChrisWhittington/polyglot-books/releases/latest/download/Performance.zip)
 
 ## 2. Rust Compute Engine
 
@@ -34,7 +34,7 @@
 
 - **Advanced Pruning:** Uses Killer Move Heuristics, Late Move Reduction and Null-Move Pruning. to improve the Alpha / Beta cutoff. 
 
-- **Deep Evaluation:** Combines Iterative Deepening with Principal Variation Search (PVS) to regularly achieve search depths of 16+ plies. (Average Move is approximately 14+ seconds).
+- **Deep Evaluation:** Combines Iterative Deepening with Principal Variation Search (PVS) to regularly achieve search depths of 16+ plies. (Average Move is approximately 22+ seconds).
 
 - **Transposition Tables:** Caches previously evaluated board states to accelerate search paths in a lockless transposition Table. The tables uses the Condon-Thompson Replacement method to increase efficiency of L1 / L2 / L3 caches by prioritizng positions that are frequently traversed positions and evaluations with strong depth. 
 

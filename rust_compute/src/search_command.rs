@@ -5,12 +5,14 @@ pub enum SearchCommand {
         uci_move: String,
     },
     
-    StartSearch
+    StartSearch  {
+        age: i8,
+    },
 }
 
 #[derive(Clone, Copy)]
 pub struct SearchResult {
-    pub score: i32,
+    pub score: i16,
     pub best_move: ForwardMove,
     pub was_aborted: bool,
 }

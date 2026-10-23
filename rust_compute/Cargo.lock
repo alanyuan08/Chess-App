@@ -265,6 +265,7 @@ dependencies = [
  "const-random",
  "crossbeam-channel",
  "polyglot",
+ "portable-atomic",
  "pyo3",
  "rand",
 ]

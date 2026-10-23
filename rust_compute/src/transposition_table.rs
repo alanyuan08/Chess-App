@@ -1,9 +1,8 @@
+use portable_atomic::{AtomicU128, Ordering};
+
 use crate::move_command::*;
 use crate::chess_game::*;
 
-use std::sync::atomic::{AtomicU64, Ordering};
-
-// TT Entry Flag definitions
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum HashFlag {
@@ -15,186 +14,303 @@ pub enum HashFlag {
 
 // TTEntry Structure
 #[derive(Clone, Copy, Debug)]
-#[repr(C, align(16))] 
+#[repr(C, align(16))]
 pub struct TTEntry {
-    pub key: u64,
-    pub move_id: u16,
+    pub key: u64,                       // 8 bytes
+
+     // --- Flattened Move Data ---
+    pub start_sq: u8,                   // 1 Byte
+    pub end_sq: u8,                     // 1 Byte
+    pub move_type: MoveFlag,            // 1 Byte
+
+    pub score: i16,                     // 2 bytes
+    pub depth: i8,                      // 1 byte
+    pub flag: HashFlag,                 // 1 byte
+    pub age: i8                         // 1 byte
+}
+
+#[derive(Debug)]
+pub struct TTResult {
     pub score: i16,
     pub depth: i8,
     pub flag: HashFlag,
+    pub forward_move: ForwardMove,
 }
 
-// Condon-Thompson Bucket using 100% stable AtomicU64 primitives.
-// current implement
+impl TTResult {
+    /// Creates a default structure representing a total transposition cache miss.
+    pub fn empty() -> Self {
+        Self {
+            score: 0,
+            depth: 0,
+            flag: HashFlag::EMPTY,
+            forward_move: ForwardMove::NULL_MOVE,
+        }
+    }
+}
+
+// The TTEntry needs to be restructued as a AtomicU128 such that it can be used 
+// inside load(Ordering::Relaxed) / store(packed_new, Ordering::Relaxed) without Locks 
+impl TTEntry {
+    pub fn empty() -> Self {
+        Self {
+            key: 0,
+            start_sq: 0,
+            end_sq: 0,
+            move_type: MoveFlag::NULL,
+            score: 0,
+            depth: 0,
+            flag: HashFlag::EXACT,
+            age: 0,
+        }
+    }
+
+    pub fn pack(&self) -> u128 {
+        let key_bits = self.key as u128;
+        
+        let start_bits = (self.start_sq as u128) << 64;
+        let end_bits   = (self.end_sq as u128) << 72;
+        let type_bits  = (self.move_type as u128) << 80;
+        let score_bits = (self.score as u16 as u128) << 88;
+        let depth_bits = (self.depth as u8 as u128) << 104;
+        let flag_bits  = (self.flag as u8 as u128) << 112;
+        let age_bits   = (self.age as u8 as u128) << 120;
+        
+        key_bits | start_bits | end_bits | type_bits | score_bits | depth_bits | flag_bits | age_bits
+    }
+
+    pub fn unpack(bits: u128) -> Self {
+        let key = bits as u64;
+        let start_sq  = (bits >> 64) as u8;
+        let end_sq    = (bits >> 72) as u8;
+        
+        let raw_type = (bits >> 80) as u8;
+        let move_type: MoveFlag = unsafe { 
+            if raw_type <= 10 {
+                std::mem::transmute::<u8, MoveFlag>(raw_type)
+            } else {
+                MoveFlag::NULL
+            }
+        };
+        
+        let score = (bits >> 88) as i16;
+        let depth = (bits >> 104) as i8;
+        
+        // Apply the same optimization to HashFlag (0..3)
+        let raw_flag = (bits >> 112) as u8;
+        let flag: HashFlag = unsafe {
+            if raw_flag <= 3 {
+                std::mem::transmute::<u8, HashFlag>(raw_flag)
+            } else {
+                HashFlag::EMPTY
+            }
+        };
+        
+        let age = (bits >> 120) as i8;
+
+        Self { key, start_sq, end_sq, move_type, score, depth, flag, age }
+    }
+}
+
+// Condon-Thompson multi-tiered bucket layout.
+#[cfg(target_arch = "aarch64")]
+pub const SLOTS_PER_BUCKET: usize = 8;
+
+#[cfg(not(target_arch = "aarch64"))]
+pub const SLOTS_PER_BUCKET: usize = 4;
+
+// Dynamically matches CPU architectures to guarantee optimal L1/L2 cache properties.
+#[cfg_attr(target_arch = "aarch64", repr(C, align(128)))] // Apple Silicon (M1-M4) / ARM64
+#[cfg_attr(not(target_arch = "aarch64"), repr(C, align(64)))] // Standard Intel/AMD x86_64
 pub struct TtBucket {
-    pub depth_preferred: AtomicU64, // Slot 1 (8 bytes)
-    pub always_replace: AtomicU64,  // Slot 2 (8 bytes)
+    pub slots: [AtomicU128; 8],
 }
 
 // Condon-Thompson transposition table using packed 128-bit buckets
-// The current implementation uses a 32 MB size cache to retain the memory within
-// Apple M4 L3 Cache - This is implementation is currently unneccessary. 
 pub struct TranspositionTable {
     buckets: Vec<TtBucket>,
     mask: usize,
-    age: u8
 }
 
 impl TranspositionTable {
     /// Creates a flat table matching the nearest power-of-two megabytes
     pub fn new(mb: usize) -> Self {
-        let size_bytes = mb * 512 * 512;
+        let size_bytes = mb * 1024 * 1024;
         let count = size_bytes / std::mem::size_of::<TtBucket>();
         
-        // Round down to power of two for fast bitwise indexing
-        let power_of_two_count = count.next_power_of_two() >> 1;
-        let final_count = std::cmp::max(1, power_of_two_count);
+        let mut final_count = count.next_power_of_two();
+        if final_count > count && final_count > 1 {
+            final_count >>= 1;
+        }
+        final_count = std::cmp::max(1, final_count);
 
-        let buckets = (0..final_count)
-            .map(|_| TtBucket {
-                depth_preferred: AtomicU64::new(0),
-                always_replace: AtomicU64::new(0),
-            })
-            .collect();
+        let mut buckets = Vec::with_capacity(final_count);
+        for _ in 0..final_count {
+            // Fill array with 0 atomic integers
+            let slots = unsafe { std::mem::zeroed() };
+            buckets.push(TtBucket { slots });
+        }
+
         Self {
             buckets,
             mask: final_count - 1,
-            age: 0,
         }
     }
 
-    pub fn increment_age(&mut self) {
-        self.age = self.age.wrapping_add(1);
-    }
+    // ========================================================================
+    // THE DISTANCE-TO-MATE CONVERSION
+    // ========================================================================
+    // Our search loop evaluates checkmates relative to the tree root, returning:
+    //   Winning Mate:  MATE_VALUE - total_search_ply
+    //   Losing Mate:  -MATE_VALUE + total_search_ply
+    //
+    // Transposition Table should store distance to mate, not total Ply. Suppose at ply_10
+    // 
+    //   Winning: (MATE_VALUE - 14) + ply_10  => MATE_VALUE - 4  (Mate is 4 steps)
+    //   Losing:  (-MATE_VALUE + 11) - ply_10 => -MATE_VALUE + 1 (Mate is 1 step)
+    //
+    // Probe -> Current Ply should be removed from the final score
+    // Store -> Current Ply should be added to the final score to find the absolute distance
+    // ========================================================================
 
-    /// Packs raw components into a 64-bit word
+    // The engine may return a combined ply that is beyond search horizon, this may be risky for an engine to execute
+    // as Stockfish RL uses 80% Deep Search + 20% WLD. This will be kept for now, however we may need to revisit
+
+    // Transposition Table Entries are unique for every key 
+    // The 1/4 of the buckets is depth-preferred - 3/4 is always-replace 
     #[inline(always)]
-    fn pack_entry(&self, move_id: u16, score: i16, depth: i32, 
-        flag: HashFlag, key: u64) -> u64 {
-        
-        let tag_22 = (key >> 42) & 0x3F_FFFF; 
-        let mut packed = 0u64;
+     pub fn probe(&self, key: u64, ply: i16) -> TTResult {
+        let bucket_idx = (key as usize) & self.mask;
+        let bucket = &self.buckets[bucket_idx];
 
-        packed |= (move_id as u64) & 0xFFFF;
-        packed |= ((score as u16) as u64) << 16;
-        packed |= ((depth as u8) as u64 & 0xFF) << 32;
-        packed |= (tag_22 & 0x3F_FFFF) << 40;
-        packed |= (flag as u8 as u64) << 62;
-        packed
-    }
+        for i in 0..SLOTS_PER_BUCKET {
+            let bits = bucket.slots[i].load(Ordering::Relaxed);
+            if bits == 0 {
+                continue;
+            }
 
-    /// Unpacks a 64-bit word into an operational TTEntry if the tag matches
-    #[inline(always)]
-    fn unpack_entry(&self, packed: u64, key: u64, ply: i32) -> TTEntry {
-        let empty_entry = TTEntry {
-            key: 0,
-            move_id: 0,
-            score: 0,
-            depth: 0,
-            flag: HashFlag::EMPTY,
-        };
+            let entry = TTEntry::unpack(bits);           
+            if entry.key == key {
+                let mut local_score = entry.score;
 
-        if packed == 0 {
-            return empty_entry;
-        }
+                let is_pos_mate = local_score >= MATE_THRESHOLD;
+                let is_neg_mate = local_score <= -MATE_THRESHOLD;
+                local_score = local_score - (is_pos_mate as i16 * ply) + (is_neg_mate as i16 * ply);
+                
+                // En Passant Offset
+                const EP_OFFSET_LOOKUP: [i8; 2] = [8, -8];
 
-        let stored_tag = ((packed >> 40) & 0x3F_FFFF) as u32;
-        let current_tag = ((key >> 42) & 0x3F_FFFF) as u32; 
+                let is_ep = (entry.move_type == MoveFlag::ENPASSANT) as i8;
+                let is_white = (entry.end_sq > entry.start_sq) as usize;
+                
+                let adjustment = is_ep * EP_OFFSET_LOOKUP[is_white];
+                let capture_sq = (entry.end_sq as i8 + adjustment) as u8;
 
-        if stored_tag != current_tag {
-            return empty_entry;
-        }
-        
-        let move_id = packed as u16;
-        let score = ((packed >> 16) & 0xFFFF) as i16;
-        let depth = ((packed >> 32) & 0xFF) as u8 as i8;
-        let flag_val = ((packed >> 62) & 0b11) as u8;
-
-        let flag = match flag_val {
-            0 => HashFlag::EXACT,
-            1 => HashFlag::LOWERBOUND,
-            2 => HashFlag::UPPERBOUND,
-            _ => HashFlag::EMPTY,
-        };
-
-        let mut entry = TTEntry {
-            key, 
-            move_id,
-            score,
-            depth,
-            flag,
-        };
-
-        if entry.score > MATE_THRESHOLD as i16 { 
-            entry.score -= ply as i16; 
-        } else if entry.score < -MATE_THRESHOLD as i16 { 
-            entry.score += ply as i16; 
-        }
-        entry
-    }
-
-    #[inline(always)]
-    pub fn probe(&self, key: u64, ply: i32) -> TTEntry {
-        let index = (key as usize) & self.mask;
-        let bucket = &self.buckets[index];
-        
-        // Fetching depth_preferred pulls the entire TT_Bucket cache line into L1.
-        let dp_packed = bucket.depth_preferred.load(Ordering::Relaxed);
-        let entry = self.unpack_entry(dp_packed, key, ply);
-        if entry.flag != HashFlag::EMPTY {
-            return entry;
-        }
-
-        // Fetching always_replace is an immediate L1 hit (0 penalty)
-        let ar_packed = bucket.always_replace.load(Ordering::Relaxed);
-        let entry = self.unpack_entry(ar_packed, key, ply);
-        if entry.flag != HashFlag::EMPTY {
-            return entry;
+                return TTResult {
+                    score: local_score,
+                    depth: entry.depth,
+                    flag: entry.flag,
+                    forward_move: ForwardMove {
+                        start_sq: entry.start_sq,
+                        end_sq: entry.end_sq,
+                        capture_sq,
+                        move_type: entry.move_type,
+                        pv_score: 0,
+                    },
+                };
+            }
         }
         
-        TTEntry {
-            key: 0,
-            move_id: 0,
-            score: 0,
-            depth: 0,
-            flag: HashFlag::EMPTY,
-        }
+        TTResult::empty()
     }
 
+    // Key should be unique and is incremented once per move 
+    // Always replace older entries -> Starting position with 30+ positions will not be encountered again
+    // Depth-Preferred -> Replace if it defeats the deepest position
+    // Always-Replace -> Randomly replace an entry 
     #[inline(always)]
-    pub fn store(&self, key: u64, score: i32, ply: i32, 
-        forward_move: ForwardMove, depth: i32, flag: HashFlag) 
-    {
-        let index = (key as usize) & self.mask;
-        let bucket = &self.buckets[index];
+    #[allow(clippy::too_many_arguments)]
+    pub fn store(&self, 
+        hash: u64, score: i16, 
+        depth: i8, ply: i16, age: i8,
+        mv: ForwardMove, flag: HashFlag, 
+    ) {
+        let bucket_idx = (hash as usize) & self.mask;
+        let bucket = &self.buckets[bucket_idx];
+        let midpoint = SLOTS_PER_BUCKET / 4;
 
-        let move_id = if forward_move.move_type == MoveFlag::NULL {
-            0
-        } else {
-            forward_move.pack()
+        let is_pos_mate = score >= MATE_THRESHOLD;
+        let is_neg_mate = score <= -MATE_THRESHOLD;
+        let adjusted_score = score + (is_pos_mate as i16 * ply) - (is_neg_mate as i16 * ply);
+
+       let new_entry = TTEntry { 
+            key: hash, 
+            start_sq: mv.start_sq,
+            end_sq: mv.end_sq,
+            move_type: mv.move_type,
+            score: adjusted_score, 
+            depth, 
+            flag, 
+            age 
         };
+        let packed_new = new_entry.pack();
 
-        let mut storage_score = score;
-        if storage_score >= MATE_THRESHOLD {
-            storage_score += ply;
-        } else if storage_score <= -MATE_THRESHOLD {
-            storage_score -= ply;
+        // --- PHASE 1: IF HASH EXISTS, REPLACE THAT ITEM ---
+        // Enforces the rule that all keys across the bucket must be completely unique.
+        for i in 0..SLOTS_PER_BUCKET {
+            let bits = bucket.slots[i].load(Ordering::Relaxed);
+            if bits == 0 { continue; }
+
+            let slot = TTEntry::unpack(bits);
+            if slot.key == hash {
+                let is_stale = slot.age != age;
+                let is_depth_preferred = i < midpoint;
+                let meets_depth = depth >= slot.depth;
+                
+                let should_replace = is_stale | !is_depth_preferred | (is_depth_preferred & meets_depth);
+                let final_bits = if should_replace { packed_new } else { bits };
+                bucket.slots[i].store(final_bits, Ordering::Relaxed);
+        
+                return;
+            }
         }
 
-        let packed_new = self.pack_entry(move_id, storage_score as i16, depth, flag, key);
+        // --- PHASE 2: NEW HASH INSERTION ---
+        
+        // --- STEP A: Depth First Search ---
+        // Replace Stale then Shallow-Depth
+        let mut best_tier1_idx = 0;
+        let mut lowest_priority = MAX_DEPTH;
 
-        let packed_depth_slot = bucket.depth_preferred.load(Ordering::Relaxed);
-        let current_depth_entry = self.unpack_entry(packed_depth_slot, key, ply);
+        for i in 0..midpoint {
+            let bits = bucket.slots[i].load(Ordering::Relaxed);
+            if bits == 0 {
+                bucket.slots[i].store(packed_new, Ordering::Relaxed);
+                return;
+            }
 
-        // Replacement Strategy Logic:
-        // Overwrite depth preferred if the slot is empty, if the old entry belongs to an 
-        // older engine search iteration, or if the new search depth is deeper.
-        if current_depth_entry.flag == HashFlag::EMPTY || (depth as i8) >= current_depth_entry.depth {
-            bucket.depth_preferred.store(packed_new, Ordering::Relaxed);
-        } else {
-            // If the depth slot is too high quality to overwrite, put this shallower entry
-            // (like a quiescence search result) into the secondary replacement tier.
-            bucket.always_replace.store(packed_new, Ordering::Relaxed);
+            let slot = TTEntry::unpack(bits);
+            if slot.age != age {
+                bucket.slots[i].store(packed_new, Ordering::Relaxed);
+                return; // Claim stale slot instantly
+            }
+
+            if slot.depth < lowest_priority {
+                lowest_priority = slot.depth;
+                best_tier1_idx = i;
+            }
         }
+
+        if depth > lowest_priority {
+            bucket.slots[best_tier1_idx].store(packed_new, Ordering::Relaxed);
+            return;
+        }
+
+        // --- STEP B: Always Replace ---
+        // Always Replace - Traffic is high and ovewrites are common.
+        let random_offset = (hash >> 12) as usize % midpoint;
+        let target_tier2_idx = midpoint + random_offset; 
+
+        bucket.slots[target_tier2_idx].store(packed_new, Ordering::Relaxed);
     }
 }

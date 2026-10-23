@@ -1,25 +1,37 @@
 use std::fs::File;
 use std::io::{Read, BufReader};
 
-/// Matches the exact memory layout of your exported Python binary.
-#[repr(C, align(64))]
+#[cfg_attr(target_arch = "aarch64", repr(C, align(128)))]
+#[cfg_attr(not(target_arch = "aarch64"), repr(C, align(64)))]
 #[derive(Clone, Copy, Debug)]
+// The NNUuE L1 / L2 and L3 weights should align 128 to avoid expensive cache splits
 pub struct NnueNetwork {
-    // Layer 1: Accumulator (49152 inputs -> 256 outputs)
+    // i16 -> 2 bytes. 2*256 / 128 -> 4 Cache Lines * 49152
+    // i32 -> 4 bytes. 4*256 / 128 -> 8 Cache Lines
     pub l1_weights: [[i16; 256]; 49152],
     pub l1_biases: [i32; 256],
-
-    // Layer 2: Hidden 2 (256*2 inputs -> 32 outputs)
+    
+    // i8-> 1 bytes. 512 / 128 -> 4 Cache Lines * 32
+    // i32 -> 4 bytes. 4*32 / 128 -> 1 Cache Lines
     pub l2_weights: [[i8; 512]; 32],
     pub l2_biases: [i32; 32],
 
-    // Layer 3: Hidden 3 (32 inputs -> 32 outputs)
+    // i8-> 1 bytes. 32 * 32 / 128 -> 8 Cache Lines
+    // i32 -> 4 bytes. 4*32 / 128 -> 1 Cache Lines
     pub l3_weights: [[i8; 32]; 32],
     pub l3_biases: [i32; 32],
 
-    // Layer 4: Output Layer (32 inputs -> 1 output)
+    // i8-> 1 bytes. 32 + 4 bytes + 92 padding -> 1 Cache Line
     pub output_weights: [[i8; 32]; 1],
-    pub output_bias: [i32; 1]
+    pub output_bias: [i32; 1],
+    
+    // If aarch64 (Mac), use 92 bytes of padding to round up to 128.
+    // If x86 (Intel/AMD), use 28 bytes of padding to round up to 64.
+    #[cfg(target_arch = "aarch64")] 
+    pub _padding: [u8; 92],
+    
+    #[cfg(not(target_arch = "aarch64"))] 
+    pub _padding: [u8; 28],
 }
 
 impl NnueNetwork {
@@ -73,12 +85,18 @@ impl NnueNetwork {
 
 /// The runtime container holding the current calculation buffers.
 /// Allocated once per search thread to prevent runtime overhead.
-#[repr(C, align(64))]
+#[cfg_attr(target_arch = "aarch64", repr(C, align(128)))]
+#[cfg_attr(not(target_arch = "aarch64"), repr(C, align(64)))]
 #[derive(Clone, Debug)]
 pub struct NnueInferenceBuffer {
+    // 4 * 128 -> 512
     pub l2_inputs: [i8; 512],
+    // 32 + 32 + 64 pading -> 128
     pub l3_inputs: [i8; 32],
     pub l4_inputs: [i8; 32],
+
+    #[cfg(target_arch = "aarch64")] 
+     _padding: [u8; 64],
 }
 
 impl NnueInferenceBuffer {    
@@ -98,6 +116,9 @@ impl Default for NnueInferenceBuffer {
             l2_inputs: [0i8; 512],
             l3_inputs: [0i8; 32],
             l4_inputs: [0i8; 32],
+
+            #[cfg(target_arch = "aarch64")]
+            _padding: [0u8; 64],
         }
     }
 }

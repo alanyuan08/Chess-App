@@ -6,8 +6,8 @@ use crate::rook_mask::*;
 use crate::queen_mask::*;
 use crate::move_command::*;
 use crate::zobrist_hash::*;
-use crate::board_accumlator::*;
 use crate::nnue_network::*;
+use crate::board_accumlator::*;
 use arrayvec::ArrayVec;
 
 // 0 -> White / 1 -> Black
@@ -22,20 +22,14 @@ pub struct ChessBoard {
     
     pub all_pieces: [u64; 2],
     pub occupied: u64,
-    
     pub mailbox: [BoardPiece; 64],
 
     castling_rights: u8,
     en_passant: u8,
     active_player: Side,
 
-    // Zobrist Hash
     zobrist_hash: u64,
-
-    // --- INTEGRATED NNUE ACCUMULATOR BASE ---
-    accumulators: Box<[BoardAccumulators; 256]>, 
     ply: usize,
-
     nnue_network: &'static NnueNetwork,
 }
 
@@ -68,14 +62,12 @@ impl ChessBoard {
             mailbox: [BoardPiece::NONE; 64],
             zobrist_hash: 0,
 
-            accumulators: Box::new([BoardAccumulators::default(); 256]),
             ply: 0,
-
             nnue_network,
         }
     }
 
-    pub fn init_board(&mut self) {
+    pub fn init_board(&mut self, accumulators: &mut AccumulatorHistory) {
         for color in 0..2 {
             // Ranks: White = 0 & 1, Black = 6 & 7
             let piece_rank_offset = if color == 0 { 0 } else { 56 };
@@ -117,7 +109,7 @@ impl ChessBoard {
         }
 
         // Init Accumulator
-        self.create_accumlator_from_scratch();    
+        self.create_accumulator_from_scratch(accumulators);    
     }
 
     // Null Move Pruning Zugzwang
@@ -163,6 +155,9 @@ impl ChessBoard {
             },
             Side::BLACK => {
                 Side::WHITE
+            },
+            Side::NONE => {
+                Side::NONE
             }
         }
     }
@@ -176,6 +171,9 @@ impl ChessBoard {
             },
             Side::BLACK => {
                 1
+            },
+            Side::NONE => {
+                2
             }
         }
     }
@@ -190,6 +188,12 @@ impl ChessBoard {
     #[inline]
     pub fn en_passant(&self) -> u8 {   
         self.en_passant
+    }
+
+    // Return En Passant as a board
+    #[inline]
+    pub fn en_passant_board(&self) -> u64 {   
+         1u64 <<  self.en_passant
     }
 
     // Return Zobrist Hash
@@ -214,8 +218,10 @@ impl ChessBoard {
     pub fn compute_attack_targets(&self, attacking_side: Side) -> u64 {
         let mut attacks = 0u64;
         let index = self.player_index(attacking_side);
+        let defender_index = 1 - index;
         
-        let occ = self.occupied;
+        let defender_king_bb = self.kings[defender_index];
+        let occ = self.occupied ^ defender_king_bb;
 
         // 1. Pawns
         let pawns = self.pawns[index];
@@ -275,7 +281,7 @@ impl ChessBoard {
     pub fn generate_moves(&mut self, 
         gen_moves: &mut ArrayVec::<ForwardMove, 256>, 
         pv_move_hint: ForwardMove,
-        ply_idx: i32,
+        ply_idx: i16,
         killer_move_table: &[[ForwardMove; 2]; 128],
         only_tactical: bool, 
     ) {        
@@ -300,7 +306,8 @@ impl ChessBoard {
             },
             Side::BLACK => {
                 black_pawn_moves(self, player_index, opp_index, gen_moves, only_tactical);
-            }
+            },
+            Side::NONE => {},
         }
         
         if ply_idx < 128 {
@@ -313,7 +320,7 @@ impl ChessBoard {
 
             for m in gen_moves.iter_mut() {
                 if has_valid_pv && *m == pv_move_hint {
-                    m.pv_score = 10_000_000;
+                    m.pv_score = 32_000;
                 } else if has_k0 && *m == k0 {
                     m.pv_score = 500;
                 } else if has_k1 && *m == k1 {
@@ -366,7 +373,7 @@ impl ChessBoard {
                 self.kings[player_index] ^= 1u64 << move_command.end_sq;
             },
             BoardPiece::NONE => {
-                println!("Tried to move empty");
+                return;
             },
         }
 
@@ -409,7 +416,7 @@ impl ChessBoard {
                 self.kings[player_index] ^= 1u64 << remove_sq;
             },
             BoardPiece::NONE => {
-                println!("Tried to remove empty");
+                return;
             },
         }
 
@@ -447,7 +454,9 @@ impl ChessBoard {
             BoardPiece::WKING | BoardPiece::BKING=> {
                 self.kings[player_index] ^= 1u64 << place_sq;
             },
-            BoardPiece::NONE => {},
+            BoardPiece::NONE => {
+                return;
+            },
         }
 
         self.mailbox[place_sq] = piece_type;
@@ -467,28 +476,8 @@ impl ChessBoard {
         // XOR the current State for Castle, En Passant and Side to Move
         self.zobrist_xor();
 
-        let mut remove_piece = BoardPiece::NONE;
-        // Store Removed Piece / No bitboard Operations
-        match move_command.move_type { 
-            MoveFlag::CAPTURE | MoveFlag::PROMOTIONQUEEN |
-            MoveFlag::PROMOTIONROOK | MoveFlag::PROMOTIONBISHOP | 
-            MoveFlag::PROMOTIONKNIGHT => {
-                if self.mailbox[move_command.end_sq as usize] != BoardPiece::NONE {
-                    remove_piece = self.mailbox[move_command.end_sq as usize];
-                }
-            },
-            MoveFlag::ENPASSANT => {
-                match self.active_player {
-                    Side::WHITE => {
-                        remove_piece = self.mailbox[(move_command.end_sq - 8) as usize];
-                    },
-                    Side::BLACK => {
-                        remove_piece = self.mailbox[(move_command.end_sq + 8) as usize];
-                    },
-                }
-            },
-            _ => {},
-        }
+        // Remove the Capture Square
+        let remove_piece = self.mailbox[move_command.capture_sq as usize];
 
         // Clear the Previous En Passant
         self.en_passant = 64;
@@ -517,71 +506,70 @@ impl ChessBoard {
             },
             MoveFlag::PAWNOPENMOVE => {
                 // Update En Passant
-                let piece = self.mailbox[move_command.start_sq as usize];
-                if (piece == BoardPiece::WPAWN || piece == BoardPiece::BPAWN) && 
-                (move_command.start_sq as i8 - move_command.end_sq as i8).abs() == 16 {
-                    match self.active_player {
-                        Side::WHITE => {
-                            self.en_passant = move_command.start_sq + 8;
-                        },
-                        Side::BLACK => {
-                            self.en_passant = move_command.start_sq - 8;
-                        },
-                    }
+                match self.active_player {
+                    Side::WHITE => {
+                        self.en_passant = move_command.start_sq + 8;
+                    },
+                    Side::BLACK => {
+                        self.en_passant = move_command.start_sq - 8;
+                    },
+                    Side::NONE => {},
                 }
-                
+            
                 self._move_piece(move_command);
             },
             MoveFlag::KINGSIDECASTLE => {
                 match self.active_player {
                     Side::WHITE => {
                         let king_move_cmd = ForwardMove { 
-                            start_sq: 4, end_sq: 6, move_type: MoveFlag::MOVE, pv_score: 0
+                            start_sq: 4, end_sq: 6, capture_sq: 6, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(king_move_cmd);
 
                         let rook_move_cmd = ForwardMove { 
-                            start_sq: 7, end_sq: 5, move_type: MoveFlag::MOVE, pv_score: 0
+                            start_sq: 7, end_sq: 5, capture_sq: 5, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(rook_move_cmd);
                     },
                     Side::BLACK => {
                         let king_move_cmd = ForwardMove { 
-                            start_sq: 60, end_sq: 62, move_type: MoveFlag::MOVE, pv_score: 0
+                            start_sq: 60, end_sq: 62, capture_sq: 62, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(king_move_cmd);
 
                         let rook_move_cmd = ForwardMove { 
-                            start_sq: 63, end_sq: 61, move_type: MoveFlag::MOVE, pv_score: 0
+                            start_sq: 63, end_sq: 61, capture_sq: 61, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(rook_move_cmd);
                     },
+                    Side::NONE => {},
                 }
             },
             MoveFlag::QUEENSIDECASTLE => {
                 match self.active_player {
                     Side::WHITE => {
                         let king_move_cmd = ForwardMove { 
-                            start_sq: 4, end_sq: 2, move_type: MoveFlag::MOVE, pv_score: 0
+                            start_sq: 4, end_sq: 2, capture_sq: 2, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(king_move_cmd);
 
                         let rook_move_cmd = ForwardMove { 
-                            start_sq: 0, end_sq: 3, move_type: MoveFlag::MOVE, pv_score: 0
+                            start_sq: 0, end_sq: 3, capture_sq: 3, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(rook_move_cmd);
                     },
                     Side::BLACK => {
                         let king_move_cmd = ForwardMove { 
-                            start_sq: 60, end_sq: 58, move_type: MoveFlag::MOVE, pv_score: 0
+                            start_sq: 60, end_sq: 58, capture_sq: 58, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(king_move_cmd);
 
                         let rook_move_cmd = ForwardMove { 
-                            start_sq: 56, end_sq: 59, move_type: MoveFlag::MOVE, pv_score: 0
+                            start_sq: 56, end_sq: 59, capture_sq: 59, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(rook_move_cmd);
                     },
+                    Side::NONE => {},
                 }
             },
             MoveFlag::PROMOTIONQUEEN | MoveFlag::PROMOTIONROOK |
@@ -589,7 +577,7 @@ impl ChessBoard {
                 self._remove_piece(move_command.start_sq as usize);
 
                 if remove_piece != BoardPiece::NONE {
-                    self._remove_piece(move_command.end_sq as usize);
+                    self._remove_piece(move_command.capture_sq as usize);
                 }
 
                 match self.active_player {
@@ -603,21 +591,11 @@ impl ChessBoard {
                             black_promotion_piece(move_command.move_type)
                         );
                     },
+                    Side::NONE => {},
                 }
             },
-            MoveFlag::ENPASSANT => {
-                self._move_piece(move_command);
-                match self.active_player {
-                    Side::WHITE => {
-                        self._remove_piece((move_command.end_sq - 8) as usize);
-                    },
-                    Side::BLACK => {
-                        self._remove_piece((move_command.end_sq + 8) as usize);
-                    },
-                }
-            },
-            MoveFlag::CAPTURE => {
-                self._remove_piece(move_command.end_sq as usize);
+            MoveFlag::CAPTURE | MoveFlag::ENPASSANT => {
+                self._remove_piece(move_command.capture_sq as usize);
                 self._move_piece(move_command);
             },
             MoveFlag::NULL => {},
@@ -641,10 +619,11 @@ impl ChessBoard {
         
         // Undo Move
         match undo_move_cmd.move_type {
-            MoveFlag::MOVE | MoveFlag::CAPTURE | MoveFlag::PAWNOPENMOVE | MoveFlag::ENPASSANT=> {
+            MoveFlag::MOVE | MoveFlag::CAPTURE | MoveFlag::PAWNOPENMOVE | MoveFlag::ENPASSANT => {
                 let undo_command = ForwardMove { 
                     start_sq: undo_move_cmd.end_sq, 
                     end_sq: undo_move_cmd.start_sq, 
+                    capture_sq: undo_move_cmd.start_sq,
                     move_type: MoveFlag::MOVE, 
                     pv_score: 0,
                 };
@@ -655,52 +634,54 @@ impl ChessBoard {
                 match self.active_player {
                     Side::WHITE => {
                         let king_move_cmd = ForwardMove { 
-                            start_sq: 6, end_sq: 4, move_type: MoveFlag::MOVE, pv_score: 0
+                            start_sq: 6, end_sq: 4, capture_sq: 4, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(king_move_cmd);
 
                         let rook_move_cmd = ForwardMove { 
-                            start_sq: 5, end_sq: 7, move_type: MoveFlag::MOVE, pv_score: 0
+                            start_sq: 5, end_sq: 7, capture_sq: 7, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(rook_move_cmd);
                     },
                     Side::BLACK => {
                         let king_move_cmd = ForwardMove { 
-                            start_sq: 62, end_sq: 60, move_type: MoveFlag::MOVE, pv_score: 0
+                            start_sq: 62, end_sq: 60, capture_sq: 60, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(king_move_cmd);
 
                         let rook_move_cmd = ForwardMove { 
-                            start_sq: 61, end_sq: 63, move_type: MoveFlag::MOVE, pv_score: 0
+                            start_sq: 61, end_sq: 63, capture_sq: 63, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(rook_move_cmd);
                     },
+                    Side::NONE => {},
                 }
             },
             MoveFlag::QUEENSIDECASTLE => {
                 match self.active_player {
                     Side::WHITE => {
                         let king_move_cmd = ForwardMove { 
-                            start_sq: 2, end_sq: 4, move_type: MoveFlag::MOVE, pv_score: 0
+                            start_sq: 2, end_sq: 4, capture_sq: 4, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(king_move_cmd);
 
                         let rook_move_cmd = ForwardMove { 
-                            start_sq: 3, end_sq: 0, move_type: MoveFlag::MOVE, pv_score: 0
+                            start_sq: 3, end_sq: 0, capture_sq: 0, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(rook_move_cmd);
                     },
                     Side::BLACK => {
                         let king_move_cmd = ForwardMove { 
-                            start_sq: 58, end_sq: 60, move_type: MoveFlag::MOVE, pv_score: 0
+                            start_sq: 58, end_sq: 60, capture_sq: 60, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(king_move_cmd);
 
                         let rook_move_cmd = ForwardMove { 
-                            start_sq: 59, end_sq: 56, move_type: MoveFlag::MOVE, pv_score: 0
+                            start_sq: 59, end_sq: 56, capture_sq: 56, move_type: MoveFlag::MOVE, pv_score: 0
                         };
                         self._move_piece(rook_move_cmd);
                     },
+                    Side::NONE => {},
                 }
             },
             MoveFlag::PROMOTIONQUEEN | MoveFlag::PROMOTIONROOK | 
@@ -714,27 +695,14 @@ impl ChessBoard {
                     Side::BLACK => {
                         self._place_piece(undo_move_cmd.start_sq as usize, BoardPiece::BPAWN);
                     },
+                    Side::NONE => {},
                 }
             },
             MoveFlag::NULL => {},
         }
 
-        // Restore Piece only if one was actually captured
-        if undo_move_cmd.captured_piece != BoardPiece::NONE {
-            match undo_move_cmd.move_type { 
-                MoveFlag::CAPTURE | MoveFlag::PROMOTIONQUEEN | 
-                MoveFlag::PROMOTIONROOK | MoveFlag::PROMOTIONBISHOP | 
-                MoveFlag::PROMOTIONKNIGHT => {
-                    self._place_piece(undo_move_cmd.end_sq as usize, undo_move_cmd.captured_piece);
-                },
-                MoveFlag::ENPASSANT => {
-                    let ep_square = if self.active_player == Side::WHITE { 
-                        undo_move_cmd.end_sq - 8 } else { undo_move_cmd.end_sq + 8 };
-                    self._place_piece(ep_square as usize, undo_move_cmd.captured_piece);
-                },
-                _ => {},
-            }
-        }
+        // Restore Captured Piece
+        self._place_piece(undo_move_cmd.capture_sq as usize, undo_move_cmd.captured_piece);
 
         // Restore En Passant
         self.en_passant = undo_move_cmd.prev_en_passant;
@@ -745,54 +713,56 @@ impl ChessBoard {
     }
 
     #[inline(always)]
-    pub fn null_move_accumulator(&mut self) {
-        let current_ply = self.ply;
-        let prev_ply = self.ply - 1; 
+    pub fn null_move_accumulator(&mut self, accumulators: &mut AccumulatorHistory) {
+        let curr_ply = self.ply;
+        let prev_ply = curr_ply - 1; 
 
-        let prev_white_vals = self.accumulators[prev_ply].white.vals;
+        let (left, right) = accumulators.moves.split_at_mut(curr_ply);
+        let prev_frame = &left[prev_ply];
+        let curr_frame = &mut right[0];
 
-        self.accumulators[current_ply].white.vals = self.accumulators[prev_ply].black.vals;
-        self.accumulators[current_ply].black.vals = prev_white_vals;
+        curr_frame.white.copy_from_slice(&prev_frame.white);
+        curr_frame.black.copy_from_slice(&prev_frame.black);
     }
 
     // Create from Scratch
-    pub fn create_accumlator_from_scratch(&mut self) {
+    pub fn create_accumulator_from_scratch(&mut self, accumulators: &mut AccumulatorHistory) {
         // Retrieve King Squares
         let w_king_sq = self.kings[Side::WHITE as usize].trailing_zeros() as u8;
         let b_king_sq = self.kings[Side::BLACK as usize].trailing_zeros() as u8;
+        
+        // Grab current accumulator frame using explicit slice indexing on the Boxed array
+        let current_frame = &mut accumulators.moves[self.ply];
+        let target_white: &mut [i16; 256] = &mut current_frame.white;
+        let target_black: &mut [i16; 256] = &mut current_frame.black;
 
-        let target_white = &mut self.accumulators[self.ply].white.vals[..256];
-        let target_black = &mut self.accumulators[self.ply].black.vals[..256];
-        let biases = &self.nnue_network.l1_biases[..256];
+        // Initialize both sides with biases first (casting i32 to i16)
+        let biases = &self.nnue_network.l1_biases;
 
-        // Initialize both sides with biases first
-        for i in 0..256 {
-            target_white[i] = biases[i] as i16;
-            target_black[i] = biases[i] as i16;
+        // Using zip allows the compiler to optimize the loop boundaries and apply SIMD
+        for (i, &bias) in biases.iter().enumerate().take(256) {
+            let casted_bias = bias as i16;
+            target_white[i] = casted_bias;
+            target_black[i] = casted_bias;
         }
 
-        // Combine ALL piece bitboards to ensure nothing (especially the Kings!) is missed.
+        // Combine ALL piece bitboards
         let mut pieces_bitboard = (self.pawns[0] | self.pawns[1])
-
             | (self.knights[0] | self.knights[1])
             | (self.bishops[0] | self.bishops[1])
             | (self.rooks[0] | self.rooks[1])
             | (self.queens[0] | self.queens[1])
             | (self.kings[0] | self.kings[1]);
 
-        // Create tiny arrays on the stack to hold our pre-calculated weight indices.
-        // 32 slots is plenty since a chess board can never have more than 32 pieces.
         let mut white_indices = [0usize; 32];
         let mut black_indices = [0usize; 32];
         let mut active_piece_count = 0;
 
         // --- SINGLE PASS: GATHER ALL FEATURE INDICES ---
-        // This eliminates all duplicate mailbox lookups and bitboard scans!
         while pieces_bitboard != 0 {
             let sq = pieces_bitboard.trailing_zeros() as u8;
             let piece = self.mailbox[sq as usize];
 
-            // Pre-calculate the exact NNUE weight pointer rows for both perspectives
             white_indices[active_piece_count] = get_feature_index(w_king_sq, piece, sq, false);
             black_indices[active_piece_count] = get_feature_index(b_king_sq, piece, sq, true);
             
@@ -801,9 +771,9 @@ impl ChessBoard {
         }
 
         // --- LOOP 1: PROCESS WHITE PERSPECTIVE COMPLETELY ---
-        // Perfect auto-vectorization! The CPU fills all registers exclusively with White data.
+        // Exact [i16; 256] array sizing unlocks aggressive SIMD/AVX2 loop unrolling
         for &w_idx in white_indices.iter().take(active_piece_count) {
-            let w_row = &self.nnue_network.l1_weights[w_idx][..256];
+            let w_row: &[i16; 256] = &self.nnue_network.l1_weights[w_idx];
             
             for i in 0..256 {
                 target_white[i] = target_white[i].wrapping_add(w_row[i]);
@@ -811,9 +781,8 @@ impl ChessBoard {
         }
 
         // --- LOOP 2: PROCESS BLACK PERSPECTIVE COMPLETELY ---
-        // Perfect auto-vectorization! The CPU reuses those same registers exclusively for Black data.
         for &b_idx in black_indices.iter().take(active_piece_count) {
-            let b_row = &self.nnue_network.l1_weights[b_idx][..256];
+            let b_row: &[i16; 256] = &self.nnue_network.l1_weights[b_idx];
             
             for i in 0..256 {
                 target_black[i] = target_black[i].wrapping_add(b_row[i]);
@@ -821,91 +790,85 @@ impl ChessBoard {
         }
     }
 
-    pub fn evaluate(&mut self, buffer: &mut NnueInferenceBuffer) -> i32 {
+    pub fn evaluate(&mut self, accumulators: &AccumulatorHistory, buffer: &mut NnueInferenceBuffer) -> i16 {
         // --- PERSPECTIVE ROUTING ---
-        // Side to move (US) always fills the first 256 inputs.
-        // Opponent (THEM) always fills the second 256 inputs.
         let (active_acc, opp_acc) = match self.active_player {
             Side::WHITE => (
-                &self.accumulators[self.ply].white, &self.accumulators[self.ply].black
+                &accumulators.moves[self.ply].white, 
+                &accumulators.moves[self.ply].black
             ),
             Side::BLACK => (
-                &self.accumulators[self.ply].black, &self.accumulators[self.ply].white
+                &accumulators.moves[self.ply].black, 
+                &accumulators.moves[self.ply].white
             ),
+            Side::NONE => panic!("Invalid Game State: active_player cannot be Side::NONE during NNUE accumulator fetching!"),
         };
 
-        // --- STEP 0: ACCUMLATOR (Input -> Accumlator) ---
-        // The accumlator is maintained by the init / move functions
+        // --- STEP 0: ACCUMULATOR ---
+        let l2_left: &mut [i8; 256] = 
+            unsafe { &mut *buffer.l2_inputs.as_mut_ptr().cast::<[i8; 256]>() };
+        let l2_right: &mut [i8; 256] = 
+            unsafe { &mut *buffer.l2_inputs.as_mut_ptr().add(256).cast::<[i8; 256]>() };
 
-        // --- STEP 1: CONCATENATION & ACTIVATION (L1 -> L2) ---
+        // --- STEP 1: Clipped ReLU ---
         for i in 0..256 {
-            buffer.l2_inputs[i] = active_acc.vals[i].clamp(0, 127) as i8;
+            l2_left[i] = active_acc[i].clamp(0, 127) as i8;
+        }
+        for i in 0..256 {
+            l2_right[i] = opp_acc[i].clamp(0, 127) as i8;
         }
 
-        for i in 0..256 {
-            buffer.l2_inputs[i + 256] = opp_acc.vals[i].clamp(0, 127) as i8;
-        }
+        // --- STEP 2: HIDDEN LAYER 2 (512 -> 32) ---
+        let l2_biases = &self.nnue_network.l2_biases;
+        let l2_inputs: &[i8; 512] = 
+            unsafe { &*buffer.l2_inputs.as_ptr().cast::<[i8; 512]>() };
+        let l3_inputs: &mut [i8; 32] = 
+            unsafe { &mut *buffer.l3_inputs.as_mut_ptr().cast::<[i8; 32]>() };
 
-        // --- STEP 2: HIDDEN LAYER 2 (256*2 -> 32) ---
-        // Input Scale (128) * Weight Scale (32) = Sum Scale (4096).
-        // Shift Down by >> 7 to Scale (32)
-        // Clamp at 32 to match Python's ReLU1 (1.0).
         for neuron in 0..32 {
-            let bias = self.nnue_network.l2_biases[neuron];
-            let mut sum: i32 = bias;
-
-            let row = &self.nnue_network.l2_weights[neuron][..512];
-            let inputs = &buffer.l2_inputs[..512];
+            let mut sum: i32 = l2_biases[neuron];
+            let row: &[i8; 512] = &self.nnue_network.l2_weights[neuron];
 
             for i in 0..512 {
-                sum += (inputs[i] as i32) * (row[i] as i32);
+                sum += (l2_inputs[i] as i32) * (row[i] as i32);
             }
 
-            let activated = sum >> 7;
-            buffer.l3_inputs[neuron] = activated.clamp(0, 32) as i8;
+            let activated = sum >> 6;
+            l3_inputs[neuron] = activated.clamp(0, 127) as i8;
         }
 
         // --- STEP 3: HIDDEN LAYER 3 (32 -> 32) ---
-        // Input Scale (32) * Weight Scale (32) = Sum Scale (1024).
-        // Shift Down by 5 to Scale (32)
-        // Clamp at 32 to match Python's ReLU1 (1.0).
-        for neuron in 0..32 {
-            let bias = self.nnue_network.l3_biases[neuron];
-            let mut sum: i32 = bias;
+        let l3_biases = &self.nnue_network.l3_biases;
+        let l4_inputs: &mut [i8; 32] = 
+            unsafe { &mut *buffer.l4_inputs.as_mut_ptr().cast::<[i8; 32]>() };
 
-            let row = &self.nnue_network.l3_weights[neuron][..32];
-            let inputs = &buffer.l3_inputs[..32];
+        for neuron in 0..32 {
+            let mut sum: i32 = l3_biases[neuron];
+            let row: &[i8; 32] = &self.nnue_network.l3_weights[neuron];
 
             for i in 0..32 {
-                sum += (inputs[i] as i32) * (row[i] as i32);
+                sum += (l3_inputs[i] as i32) * (row[i] as i32);
             }
 
-            let activated = sum >> 5;
-            buffer.l4_inputs[neuron] = activated.clamp(0, 32) as i8;
+            let activated = sum >> 6;
+            l4_inputs[neuron] = activated.clamp(0, 127) as i8;
         }
 
         // --- STEP 4: OUTPUT LAYER (32 -> 1) ---
-        // Input Scale (32) * Weight Scale (128) = Sum Scale (4096).
-        // Shift Down by 5 to Scale (128)
         let mut final_sum: i32 = self.nnue_network.output_bias[0];
+        let row: &[i8; 32] = &self.nnue_network.output_weights[0];
 
-        let row = &self.nnue_network.output_weights[0][..32];
-        let inputs = &buffer.l4_inputs[..32];
         for i in 0..32 {
-            final_sum += (inputs[i] as i32) * (row[i] as i32);
+            final_sum += (l4_inputs[i] as i32) * (row[i] as i32);
         }
 
-        let internal_pawns_scaled = final_sum >> 5;
+        let score_scaled = (final_sum * 100) >> 12;
 
-        // Shift by >> 7 remove remaining scale
-        (internal_pawns_scaled * 100) >> 7
+        score_scaled as i16
     }
 
     /// Progresses the network forward incrementally during move making
-    pub fn make_move(
-        &mut self, 
-        mv: ForwardMove,
-    ) {
+    pub fn make_move(&mut self, mv: ForwardMove, accumulators: &mut AccumulatorHistory) {
         // Retrieve King Squares
         let w_king_sq = self.kings[Side::WHITE as usize].trailing_zeros() as u8;
         let b_king_sq = self.kings[Side::BLACK as usize].trailing_zeros() as u8;
@@ -930,77 +893,63 @@ impl ChessBoard {
             _ => {}
         }
 
-        // --- 2. Identify Captured Piece & Coordinate (Handles En Passant) ---
-        let (captured_sq, captured_piece) = if mv.move_type == MoveFlag::ENPASSANT {
-            let sq = if move_piece == BoardPiece::WPAWN {
-                mv.end_sq - 8 
-            } else {
-                mv.end_sq + 8 
-            };
-            (sq, self.mailbox[sq as usize])
-        } else {
-            (mv.end_sq, self.mailbox[mv.end_sq as usize])
-        };
+         // --- 2. Identify Captured Piece & Coordinate (Handles En Passant) ---
+        let (captured_sq, captured_piece) = (mv.capture_sq, self.mailbox[mv.capture_sq as usize]);
 
-        // --- 3. Compute Sparse Feature Indices ---
+        // --- 3. Compute Sparse Feature Indices for the Moving Piece ---
         let w_remove = get_feature_index(w_king_sq, move_piece, mv.start_sq, false);
         let b_remove = get_feature_index(b_king_sq, move_piece, mv.start_sq, true);
 
         let w_add = get_feature_index(w_king_sq, added_piece, mv.end_sq, false);
         let b_add = get_feature_index(b_king_sq, added_piece, mv.end_sq, true);
 
-        // Get basic rows
-        let w_rem_row = &self.nnue_network.l1_weights[w_remove][..256];
-        let b_rem_row = &self.nnue_network.l1_weights[b_remove][..256];
-        let w_add_row = &self.nnue_network.l1_weights[w_add][..256];
-        let b_add_row = &self.nnue_network.l1_weights[b_add][..256];
+        let w_rem_row: &[i16; 256] = &self.nnue_network.l1_weights[w_remove];
+        let b_rem_row: &[i16; 256] = &self.nnue_network.l1_weights[b_remove];
+        let w_add_row: &[i16; 256] = &self.nnue_network.l1_weights[w_add];
+        let b_add_row: &[i16; 256] = &self.nnue_network.l1_weights[b_add];
 
-        // --- 4. High-Density Auto-Vectorized Parallel Loop Block ---
-        let prev_ply = self.ply - 1;
-        let (left, right) = self.accumulators.split_at_mut(self.ply);
-        
+        // --- 4. Setup Target and Source Frame Boundaries Safely ---
+        let curr_ply = self.ply;
+        let prev_ply = curr_ply - 1;
+
+        // Split the mutable array slice to satisfy the borrow checker cleanly
+        let (left, right) = accumulators.moves.split_at_mut(curr_ply);
         let prev_acc = &left[prev_ply];
         let curr_acc = &mut right[0];
 
-        // Slice both targets to exactly 256 to remove runtime bounds checking
-        let curr_white = &mut curr_acc.white.vals[..256];
-        let curr_black = &mut curr_acc.black.vals[..256];
+        let curr_white: &mut [i16; 256] = &mut curr_acc.white;
+        let curr_black: &mut [i16; 256] = &mut curr_acc.black;
         
-        let prev_white = &prev_acc.white.vals[..256];
-        let prev_black = &prev_acc.black.vals[..256];
+        let prev_white: &[i16; 256] = &prev_acc.white;
+        let prev_black: &[i16; 256] = &prev_acc.black;
 
+        // --- 5. High-Density Auto-Vectorized Accumulation Pass ---
         if captured_piece != BoardPiece::NONE {
             let w_cap = get_feature_index(w_king_sq, captured_piece, captured_sq, false);
             let b_cap = get_feature_index(b_king_sq, captured_piece, captured_sq, true);
             
-            let w_cap_row = &self.nnue_network.l1_weights[w_cap][..256];
-            let b_cap_row = &self.nnue_network.l1_weights[b_cap][..256];
+            let w_cap_row: &[i16; 256] = &self.nnue_network.l1_weights[w_cap];
+            let b_cap_row: &[i16; 256] = &self.nnue_network.l1_weights[b_cap];
 
-            // 1. Process White entirely in a clean, isolated memory pipeline
+            // Single loop updates both perspectives at once, minimizing cache misses
             for i in 0..256 {
                 curr_white[i] = prev_white[i]
                     .wrapping_add(w_add_row[i])
                     .wrapping_sub(w_rem_row[i])
                     .wrapping_sub(w_cap_row[i]);
-            }
-
-            // 2. Process Black entirely in a clean, isolated memory pipeline
-            for i in 0..256 {
+                
                 curr_black[i] = prev_black[i]
                     .wrapping_add(b_add_row[i])
                     .wrapping_sub(b_rem_row[i])
                     .wrapping_sub(b_cap_row[i]);
             }
         } else {
-            // 1. Process White entirely
+            // Standard quiet move pattern: 1 addition, 1 subtraction
             for i in 0..256 {
                 curr_white[i] = prev_white[i]
                     .wrapping_add(w_add_row[i])
                     .wrapping_sub(w_rem_row[i]);
-            }
-
-            // 2. Process Black entirely
-            for i in 0..256 {
+                
                 curr_black[i] = prev_black[i]
                     .wrapping_add(b_add_row[i])
                     .wrapping_sub(b_rem_row[i]);
@@ -1010,16 +959,334 @@ impl ChessBoard {
 
     #[inline]
     pub fn unmake_move(&mut self) {
-        if self.ply > 0 {
-            self.ply -= 1; 
-        } else {
-            eprintln!("Warning: Attempted to unmake_move at ply 0!");
-        }
+        // Safe development check: verifies we never unroll past the root.
+        // It disappears completely in --release mode, leaving zero runtime overhead.
+        debug_assert!(self.ply > 0, "Catastrophic: Attempted to unmake_move at root ply 0!");
+
+        self.ply -= 1;
     }
 
     #[inline]
     pub fn increment_ply(&mut self) {
         self.ply += 1;
     }
-}
 
+    pub fn compute_pinned_mask_with_custom_state(&self, custom_occupancy: u64, friendly_pieces: u64, stm: usize) -> u64 {
+        let opponent_side = 1 - stm;
+        let king_sq = self.kings[stm].trailing_zeros() as u8;
+        if king_sq >= 64 { return 0; }
+
+        // 1. Gather all sliding pinners using X-ray lookups matching the custom sandbox layout
+        let friendly_blockers_ortho = rook_attack_paths(king_sq, custom_occupancy) & friendly_pieces;
+        let orthogonal_pinners = rook_attack_paths(king_sq, custom_occupancy ^ friendly_blockers_ortho) 
+            & (self.rooks[opponent_side] | self.queens[opponent_side]);
+
+        let friendly_blockers_diag = bishop_attack_paths(king_sq, custom_occupancy) & friendly_pieces;
+        let diagonal_pinners = bishop_attack_paths(king_sq, custom_occupancy ^ friendly_blockers_diag) 
+            & (self.bishops[opponent_side] | self.queens[opponent_side]);
+
+        let active_pinners = orthogonal_pinners | diagonal_pinners;
+        let mut pinned_mask = 0u64;
+
+        // 2. Identify which internal friendly blockers sit perfectly online with active threats
+        let mut potential_pieces = friendly_blockers_ortho | friendly_blockers_diag;
+        while potential_pieces != 0 {
+            let p_sq = potential_pieces.trailing_zeros() as u8;
+            let single_friendly_piece = 1u64 << p_sq;
+
+            let mut pinners = active_pinners;
+            while pinners != 0 {
+                let pinner_sq = pinners.trailing_zeros() as u8;
+                if Self::aligned(p_sq, pinner_sq, king_sq) {
+                    pinned_mask |= single_friendly_piece;
+                    break;
+                }
+                pinners &= pinners - 1;
+            }
+            potential_pieces &= potential_pieces - 1;
+        }
+
+        pinned_mask
+    }
+
+    #[inline(always)]
+    pub fn aligned(p_sq: u8, target_sq: u8, king_sq: u8) -> bool {
+        let p_rank = (p_sq >> 3) as i8;
+        let p_file = (p_sq & 7) as i8;
+        
+        let t_rank = (target_sq >> 3) as i8;
+        let t_file = (target_sq & 7) as i8;
+        
+        let k_rank = (king_sq >> 3) as i8;
+        let k_file = (king_sq & 7) as i8;
+
+        // Isolate vectors from the King to the Pinned piece and Target square
+        let dr_p = p_rank - k_rank;
+        let df_p = p_file - k_file;
+        
+        let dr_t = t_rank - k_rank;
+        let df_t = t_file - k_file;
+
+        // 1. Check if all three squares are colinear
+        let colinear = (dr_p * df_t) == (dr_t * df_p);
+
+        // 2. Check if the line matches a valid orthogonal or perfect 45-degree diagonal ray
+        let valid_ray = (dr_p == 0) | (df_p == 0) | ((dr_p * dr_p) == (df_p * df_p));
+
+        // 3. Directional Guard via Dot Product
+        let same_direction = (dr_p * dr_t + df_p * df_t) >= 0;
+
+        colinear & valid_ray & same_direction
+    }
+
+    /// Generates sliding attacks on the fly using your engine's ray paths.
+    fn get_slider_attackers(&self, target_sq: u8, occupied: u64) -> u64 {
+        let mut attackers = 0u64;
+
+        // Bishop-like attacks (Bishops and Queens from both sides)
+        let bishop_rays = bishop_attack_paths(target_sq, occupied);
+        let diagonal_pieces = self.bishops[0] | self.bishops[1] | self.queens[0] | self.queens[1];
+        attackers |= bishop_rays & diagonal_pieces;
+
+        // Rook-like attacks (Rooks and Queens from both sides)
+        let rook_rays = rook_attack_paths(target_sq, occupied);
+        let orthogonal_pieces = self.rooks[0] | self.rooks[1] | self.queens[0] | self.queens[1];
+        attackers |= rook_rays & orthogonal_pieces;
+
+        attackers
+    }
+
+    /// Pulls the least valuable piece out of the attacker pool for the active side to move (stm).
+    pub fn get_least_valuable_attacker(
+        &self, 
+        attackers_pool: u64, 
+        pinned_mask: u64, 
+        king_sq: u8, 
+        target_sq: u8,
+        stm: usize,
+        occupancy: u64 
+    ) -> (u8, BoardPiece) {
+        let mut pool = attackers_pool;
+
+        // --- PIN FILTRATION ---
+        let pinned_attackers = pool & pinned_mask;
+        if pinned_attackers != 0 {
+            let mut temp = pinned_attackers;
+            while temp != 0 {
+                let p_sq = temp.trailing_zeros() as u8;
+                
+                // If the pinned piece attempts to move off its pin line, eliminate it from this turn's pool
+                if !Self::aligned(p_sq, target_sq, king_sq) {
+                    pool &= !(1u64 << p_sq);
+                }
+                temp &= temp - 1;
+            }
+        }
+
+        // --- LEAST VALUABLE PIECE CHECKS ---
+        let pawns = pool & self.pawns[stm];
+        if pawns != 0 {
+            return (pawns.trailing_zeros() as u8, if stm == 0 { BoardPiece::WPAWN } else { BoardPiece::BPAWN });
+        }
+
+        let knights = pool & self.knights[stm];
+        if knights != 0 {
+            return (knights.trailing_zeros() as u8, if stm == 0 { BoardPiece::WKNIGHT } else { BoardPiece::BKNIGHT });
+        }
+
+        let bishops = pool & self.bishops[stm];
+        if bishops != 0 {
+            return (bishops.trailing_zeros() as u8, if stm == 0 { BoardPiece::WBISHOP } else { BoardPiece::BBISHOP });
+        }
+
+        let rooks = pool & self.rooks[stm];
+        if rooks != 0 {
+            return (rooks.trailing_zeros() as u8, if stm == 0 { BoardPiece::WROOK } else { BoardPiece::BROOK });
+        }
+
+        let queens = pool & self.queens[stm];
+        if queens != 0 {
+            return (queens.trailing_zeros() as u8, if stm == 0 { BoardPiece::WQUEEN } else { BoardPiece::BQUEEN });
+        }
+
+        // --- KING RECAPTURE PROTECTION ---
+        let kings = pool & self.kings[stm];
+        if kings != 0 {
+            let opponent_side = 1 - stm;
+
+            // 1. FIXED: Isolate direct opponent defenders currently in the pool.
+            // Since pool is already pre-filtered in the SEE loop by the active live side masks,
+            // we simply subtract the active stm's known pieces. Everything left belongs to alive opponents!
+            let opponent_attackers_in_pool = pool & !self.all_pieces[stm];
+            
+            // If the opponent has ANY direct leaper or remaining attacker currently targeting this square,
+            // the king cannot move into check. Break the chain immediately.
+            let direct_opponent_leapers = opponent_attackers_in_pool & (
+                self.pawns[opponent_side] | self.knights[opponent_side] | self.kings[opponent_side]
+            );
+            if direct_opponent_leapers != 0 {
+                return (0, BoardPiece::NONE);
+            }
+
+            // 2. Check live sliding attacks targeting the square if the king lands on it.
+            let king_bit = 1u64 << kings.trailing_zeros();
+            let safe_occ = occupancy ^ king_bit;
+
+            // Generate fresh diagonal paths from target_sq and ensure no ghost sliders are registered
+            let diagonal_threats = bishop_attack_paths(target_sq, safe_occ) 
+                & opponent_attackers_in_pool
+                & (self.bishops[opponent_side] | self.queens[opponent_side]);
+            if diagonal_threats != 0 {
+                return (0, BoardPiece::NONE);
+            }
+
+            // Generate fresh orthogonal paths from target_sq and ensure no ghost sliders are registered
+            let orthogonal_threats = rook_attack_paths(target_sq, safe_occ) 
+                & opponent_attackers_in_pool
+                & (self.rooks[opponent_side] | self.queens[opponent_side]);
+            if orthogonal_threats != 0 {
+                return (0, BoardPiece::NONE);
+            }
+
+            return (kings.trailing_zeros() as u8, if stm == 0 { BoardPiece::WKING } else { BoardPiece::BKING });
+        }
+
+        (0, BoardPiece::NONE)
+    }
+
+    /// Aggregates non-sliding attackers targeting a square using your native function hooks.
+    pub fn get_leaper_attacks_to(&self, target_sq: u8) -> u64 {
+        let mut leapers = 0u64;
+        let target_bb = 1u64 << target_sq;
+
+        // -----------------------------------------------------------------
+        // Knights lookups across BOTH player colors (With File Wrap Protection)
+        // -----------------------------------------------------------------
+        // If your KNIGHT_ATTACKS table has leak overflows, filtering the source 
+        // knight bits with file guards prevents cross-board wrap attacks.
+        let all_knights = self.knights[0] | self.knights[1];
+        leapers |= KNIGHT_ATTACKS[target_sq as usize] & all_knights;
+        
+        // Kings lookup across BOTH player colors
+        leapers |= KING_ATTACKS[target_sq as usize] & (self.kings[0] | self.kings[1]);
+
+        // -----------------------------------------------------------------
+        // White Pawns attacking TO target_sq (moving up the board)
+        // -----------------------------------------------------------------
+        // Target is North-West (Up-Left) from pawn -> pawn is South-East (Down-Right)
+        // A pawn moving Up-Left cannot originate from the A-File.
+        let w_pawn_from_right = (target_bb >> 7) & NOT_A_FILE;
+        
+        // Target is North-East (Up-Right) from pawn -> pawn is South-West (Down-Left)
+        // A pawn moving Up-Right cannot originate from the H-File.
+        let w_pawn_from_left = (target_bb >> 9) & NOT_H_FILE;
+        
+        // Intersect with White Pawns ([0])
+        leapers |= (w_pawn_from_right | w_pawn_from_left) & self.pawns[0];
+
+        let b_pawn_from_right = (target_bb << 9) & NOT_A_FILE;
+        let b_pawn_from_left = (target_bb << 7) & NOT_H_FILE;
+        
+        // Intersect with Black Pawns ([1])
+        leapers |= (b_pawn_from_right | b_pawn_from_left) & self.pawns[1];
+
+        leapers
+    }
+
+    // Static Exchange Evaluation (SEE)
+    pub fn static_exchange_evaluation(&self, forward_move: ForwardMove) -> i16 {
+        let from_sq = forward_move.start_sq;
+        let target_sq = forward_move.end_sq;
+        let capture_sq = forward_move.capture_sq;
+
+        // Since the move hasn't happened yet, stm is our current active player (the attacker)
+        let stm = self.player_index(self.active_player);
+        
+        let mut capture_gain = [0i16; 32];
+        let mut defender = 0;
+
+        // Read the moving piece and the captured victim straight from the current board states
+        let piece_moving = self.mailbox[from_sq as usize];
+        let piece_captured = self.mailbox[capture_sq as usize];
+        
+        let base_captured_value = piece_value(piece_captured);
+        let mut current_piece_value = piece_value(piece_moving);
+        
+        let promotion_bonus = promotion_bonus(forward_move);
+        capture_gain[defender] = base_captured_value + promotion_bonus;
+        current_piece_value += promotion_bonus;
+
+        // 1. Simulate the initial move step on our tracking sandbox masks
+        let mut occupancy = self.occupied;
+        occupancy &= !(1u64 << from_sq);
+        occupancy &= !(1u64 << capture_sq);
+        occupancy |= 1u64 << target_sq;
+
+        // Isolate dynamic side piece tracks to accurately compute sandbox cross-pins
+        let mut side_pieces = [self.all_pieces[0], self.all_pieces[1]];
+        let clear_attacker_bits = !(1u64 << from_sq);
+        let clear_victim_bits = !(1u64 << capture_sq);
+        
+        side_pieces[stm] &= clear_attacker_bits;
+        side_pieces[1 - stm] &= clear_victim_bits;
+        side_pieces[stm] |= 1u64 << target_sq;
+
+        // 2. Construct the initial pool of subsequent recapturers
+        let mut attackers_pool = self.get_leaper_attacks_to(target_sq) 
+            | self.get_slider_attackers(target_sq, occupancy);
+
+        // Filter the pool strictly against active live simulated pieces
+        attackers_pool &= side_pieces[0] | side_pieces[1];
+
+        // Flip immediately to the defender's side-to-move index for the loop
+        let mut loop_stm = 1 - stm;
+
+        // 3. Recapture Simulation Loop
+        while attackers_pool != 0 {
+            let defender_king_sq = self.kings[loop_stm].trailing_zeros() as u8;
+            
+            // Evaluate pins safely based on the simulated layout progression
+            let current_pinned_mask = self.compute_pinned_mask_with_custom_state(occupancy, side_pieces[loop_stm], loop_stm);
+
+            // Passing the dynamic opponent piece tracker to ensure the King avoids phantom defenders
+            let (att_sq, att_piece) = self.get_least_valuable_attacker(
+                attackers_pool, 
+                current_pinned_mask, 
+                defender_king_sq, 
+                target_sq,
+                loop_stm,
+                occupancy
+            );
+
+            if att_piece == BoardPiece::NONE {
+                break; 
+            }
+
+            defender += 1;
+            capture_gain[defender] = current_piece_value - capture_gain[defender - 1];
+            current_piece_value = piece_value(att_piece);
+
+            // Safe bitwise clear for the attacker's square inside our local state masks
+            let clear_mask = !(1u64 << att_sq);
+            occupancy &= clear_mask;
+            side_pieces[loop_stm] &= clear_mask;
+
+            // Re-calculate attack vectors targeting the destination pad under modified states
+            attackers_pool = self.get_leaper_attacks_to(target_sq) 
+                | self.get_slider_attackers(target_sq, occupancy);
+            
+            // Shield the newly recalculated pool against ghost/captured pieces
+            attackers_pool &= side_pieces[0] | side_pieces[1];
+
+            loop_stm = 1 - loop_stm;
+        }
+
+        // 4. Minimax back up the choice path
+        while defender > 0 {
+            capture_gain[defender - 1] = std::cmp::max(-capture_gain[defender], capture_gain[defender - 1]);
+            defender -= 1;
+        }
+
+        capture_gain[0]
+    }
+}
