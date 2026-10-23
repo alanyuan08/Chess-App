@@ -88,7 +88,7 @@ impl SearchWorker {
         // Aspiration window configuration
         let mut alpha = -INFINITY;
         let mut beta = INFINITY;
-        let window_delta = 50;
+        let window_delta = 70;
 
         while depth <= MAX_DEPTH {
             let mut result = self.negamax(depth, 0, alpha, beta, best_move_overall, true);
@@ -465,7 +465,7 @@ impl SearchWorker {
         }
 
         // 5. Pure Fail-Soft Null Move Pruning
-        if allow_null && !king_in_check && depth >= 3 && 
+        if allow_null && pv_move_hint.move_type != MoveFlag::NULL && !king_in_check && depth >= 3 && 
             self.chess_board.has_major_pieces() && ply > 0 &&
             beta < MATE_THRESHOLD && beta > -MATE_THRESHOLD && 
             static_eval >= beta {
@@ -492,6 +492,19 @@ impl SearchWorker {
             }
             
             if null_score >= beta {
+                // 4. Verification Search: Prevent devastating endgame/zugzwang traps at high depths
+                if depth > 12 {
+                    let verify_depth = if depth > 1 + reduction { depth - 1 - reduction } else { 0 };
+                    let verify_result = self.negamax(verify_depth, ply + 1, beta - 1, beta, ForwardMove::NULL_MOVE, false);
+                    if verify_result.score < beta {
+                       return SearchResult { 
+                            score: verify_result.score, 
+                            best_move: verify_result.best_move, 
+                            was_aborted: verify_result.was_aborted 
+                        };
+                    }
+                }
+
                 if beta == original_beta {
                     self.transposition_table.store(
                         hash, null_score, 
