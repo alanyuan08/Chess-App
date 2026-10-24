@@ -36,7 +36,7 @@ pub const MATE_THRESHOLD: i16 = MATE_VALUE - ((MAX_DEPTH * 2) as i16);
 pub const NUM_THREADS: usize = 8;
 
 // Condon-Thompson Bucket Transposition Table
-pub const CACHE_SIZE: usize = 1024;
+pub const CACHE_SIZE: usize = 2048;
 
 // Max Game Moves
 pub const MAX_GAME_MOVES: usize = 256;

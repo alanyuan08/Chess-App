@@ -73,7 +73,6 @@ else
     echo "'$BOOK_FILE' specialized opening dataset already active. Skipping setup."
 fi
 
-
 # 4. Run your main script
 python chessApp.py $1
 
