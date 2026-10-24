@@ -14,7 +14,7 @@ from keras import layers
 from permanent_dataset_manager import EpochSynchronizedDatasetManager
 
 # --- Global Configurations ---
-INPUT_FEATURES = 64 * 64 * 12  # Dual-Perspective HalfKA Dimension (49152)
+INPUT_FEATURES = 16 * 64 * 11  #  16-bucket HalfKA Dimension * 64 * 11 King Pieces
 MAX_PIECES = 32                # Uniform layout array padding bound
 SCALE_MAX = 1.0                # Bounded Clipped ReLU limit 
 
@@ -152,24 +152,25 @@ def get_local_shard_directories():
     val_dir = "./balanced_shards/validation/"
     return train_dir, val_dir
 
-# --- Export NNuE Weights for Rust ---
+# --- Export NNUE Weights for Rust ---
 def export_dense_nnue_for_rust(model, file_path="model.nnue"):
     with open(file_path, "wb") as f:
         print("--- Commencing Weight Quantization & Serialization for Rust ---")
         
-        # 1. Accumulator Layer (49152 -> 256)
+        # 1. Accumulator Layer (11264 -> 256)
         # Input: Binary (0/1) | Weights: i16 | Bias/Output Accumulator: i32
         acc_layer = model.get_layer("accumulator_layer")
         embedding_weights = acc_layer.get_weights()[0]
 
-        # Accumlator Weights
-        w1_real = embedding_weights[:49152, :]
+        # Accumulator Weights (Updated dimension bound for 16-bucket layout)
+        w1_real = embedding_weights[:11264, :]
         w1_quant = np.ascontiguousarray(np.round(w1_real * 128.0)).astype(np.int16)
 
-        # Accumlator Bias
+        # Accumulator Bias
         bias_layer = model.get_layer("accumulator_bias")
         b1_real = bias_layer.get_weights()[0]
         b1_quant = np.round(b1_real * 128.0).astype(np.int32)
+        
         # Write exactly the same bytes structure as before
         f.write(w1_quant.tobytes())
         f.write(b1_quant.tobytes())

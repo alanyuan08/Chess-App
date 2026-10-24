@@ -3,6 +3,14 @@
 # Exit the shell script immediately if any individual command fails
 set -e
 
+# =====================================================================
+# CREDENTIAL CACHING ENGINE
+# =====================================================================
+# Keep-alive loop: Refreshes your sudo credential token every 60 seconds 
+# in the background. It automatically terminates when this script ends.
+while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
+# =====================================================================
+
 # 1. Check if the environment already exists to prevent overwriting
 brew install python@3.11
 if [ ! -d "../.tf_venv" ]; then
@@ -19,10 +27,18 @@ pip install "../[training]"
 
 # 4. Process the Positions -> Input /data -> Output /processed_shards
 python dataset_exporter.py
+
+# Cleans your system RAM seamlessly using your cached credentials
+sync && sudo purge
+
 rm -f ./data/*
 
 # 5. Data Parse + Mirror -> Input /processed_shards -> Output /data_dedup
 python global_dedup.py
+
+# Cleans your system RAM seamlessly a second time
+sync && sudo purge
+
 rm -f ./processed_shards/*
 
 # 6. Shard Balancer -> Input /data_dedup -> Output /balanced_shards
