@@ -135,6 +135,7 @@
 
 - **Training Error:**
     * **Average Centipawn Error for positons +/- 3.5 Pawn Units**: 35 Centipawns
+    * **Average Centipawn Error for All Positions**: 45 Centipawns
 
 - cd nnue-training
 - /train_pipeline.sh
