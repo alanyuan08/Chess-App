@@ -139,8 +139,8 @@ class EpochSynchronizedDatasetManager:
             
         print(f"[DatasetManager] Initialized for {shard_directory} with {len(self.all_files)} shards.")
         
-        # Dual-perspective HalfKA padding configuration constants (49,152 mapping index)
-        self.PADDING_INDEX_VALUE = 64 * 64 * 12 
+        # Dual-perspective HalfKA padding configuration constants (11,264 mapping index)
+        self.PADDING_INDEX_VALUE = 64 * 11 * 16
         
         # Core IPC state trackers
         self.shutdown_event = mp.Event()

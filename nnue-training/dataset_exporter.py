@@ -3,12 +3,13 @@ import sys
 import glob
 import numpy as np
 import chess
+import multiprocessing
 import pandas as pd
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # --- INITIALIZATION ENGINE CONSTANTS ---
 DATA_SIZE = 2_000_000
-INPUT_FEATURES = 64 * 64 * 12  # Dual-Perspective HalfKA Dimension (49,152)
+INPUT_FEATURES = 64 * 11 * 16  # Dual-Perspective HalfKA Dimension (49,152)
 MAX_PIECES = 32  
 
 # Map FEN character to an integer type 0-11
@@ -270,7 +271,7 @@ def main():
     print(f"Spawning 4 worker processes")
     
     total_global_processed = 0
-    
+
     # Process Pool Executor manages CPU-bound processing scales automatically
     with ProcessPoolExecutor(max_workers=4) as executor:
         # Submit all tasks to the process pool
@@ -295,4 +296,7 @@ def main():
     print("=====================================================================")
 
 if __name__ == "__main__":
+    if sys.platform == "darwin":
+        multiprocessing.set_start_method("spawn", force=True)
+        
     main()
