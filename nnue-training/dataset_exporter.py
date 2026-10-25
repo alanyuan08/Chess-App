@@ -9,7 +9,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # --- INITIALIZATION ENGINE CONSTANTS ---
 DATA_SIZE = 2_000_000
-INPUT_FEATURES = 64 * 11 * 16  # Dual-Perspective HalfKA Dimension (49,152)
+INPUT_FEATURES = 64 * 11 * 16  # Dual-Perspective HalfKA Dimension (11,264)
 MAX_PIECES = 32  
 
 # Map FEN character to an integer type 0-11

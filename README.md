@@ -42,19 +42,19 @@
 
 - **Parallel Processing:** The search uses Lazy SMP (Symmetric Multiprocessing) which uses multiple search algorithms to independently process the same search evaluation agorithm and share position evaluations and cut-offs using a shared Lockless Transposition table.
 
-- **Performance Benchmark:** Processes approximately 17+ million nodes per second (NPS) on an Apple M4 Pro chip. (8 Performance Core Only - 4.5 GHz + On-Chip Cache Memory - 39.5 MB)
+- **Performance Benchmark:** Processes approximately 24+ million nodes per second (NPS) on an Apple M4 Pro chip. (8 Performance Core Only - 4.5 GHz + On-Chip Cache Memory - 39.5 MB)
 
 ## 3. Neural Network Evaluation
 
-- **NNuE Architecture:** The engine features a customized **Dual-Perspective HalfKA** perspective neural network utilizing a hybrid quantization layout. The architectural data pathways progress as follows:
+- **NNuE Architecture:** The engine features a customized **Dual-Perspective HalfKA King Bucket Model** perspective neural network utilizing a hybrid quantization layout. The architectural data pathways progress as follows:
 
   - **Input Preprocessing:** 
     - Convert to CentiPawn: ($\text{Centipawn / 100.0}$) -> pawn_units
 
-  $$\text{Inputs (49,152)} \rightarrow \text{Accumulator (256)} \rightarrow \text{Multiplexed Perspective (256*2)} \rightarrow \text{Hidden 2 (32)} \rightarrow \text{Hidden 3 (32)} \rightarrow \text{Output (1)}$$
+  $$\text{Inputs (11,264)} \rightarrow \text{Accumulator (256)} \rightarrow \text{Multiplexed Perspective (256*2)} \rightarrow \text{Hidden 2 (32)} \rightarrow \text{Hidden 3 (32)} \rightarrow \text{Output (1)}$$
 
-  - **Input Layer:** $12 \times 64 \times 64 = 49,152$ sparse features mapping active piece-square configurations relative to your own active King's position.
-  - **Accumulator Layer:** Shapes into $(49152, 256)$ weights and $(256,)$ biases quantized to signed 16-bit integers (`i16`). Uses branchless tensor multiplexing to concatenate White/Black points of view into a unified $256$-dimensional vector.
+  - **Input Layer:** $12 \times 64 \times 64 = 11,264$ sparse features mapping active piece-square configurations relative to your own active King's position.
+  - **Accumulator Layer:** Shapes into $(11,264, 256)$ weights and $(256,)$ biases quantized to signed 16-bit integers (`i16`). Uses branchless tensor multiplexing to concatenate White/Black points of view into a unified $256$-dimensional vector.
     - *Activation:* Clipped/Bounded Linear ReLU ($\text{ReLU1}$) bounded strictly between `0.0` and `1.0`.
   - **Hidden Layer 2:** Matrix transformation mapping $(256*2, 32)$ quantized to signed 8-bit weights (`i8`) and 32-bit biases (`i32`).
     - *Activation:* Clipped/Bounded Linear ReLU ($\text{ReLU1}$) bounded strictly between `0.0` and `1.0`.
@@ -129,6 +129,7 @@
       * **Training Throughput:** 3,168 steps per epoch.
       * **Batch Size:** 8,192 positions per step.
       * **Validation Window:** 63 steps per epoch.
+      * **Training Set:**: 26,610,776 Positions
       * **Data Pipeline:** Datasets are systematically shuffled between epochs to prevent sequential memorization and overfitting.
     - **Learning Rate Dynamics:** Optimization utilizes the **AdamW** algorithm paired with a **CosineDecay** learning rate schedule, ensuring smooth, monotonic convergence toward the minimum floor ($\alpha = 2 \times 10^{-7}$).
 
