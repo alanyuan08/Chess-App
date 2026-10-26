@@ -77,8 +77,26 @@ def q_search(b, alpha, beta, depth=0, max_depth=12):
 
     return alpha
 
+KING_BUCKET_MAP = [
+    # Rank 1 (Each file A-D gets its own bucket)
+    0,  1,  2,  3,    3,  2,  1,  0,
+    # Rank 2 (Each file A-D gets its own bucket)
+    4,  5,  6,  7,    7,  6,  5,  4,
+    # Rank 3 & 4 (Combined 2x2 grids to combat mid-board starvation)
+    8,  8,  9,  9,    9,  9,  8,  8,
+    8,  8,  9,  9,    9,  9,  8,  8,
+    # Rank 5 (Files A-D pooled together)
+    10, 10, 10, 10,  10, 10, 10, 10,
+    # Rank 6 (Files A-D pooled together)
+    11, 11, 11, 11,  11, 11, 11, 11,
+    # Rank 7 (Files A-D pooled together)
+    12, 12, 12, 12,  12, 12, 12, 12,
+    # Rank 8 (Files A-D pooled together)
+    13, 13, 13, 13,  13, 13, 13, 13
+]
+
 def parse_fen_to_features(fen_string):
-    """Parses a standard FEN string into sparse categorical indices."""
+    """Parses a standard FEN string into sparse categorical indices for a 16-bucket HalfKA NNUE."""
     parts = fen_string.split()
     board_part = parts[0]
     turn_part = parts[1]
@@ -104,27 +122,36 @@ def parse_fen_to_features(fen_string):
         if char == '.':
             continue
         piece_type_id = PIECE_MAP[char]
-        pieces.append((piece_type_id, sq))
+        pieces.append((piece_type_id, char, sq))
         if char == 'K':
             white_king_sq = sq
         elif char == 'k':
             black_king_sq = sq
 
+    # --- RESOLVE KING BUCKETS ---
+    white_king_bucket = KING_BUCKET_MAP[white_king_sq]
+    black_king_sq_rotated = black_king_sq ^ 63
+    black_king_bucket = KING_BUCKET_MAP[black_king_sq_rotated]
+
     white_perspective_indices = []
     black_perspective_indices = []
         
-    for p_type, p_sq in pieces:
+    for p_type, char, p_sq in pieces:
         # --- WHITE PERSPECTIVE ---
-        w_idx = (white_king_sq * 768) + (p_type * 64) + p_sq
-        white_perspective_indices.append(w_idx)
+        if p_type != 5: # Skip White King ('K')
+            # Shift everything above White King down by 1 to make space contiguous (0-10)
+            w_type = p_type if p_type < 5 else p_type - 1
+            w_idx = (white_king_bucket * 704) + (w_type * 64) + p_sq
+            white_perspective_indices.append(w_idx)
                 
         # --- BLACK PERSPECTIVE (Flipped & Rotated) ---
-        b_type = (p_type + 6) % 12
-        b_sq = p_sq ^ 63
-        b_king_sq_rotated = black_king_sq ^ 63
-                
-        b_idx = (b_king_sq_rotated * 768) + (b_type * 64) + b_sq
-        black_perspective_indices.append(b_idx)
+        b_orig_type = (p_type + 6) % 12
+        if b_orig_type != 5: # Skip Black King ('k' became index 5 after side swap)
+            # Shift everything above the swapped King index down by 1
+            b_type = b_orig_type if b_orig_type < 5 else b_orig_type - 1
+            b_sq = p_sq ^ 63
+            b_idx = (black_king_bucket * 704) + (b_type * 64) + b_sq
+            black_perspective_indices.append(b_idx)
             
     if is_black_turn:
         return black_perspective_indices, white_perspective_indices
