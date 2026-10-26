@@ -9,7 +9,8 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # --- INITIALIZATION ENGINE CONSTANTS ---
 DATA_SIZE = 2_000_000
-INPUT_FEATURES = 64 * 11 * 16  # Dual-Perspective HalfKA Dimension (11,264)
+# 14 Buckets * 11 Active Pieces (excluding own King) * 64 Squares = 9,856
+INPUT_FEATURES = 14 * 11 * 64  # Dual-Perspective HalfKA Dimension (9,856)
 MAX_PIECES = 32  
 
 # Map FEN character to an integer type 0-11
@@ -78,32 +79,41 @@ def q_search(b, alpha, beta, depth=0, max_depth=12):
     return alpha
 
 KING_BUCKET_MAP = [
-    # Rank 1 (Each file A-D gets its own bucket)
+    # Rank 1: Full file resolution near home rank (Buckets 0-3)
     0,  1,  2,  3,    3,  2,  1,  0,
-    # Rank 2 (Each file A-D gets its own bucket)
+    # Rank 2: Full file resolution (Buckets 4-7)
     4,  5,  6,  7,    7,  6,  5,  4,
-    # Rank 3 & 4 (Combined 2x2 grids to combat mid-board starvation)
+    
+    # Rank 3 & 4: 2x2 Quadrant blocks (Buckets 8-9)
     8,  8,  9,  9,    9,  9,  8,  8,
     8,  8,  9,  9,    9,  9,  8,  8,
-    # Rank 5 (Files A-D pooled together)
-    10, 10, 10, 10,  10, 10, 10, 10,
-    # Rank 6 (Files A-D pooled together)
-    11, 11, 11, 11,  11, 11, 11, 11,
-    # Rank 7 (Files A-D pooled together)
-    12, 12, 12, 12,  12, 12, 12, 12,
-    # Rank 8 (Files A-D pooled together)
-    13, 13, 13, 13,  13, 13, 13, 13
+    
+    # Rank 5 & 6: 2x2 Quadrant blocks (Buckets 10-11)
+    10, 10, 11, 11,  11, 11, 10, 10,
+    10, 10, 11, 11,  11, 11, 10, 10,
+    
+    # Rank 7 & 8: 2x2 Quadrant blocks (Buckets 12-13)
+    12, 12, 13, 13,  13, 13, 12, 12,
+    12, 12, 13, 13,  13, 13, 12, 12
 ]
 
 def parse_fen_to_features(fen_string):
-    """Parses a standard FEN string into sparse categorical indices for a 16-bucket HalfKA NNUE."""
+    """
+    Parses a standard FEN string into sparse categorical feature indices for a
+    14-bucket, horizontally mirrored HalfKA NNUE layout using the custom PIECE_MAP.
+    
+    Returns:
+        tuple: (active_side_indices, passive_side_indices)
+               Each list contains integer indices ranging from 0 to 9855.
+    """
     parts = fen_string.split()
     board_part = parts[0]
     turn_part = parts[1]
     is_black_turn = (turn_part == 'b')
         
+    # Process FEN ranks from top to bottom (Rank 8 down to Rank 1)
     rows = board_part.split('/')
-    rows.reverse()
+    rows.reverse()  # Reverse so Square 0 = A1, Square 63 = H8
     
     clean_board = ""
     for row in rows:
@@ -117,6 +127,7 @@ def parse_fen_to_features(fen_string):
     white_king_sq = 0
     black_king_sq = 0
         
+    # Scan the board to collect pieces and isolate King positions
     for sq in range(64):
         char = clean_board[sq]
         if char == '.':
@@ -128,35 +139,69 @@ def parse_fen_to_features(fen_string):
         elif char == 'k':
             black_king_sq = sq
 
-    # --- RESOLVE KING BUCKETS ---
-    white_king_bucket = KING_BUCKET_MAP[white_king_sq]
+    # --------------------------------------------------------------------------
+    # --- RESOLVE WHITE KING BUCKET & HORIZONTAL MIRRORING FLAG ---
+    # --------------------------------------------------------------------------
+    white_king_file = white_king_sq % 8
+    mirror_white = (white_king_file >= 4)  # True if King is on files E, F, G, or H
+    
+    # If the king is on the right wing, look up bucket using its mirrored position
+    w_king_lookup_sq = white_king_sq ^ 7 if mirror_white else white_king_sq
+    white_king_bucket = KING_BUCKET_MAP[w_king_lookup_sq]
+
+    # --------------------------------------------------------------------------
+    # --- RESOLVE BLACK KING BUCKET & HORIZONTAL MIRRORING FLAG ---
+    # --------------------------------------------------------------------------
+    # Rotate square 180 degrees vertically so Black tracks the board from its own side
     black_king_sq_rotated = black_king_sq ^ 63
-    black_king_bucket = KING_BUCKET_MAP[black_king_sq_rotated]
+    black_king_file = black_king_sq_rotated % 8
+    mirror_black = (black_king_file >= 4)
+    
+    b_king_lookup_sq = black_king_sq_rotated ^ 7 if mirror_black else black_king_sq_rotated
+    black_king_bucket = KING_BUCKET_MAP[b_king_lookup_sq]
 
     white_perspective_indices = []
     black_perspective_indices = []
         
     for p_type, char, p_sq in pieces:
+        # ----------------------------------------------------------------------
         # --- WHITE PERSPECTIVE ---
-        if p_type != 5: # Skip White King ('K')
-            # Shift everything above White King down by 1 to make space contiguous (0-10)
-            w_type = p_type if p_type < 5 else p_type - 1
-            w_idx = (white_king_bucket * 704) + (w_type * 64) + p_sq
+        # ----------------------------------------------------------------------
+        if p_type != 5:  # Skip own King ('K' feature index 5 is omitted)
+            # Shift types above omitted King down by 1 to compress features to 0..10 range
+            w_compressed_type = p_type if p_type < 5 else p_type - 1
+            
+            # If White King requires horizontal mirroring, flip this piece square horizontally
+            final_w_sq = p_sq ^ 7 if mirror_white else p_sq
+            
+            w_idx = (white_king_bucket * 704) + (w_compressed_type * 64) + final_w_sq
             white_perspective_indices.append(w_idx)
                 
+        # ----------------------------------------------------------------------
         # --- BLACK PERSPECTIVE (Flipped & Rotated) ---
+        # ----------------------------------------------------------------------
+        # Invert side mapping using your custom mapping indices (P<->p, B<->b, etc.)
         b_orig_type = (p_type + 6) % 12
-        if b_orig_type != 5: # Skip Black King ('k' became index 5 after side swap)
-            # Shift everything above the swapped King index down by 1
-            b_type = b_orig_type if b_orig_type < 5 else b_orig_type - 1
-            b_sq = p_sq ^ 63
-            b_idx = (black_king_bucket * 704) + (b_type * 64) + b_sq
+        
+        if b_orig_type != 5:  # Skip own King ('k' became index 5 after side inversion)
+            # Compress feature types to 0..10 range
+            b_compressed_type = b_orig_type if b_orig_type < 5 else b_orig_type - 1
+            
+            # Flip square 180 degrees vertically for baseline black perspective
+            b_sq_rotated = p_sq ^ 63
+            
+            # If Black King requires horizontal mirroring, flip this square horizontally too
+            final_b_sq = b_sq_rotated ^ 7 if mirror_black else b_sq_rotated
+            
+            b_idx = (black_king_bucket * 704) + (b_compressed_type * 64) + final_b_sq
             black_perspective_indices.append(b_idx)
             
+    # Return indices organized cleanly by active player turn
     if is_black_turn:
         return black_perspective_indices, white_perspective_indices
     else:
         return white_perspective_indices, black_perspective_indices
+
 
 def is_invalid_training_row(depth_str) -> bool:
     return int(depth_str) < 20

@@ -53,8 +53,8 @@
 
   $$\text{Inputs (11,264)} \rightarrow \text{Accumulator (256)} \rightarrow \text{Multiplexed Perspective (256*2)} \rightarrow \text{Hidden 2 (32)} \rightarrow \text{Hidden 3 (32)} \rightarrow \text{Output (1)}$$
 
-  - **Input Layer:** $12 \times 64 \times 64 = 11,264$ sparse features mapping active piece-square configurations relative to your own active King's position.
-  - **Accumulator Layer:** Shapes into $(11,264, 256)$ weights and $(256,)$ biases quantized to signed 16-bit integers (`i16`). Uses branchless tensor multiplexing to concatenate White/Black points of view into a unified $256$-dimensional vector.
+  - **Input Layer:** $14 \times 11 \times 64 = 9,856$ sparse features mapping active piece-square configurations relative to your own active King's position.
+  - **Accumulator Layer:** Shapes into $(9,856, 256)$ weights and $(256,)$ biases quantized to signed 16-bit integers (`i16`). Uses branchless tensor multiplexing to concatenate White/Black points of view into a unified $256$-dimensional vector.
     - *Activation:* Clipped/Bounded Linear ReLU ($\text{ReLU1}$) bounded strictly between `0.0` and `1.0`.
   - **Hidden Layer 2:** Matrix transformation mapping $(256*2, 32)$ quantized to signed 8-bit weights (`i8`) and 32-bit biases (`i32`).
     - *Activation:* Clipped/Bounded Linear ReLU ($\text{ReLU1}$) bounded strictly between `0.0` and `1.0`.
@@ -129,7 +129,6 @@
       * **Training Throughput:** 3,168 steps per epoch.
       * **Batch Size:** 8,192 positions per step.
       * **Validation Window:** 63 steps per epoch.
-      * **Training Set:**: 26,610,776 Positions
       * **Data Pipeline:** Datasets are systematically shuffled between epochs to prevent sequential memorization and overfitting.
     - **Learning Rate Dynamics:** Optimization utilizes the **AdamW** algorithm paired with a **CosineDecay** learning rate schedule, ensuring smooth, monotonic convergence toward the minimum floor ($\alpha = 2 \times 10^{-7}$).
 

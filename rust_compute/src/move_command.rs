@@ -167,26 +167,28 @@ pub fn flip_square(sq: u8) -> u8 {
     sq ^ 63
 }
 
-// The 16-bucket coordinate mapping layout array with horizontal mirroring
+// The 14-bucket coordinate mapping layout array with horizontal mirroring.
+// Re-indexed to 14 buckets (0..13) instead of 16 to match the exact mathematical dimension.
 pub const KING_BUCKET_MAP: [u8; 64] = [
-    // Rank 1 (Each file A-D gets its own bucket)
+    // Rank 1 (Each file A-D gets its own unique bucket)
     0,  1,  2,  3,    3,  2,  1,  0,
-    // Rank 2 (Each file A-D gets its own bucket)
+    // Rank 2 (Each file A-D gets its own unique bucket)
     4,  5,  6,  7,    7,  6,  5,  4,
-    // Rank 3 & 4 (Combined 2x2 grids to combat mid-board starvation)
+    
+    // Rank 3 & 4 (Combined 2x2 grids to combat mid-board data starvation)
     8,  8,  9,  9,    9,  9,  8,  8,
     8,  8,  9,  9,    9,  9,  8,  8,
-    // Rank 5 (Files A-D pooled together)
-    10, 10, 10, 10,  10, 10, 10, 10,
-    // Rank 6 (Files A-D pooled together)
-    11, 11, 11, 11,  11, 11, 11, 11,
-    // Rank 7 (Files A-D pooled together)
-    12, 12, 12, 12,  12, 12, 12, 12,
-    // Rank 8 (Files A-D pooled together)
-    13, 13, 13, 13,  13, 13, 13, 13
+    
+    // Rank 5 & 6 (Combined 2x2 quadrant blocks to isolate edge vs center)
+    10, 10, 11, 11,  11, 11, 10, 10,
+    10, 10, 11, 11,  11, 11, 10, 10,
+    
+    // Rank 7 & 8 (Combined 2x2 quadrant blocks to isolate edge vs center)
+    12, 12, 13, 13,  13, 13, 12, 12,
+    12, 12, 13, 13,  13, 13, 12, 12
 ];
 
-/// Computes the unique index [0..11263] for a piece from a specific player's perspective.
+/// Computes the unique index [0..9856] for a piece from a specific player's perspective.
 /// Returns `None` if the piece is a King, signaling that it should not be added to the features.
 #[inline(always)]
 pub fn get_feature_index(
@@ -195,29 +197,37 @@ pub fn get_feature_index(
     piece_sq: u8, 
     is_black_active: bool
 ) -> usize {
-    let piece_type = piece.to_nnue_type(); // 0..11 based on PIECE_MAP (excluding 5 and 11)
+    let piece_type = piece.to_nnue_type(); // 0..11 based on your PIECE_MAP
 
+    // 1. Establish perspective baseline coordinates and handle color inversions
     let (k_sq, p_sq, b_orig_type) = if is_black_active {
-        // From Black's perspective, flip/rotate the board and invert piece colors
+        // Rotate 180 degrees vertically and invert side types for Black's perspective
         let inverted_type = (piece_type + 6) % 12;
         (king_sq ^ 63, piece_sq ^ 63, inverted_type)
     } else {
         (king_sq, piece_sq, piece_type)
     };
 
-    // --- REMAP PIECE IDS (0 to 10) ---
-    // Condense the gaps left by the missing kings into a contiguous 0..10 space
+    // 3. Compress piece IDs into a contiguous 0..10 space
     let final_p_type = if b_orig_type < 5 {
         b_orig_type
     } else {
         b_orig_type - 1
     };
 
-    // Resolve the active king bucket using the mirrored distribution map
-    let king_bucket = KING_BUCKET_MAP[k_sq as usize] as usize;
+    // 4. Resolve horizontal mirroring conditions based on active King's file position
+    let king_file = k_sq % 8;
+    let is_mirrored = king_file >= 4;
 
-    // Index Formula: (KingBucket * 704) + (PieceType * 64) + PieceSquare
-    (king_bucket * 704) + (final_p_type as usize * 64) + (p_sq as usize)
+    // Determine target lookup square for the bucket layout and piece features using branchless select
+    let lookup_king_sq = if is_mirrored { k_sq ^ 7 } else { k_sq };
+    let final_p_sq = if is_mirrored { p_sq ^ 7 } else { p_sq };
+
+    // Resolve the bucket ID (0..13)
+    let king_bucket = KING_BUCKET_MAP[lookup_king_sq as usize] as usize;
+
+    // 5. Index Formula: (KingBucket * 704) + (PieceType * 64) + PieceSquare
+    (king_bucket * 704) + (final_p_type as usize * 64) + (final_p_sq as usize)
 }
 
 pub fn is_pawn(piece: BoardPiece) -> bool {
