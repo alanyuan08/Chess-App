@@ -30,9 +30,7 @@ def run_partitioned_deduplication():
     for i, path in enumerate(all_shards, 1):
         try:
             print(f"    [{i}/{len(all_shards)}] Splitting {os.path.basename(path)} into temporary disk buckets...")
-            
-            # CRITICAL FIX: Use Polars expression hashing instead of passing a custom function 
-            # with pl.Series. This allows proper out-of-core streaming optimizations.
+
             lazy_shard = pl.scan_parquet(path).with_columns(
                 bucket=(pl.col("fen").hash(seed=42) % NUM_BUCKETS).abs()
             )
