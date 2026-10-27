@@ -80,14 +80,6 @@ def process_single_shard(args):
     if len(df_shard) == 0: 
         return
         
-    df_filtered = df_shard.filter(
-        ((piece_count_expr >= 26) & (pl.col("depth") >= 26)) |
-        ((piece_count_expr.is_between(13, 25)) & (pl.col("depth") >= 26)) |
-        ((piece_count_expr < 13) & (pl.col("depth") >= 26))
-    )
-    if len(df_filtered) == 0: 
-        return
-
     # 2. Add features and compute canonical FEN string mapping
     # map_elements with strategy="thread_local" lets this thread compute its own subset safely
     df_filtered = df_shard.with_columns(
