@@ -295,8 +295,7 @@ impl SearchWorker {
         let is_greater_equal_depth = (raw_reduced_depth >= depth as i16) as i16;
         let is_valid = 1 - is_less_than_zero - is_greater_equal_depth;
 
-        let reduced_depth = (0 * is_less_than_zero) 
-            + (((depth as i16) - 1) * is_greater_equal_depth) 
+        let reduced_depth = (((depth as i16) - 1) * is_greater_equal_depth) 
             + (raw_reduced_depth * is_valid);
 
         reduced_depth as i8
