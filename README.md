@@ -73,8 +73,8 @@
   - **Data Augmentation & DeDuplication:** The filtered positions are augmented by rotating each board state 180 degrees. The positions are then deduplicationed. This yields a total of **392,386,524 unique positions**.
 
     ### **1. High-Fidelity Data Distribution Matrix**    
-    * **Total Training Positions:** **25,952,256 positions**
-    * **Total Validation Positions:** **524,288 positions**
+    * **Total Training Positions:** **111,319,560 positions**
+    * **Total Validation Positions:** **1,124,440 positions**
 
     * **Final Operational Phase Split:** **20.00% Early** / **45.00% Mid** / **35.00% Late**
 
@@ -93,30 +93,31 @@
     * **Mid (Midgame):** 13 to 25 active pieces remaining on the board 
     * **Late (All Endgames):** <= 13 active pieces remaining on the board
 
-    Min Depth 26
+    Min Depth 26 to remove positions from 1 Second Blitz or 3 Minute Games 
 
-    ### **2. Dataset Stratification**
+    ### **2. Dataset Stratification (Post-Reduce)**
 
-    | Strata Key | Raw Count | Target Pct | Target Count | Factor |
-    | :--- | :--- | :--- | :--- | :--- |
-    | early_dead_equal | 22685342 | 8.0 | 2076892 | 0.09x |
-    | early_slight_pull | 11066408 | 6.0 | 1557669 | 0.14x |
-    | early_micro_advantage | 4876664 | 3.5 | 908640 | 0.19x |
-    | early_solid_edge | 3089720 | 1.5 | 389417 | 0.13x |
-    | early_clear_dominance | 1488865 | 0.7 | 181728 | 0.12x |
-    | early_decisive_zone | 205469 | 0.3 | 77883 | 0.38x |
-    | mid_dead_equal | 38791499 | 14.0 | 3634561 | 0.09x |
-    | mid_slight_pull | 6854365 | 12.0 | 3115338 | 0.45x |
-    | mid_micro_advantage | 5367918 | 10.0 | 2596115 | 0.48x |
-    | mid_solid_edge | 6620911 | 6.5 | 1687474 | 0.25x |
-    | mid_clear_dominance | 6629447 | 2.0 | 519223 | 0.08x |
-    | mid_decisive_zone | 1587169 | 0.5 | 129805 | 0.08x |
-    | late_dead_equal | 35070519 | 11.0 | 2855726 | 0.08x |
-    | late_slight_pull | 747026 | 10.0 | 2596115 | 3.48x |
-    | late_micro_advantage | 367783 | 8.5 | 2206697 | 6.00x |
-    | late_solid_edge | 815142 | 4.0 | 1038446 | 1.27x |
-    | late_clear_dominance | 1573635 | 1.0 | 259611 | 0.16x |
-    | late_decisive_zone | 839720 | 0.5 | 129805 | 0.15x |
+    | Strata Key | Raw Count | Target Pct | Target Count | Factor | Status |
+    | :--- | :---: | :---: | :---: | :---: | :---: |
+    | `early_dead_equal` | 23,452,313 | 10.0% | 11,244,400 | 0.48x | Clean Pruning |
+    | `early_slight_pull` | 11,285,215 | 7.5% | 8,433,300 | 0.75x | Clean Pruning |
+    | `early_micro_advantage` | 4,953,919 | 6.5% | 7,308,860 | 1.48x | Safe Padding |
+    | `early_solid_edge` | 3,113,893 | 2.5% | 2,811,100 | 0.90x | Clean Pruning |
+    | `early_clear_dominance` | 1,492,616 | 1.0% | 1,124,440 | 0.75x | Clean Pruning |
+    | `early_decisive_zone` | 224,888 | 0.3% | 337,332 | 1.50x | Safe Padding |
+    | `mid_dead_equal` | 54,472,242 | 14.5% | 16,304,379 | 0.30x | Clean Pruning |
+    | `mid_slight_pull` | 12,278,918 | 14.0% | 15,742,160 | 1.28x | Safe Padding |
+    | `mid_micro_advantage` | 10,033,158 | 11.5% | 12,931,060 | 1.29x | Safe Padding |
+    | `mid_solid_edge` | 12,618,491 | 7.0% | 7,871,080 | 0.62x | Clean Pruning |
+    | `mid_clear_dominance` | 12,633,455 | 2.0% | 2,248,880 | 0.18x | Clean Pruning |
+    | `mid_decisive_zone` | 3,633,547 | 0.5% | 562,220 | 0.15x | Clean Pruning |
+    | `late_dead_equal` | 49,946,142 | 11.0% | 12,368,840 | 0.25x | Clean Pruning |
+    | `late_slight_pull` | 1,868,863 | 4.0% | 4,497,760 | 2.41x | Safe Padding |
+    | `late_micro_advantage` | 1,189,341 | 2.2% | 2,473,768 | 2.08x | Safe Padding |
+    | `late_solid_edge` | 2,943,639 | 4.0% | 4,497,760 | 1.53x | Safe Padding |
+    | `late_clear_dominance` | 5,822,248 | 1.0% | 1,124,440 | 0.19x | Clean Pruning |
+    | `late_decisive_zone` | 4,417,483 | 0.5% | 562,220 | 0.13x | Clean Pruning |
+    | **TOTALS** | **211,733,190** | **100.0%** | **112,444,000** | — | — |
 
     If there is a surplus of positions, it will opt for the positions without a mirror FEN + higher stockfish depth eval.
 
