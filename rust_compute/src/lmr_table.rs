@@ -10,11 +10,11 @@ pub fn calculate_lmr_base(depth: usize, moves: usize) -> i8 {
 pub static LMR_TABLE: std::sync::LazyLock<[[i8; 64]; 64]> = std::sync::LazyLock::new(|| {
     let mut table = [[0; 64]; 64];
     
-    for depth in 0..64 {
-        for moves in 0..64 {
-            table[depth][moves] = calculate_lmr_base(depth, moves);
+    for (depth, row) in table.iter_mut().enumerate() {
+        for (moves, cell) in row.iter_mut().enumerate() {
+            *cell = calculate_lmr_base(depth, moves);
         }
     }
-         
+    
     table
 });

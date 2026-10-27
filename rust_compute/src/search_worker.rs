@@ -260,33 +260,37 @@ impl SearchWorker {
     // A simple, linear-logarithmic approximation using integer division:
     // R increases slowly as depth and move count grow.
     #[inline]
-    fn get_reduced_depth(&self, depth: i8, moves_tried: i8) -> i8 {
+    pub fn get_reduced_depth(&self, depth: i8, moves_tried: i8) -> i8 {
         // 1. Safe array bounds clamping
         let d = depth.clamp(0, 63) as usize;
         let m = moves_tried.clamp(0, 63) as usize;
 
+        // Ensure your LMR_TABLE stores values that can cast cleanly into an i16
         let base_reduction = LMR_TABLE[d][m] as i16;
 
         // 2. Branchless Thread Diversity Calculation
         let is_helper_thread = (self.thread_id != 0) as i16;
-        let is_odd_thread = ((self.thread_id % 2) != 0) as i16;
+        
+        // FIX: Replaced .is_multiple_of(2) with standard, blistering-fast bitwise masking
+        let is_odd_thread = ((self.thread_id & 1) != 0) as i16;
         let is_even_thread = 1 - is_odd_thread;
         
         let depth_gt_4 = (depth > 4) as i16;
-        let even_offset = (-1 * (1 - depth_gt_4)) + (-2 * depth_gt_4);
+        let even_offset = -(1 - depth_gt_4);
 
         // Combine offsets branchlessly based on the active thread ID properties
-        let thread_offset = (1 * is_odd_thread) + (even_offset * is_even_thread);
+        let thread_offset = is_odd_thread + (even_offset * is_even_thread);
         
-        // Apply thread diversity adjustment, clamped at a minimum of 0
+        // Apply thread diversity adjustment
         let adjusted_reduction = base_reduction + (thread_offset * is_helper_thread);
+        
+        // FIX: Type-safe branchless floor clamp to avoid zero-shattering
         let reduction = adjusted_reduction * (adjusted_reduction > 0) as i16;
 
         // 3. Calculate raw reduced depth
         let raw_reduced_depth = (depth as i16) - 1 - reduction;
 
         // 4. Branchless Safety Clamp (Forces result between 0 and depth - 1)
-        // If raw < 0, it clamps up to 0. If raw >= depth, it clamps down to depth - 1.
         let is_less_than_zero = (raw_reduced_depth < 0) as i16;
         let is_greater_equal_depth = (raw_reduced_depth >= depth as i16) as i16;
         let is_valid = 1 - is_less_than_zero - is_greater_equal_depth;
@@ -312,7 +316,7 @@ impl SearchWorker {
         // Determine the next state for Slot 0 and Slot 1 
         // These clean conditional selections compile to zero-branch hardware instructions (CMOV)
         let next_slot0 = if match_k0 { k0 } else { new_killer_move };
-        let next_slot1 = if match_k0 { k1 } else if match_k1 { k0 } else { k0 };
+        let next_slot1 = if match_k0 { k1 } else { k0 };
 
         // Save states back down into the table
         self.killer_move_table[ply_idx][0] = next_slot0;
