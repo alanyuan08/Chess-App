@@ -81,21 +81,19 @@ def q_search(b, alpha, beta, depth=0, max_depth=12):
 
 # The 10-bucket coordinate mapping layout array with horizontal mirroring.
 KING_BUCKET_MAP = [
-    # Rank 1: Full file resolution strictly preserved (Buckets 0-3)
+    # Rank 1: Full file resolution (Buckets 0-3)
     0,  1,  2,  3,    3,  2,  1,  0,
     
-    # Rank 2: Split defensive tier (Corner vs Fianchetto vs Center)
-    4,  5,  6,  6,    6,  6,  5,  4,
+    # Rank 2: Full file resolution (Buckets 4-7)
+    4,  5,  6,  7,    7,  6,  5,  4,
     
-    # Rank 3 & 4: Merged Midgame Transition Zone (All files unified) (Bucket 7)
-    7,  7,  7,  7,    7,  7,  7,  7,
-    7,  7,  7,  7,    7,  7,  7,  7,
-    
-    # Rank 5 & 6: Merged Active Attacking Zone (All files unified) (Bucket 8)
+    # Ranks 3, 4, 5: Consolidated Midgame Core Block (24 squares) (Bucket 8)
+    8,  8,  8,  8,    8,  8,  8,  8,
     8,  8,  8,  8,    8,  8,  8,  8,
     8,  8,  8,  8,    8,  8,  8,  8,
     
-    # Rank 7 & 8: High-Density Aggregated Endgame Pool (All files unified) (Bucket 9)
+    # Ranks 6, 7, 8: High-Density Active Attacking & Endgame Pool (24 squares) (Bucket 9)
+    9,  9,  9,  9,    9,  9,  9,  9,
     9,  9,  9,  9,    9,  9,  9,  9,
     9,  9,  9,  9,    9,  9,  9,  9
 ]

@@ -833,14 +833,14 @@ impl ChessBoard {
             l2_right[i] = opp_acc[i].clamp(0, 127) as i8;
         }
 
-        // --- STEP 2: HIDDEN LAYER 2 (512 -> 32) ---
+        // --- STEP 2: HIDDEN LAYER 2 (512 -> 64) ---
         let l2_biases = &self.nnue_network.l2_biases;
         let l2_inputs: &[i8; 512] = 
             unsafe { &*buffer.l2_inputs.as_ptr().cast::<[i8; 512]>() };
-        let l3_inputs: &mut [i8; 32] = 
-            unsafe { &mut *buffer.l3_inputs.as_mut_ptr().cast::<[i8; 32]>() };
+        let l3_inputs: &mut [i8; 64] = 
+            unsafe { &mut *buffer.l3_inputs.as_mut_ptr().cast::<[i8; 64]>() };
 
-        for neuron in 0..32 {
+        for neuron in 0..64 {
             let mut sum: i32 = l2_biases[neuron];
             let row: &[i8; 512] = &self.nnue_network.l2_weights[neuron];
 
@@ -852,16 +852,16 @@ impl ChessBoard {
             l3_inputs[neuron] = activated.clamp(0, 127) as i8;
         }
 
-        // --- STEP 3: HIDDEN LAYER 3 (32 -> 32) ---
+        // --- STEP 3: HIDDEN LAYER 3 (64 -> 32) ---
         let l3_biases = &self.nnue_network.l3_biases;
         let l4_inputs: &mut [i8; 32] = 
             unsafe { &mut *buffer.l4_inputs.as_mut_ptr().cast::<[i8; 32]>() };
 
         for neuron in 0..32 {
             let mut sum: i32 = l3_biases[neuron];
-            let row: &[i8; 32] = &self.nnue_network.l3_weights[neuron];
+            let row: &[i8; 64] = &self.nnue_network.l3_weights[neuron];
 
-            for i in 0..32 {
+            for i in 0..64 {
                 sum += (l3_inputs[i] as i32) * (row[i] as i32);
             }
 

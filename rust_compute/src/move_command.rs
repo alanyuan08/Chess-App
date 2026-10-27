@@ -167,25 +167,23 @@ pub fn flip_square(sq: u8) -> u8 {
     sq ^ 63
 }
 
-// The 10-bucket coordinate mapping layout array with horizontal mirroring.
-// Preserves absolute file resolution on Rank 1, splits Rank 2 into Corner (A/H), Fianchetto (B/G),
-// and Center (C-F) zones, and collapses Ranks 3+ to eliminate data starvation.
+// The optimized 10-bucket coordinate mapping layout array with horizontal mirroring.
+// Preserves absolute file resolution on Rank 1 and Rank 2 to lock down castling geometry,
+// and groups Ranks 3-5 and Ranks 6-8 into 2 high-density horizontal master pools.
 pub const KING_BUCKET_MAP: [u8; 64] = [
     // Rank 1: Full file resolution strictly preserved (Buckets 0-3)
     0,  1,  2,  3,    3,  2,  1,  0,
     
-    // Rank 2: Split defensive tier (Corner vs Fianchetto vs Center) (Buckets 4-6)
-    4,  5,  6,  6,    6,  6,  5,  4,
+    // Rank 2: Full file resolution strictly preserved (Buckets 4-7)
+    4,  5,  6,  7,    7,  6,  5,  4,
     
-    // Rank 3 & 4: Merged Midgame Transition Zone (All files unified) (Bucket 7)
-    7,  7,  7,  7,    7,  7,  7,  7,
-    7,  7,  7,  7,    7,  7,  7,  7,
-    
-    // Rank 5 & 6: Merged Active Attacking Zone (All files unified) (Bucket 8)
+    // Ranks 3, 4, 5: Consolidated Midgame Core Block (24 squares) (Bucket 8)
+    8,  8,  8,  8,    8,  8,  8,  8,
     8,  8,  8,  8,    8,  8,  8,  8,
     8,  8,  8,  8,    8,  8,  8,  8,
     
-    // Rank 7 & 8: High-Density Aggregated Endgame Pool (All files unified) (Bucket 9)
+    // Ranks 6, 7, 8: High-Density Active Attacking & Endgame Pool (24 squares) (Bucket 9)
+    9,  9,  9,  9,    9,  9,  9,  9,
     9,  9,  9,  9,    9,  9,  9,  9,
     9,  9,  9,  9,    9,  9,  9,  9
 ];

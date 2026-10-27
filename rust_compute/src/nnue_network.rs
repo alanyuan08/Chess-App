@@ -10,11 +10,11 @@ pub struct NnueNetwork {
     pub l1_weights: [[i16; 256]; 7040],
     
     // i8 -> 1 byte. 512 / 128 -> 4 Cache Lines * 32
-    pub l2_weights: [[i8; 512]; 32],
-    pub l2_biases: [i32; 32],
+    pub l2_weights: [[i8; 512]; 64],
+    pub l2_biases: [i32; 64],
 
     // i8 -> 1 byte. 32 * 32 / 128 -> 8 Cache Lines
-    pub l3_weights: [[i8; 32]; 32],
+    pub l3_weights: [[i8; 64]; 32],
     pub l3_biases: [i32; 32],
 
     // i8 -> 1 byte. 32 + 4 bytes + padding -> 1 Cache Line
@@ -62,11 +62,11 @@ impl NnueNetwork {
             read_field(&mut network_box.l1_weights as *mut _ as *mut u8, 7040 * 256, 2)?;
 
             // 2. Hidden Layer 2
-            read_field(&mut network_box.l2_weights as *mut _ as *mut u8, 32 * 512, 1)?;
+            read_field(&mut network_box.l2_weights as *mut _ as *mut u8, 64 * 512, 1)?;
             read_field(&mut network_box.l2_biases as *mut _ as *mut u8, 32, 4)?;
 
             // 3. Hidden Layer 3
-            read_field(&mut network_box.l3_weights as *mut _ as *mut u8, 32 * 32, 1)?;
+            read_field(&mut network_box.l3_weights as *mut _ as *mut u8, 32 * 64, 1)?;
             read_field(&mut network_box.l3_biases as *mut _ as *mut u8, 32, 4)?;
 
             // 4. Output Layer
@@ -87,11 +87,11 @@ pub struct NnueInferenceBuffer {
     // 4 * 128 -> 512
     pub l2_inputs: [i8; 512],
     // 32 + 32 + 64 pading -> 128
-    pub l3_inputs: [i8; 32],
+    pub l3_inputs: [i8; 64],
     pub l4_inputs: [i8; 32],
 
     #[cfg(target_arch = "aarch64")] 
-     _padding: [u8; 64],
+     _padding: [u8; 32],
 }
 
 impl NnueInferenceBuffer {    
@@ -109,11 +109,11 @@ impl Default for NnueInferenceBuffer {
     fn default() -> Self {
         Self {
             l2_inputs: [0i8; 512],
-            l3_inputs: [0i8; 32],
+            l3_inputs: [0i8; 64],
             l4_inputs: [0i8; 32],
 
             #[cfg(target_arch = "aarch64")]
-            _padding: [0u8; 64],
+            _padding: [0u8; 32],
         }
     }
 }

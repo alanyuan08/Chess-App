@@ -51,14 +51,14 @@
   - **Input Preprocessing:** 
     - Convert to CentiPawn: ($\text{Centipawn / 100.0}$) -> pawn_units
 
-  $$\text{Inputs (7040)} \rightarrow \text{Accumulator (256)} \rightarrow \text{Multiplexed Perspective (256*2)} \rightarrow \text{Hidden 2 (32)} \rightarrow \text{Hidden 3 (32)} \rightarrow \text{Output (1)}$$
+  $$\text{Inputs (7040)} \rightarrow \text{Accumulator (256)} \rightarrow \text{Multiplexed Perspective (256*2)} \rightarrow \text{Hidden 2 (64)} \rightarrow \text{Hidden 3 (32)} \rightarrow \text{Output (1)}$$
 
   - **Input Layer:** $10 \times 11 \times 64 = 7040$ sparse features mapping active piece-square configurations relative to your own active King's position.
   - **Accumulator Layer:** Shapes into $(7040, 256)$ weights quantized to signed 16-bit integers (`i16`). Uses branchless tensor multiplexing to concatenate White/Black points of view into a unified $256$-dimensional vector.
     - *Activation:* Clipped/Bounded Linear ReLU ($\text{ReLU1}$) bounded strictly between `0.0` and `1.0`.
-  - **Hidden Layer 2:** Matrix transformation mapping $(256*2, 32)$ quantized to signed 8-bit weights (`i8`) and 32-bit biases (`i32`).
+  - **Hidden Layer 2:** Matrix transformation mapping $(256*2, 64)$ quantized to signed 8-bit weights (`i8`) and 32-bit biases (`i32`).
     - *Activation:* Clipped/Bounded Linear ReLU ($\text{ReLU1}$) bounded strictly between `0.0` and `1.0`.
-  - **Hidden Layer 3:** Matrix transformation mapping $(32, 32)$ quantized to signed 8-bit weights (`i8`) and 32-bit biases (`i32`).
+  - **Hidden Layer 3:** Matrix transformation mapping $(64, 32)$ quantized to signed 8-bit weights (`i8`) and 32-bit biases (`i32`).
     - *Activation:* Clipped/Bounded Linear ReLU ($\text{ReLU1}$) bounded strictly between `0.0` and `1.0`.
   - **Output Layer:** Combines $(32, 1)$ outputs down to a single evaluation scalar using 8-bit weights (`i8`) and 32-bit biases (`i32`).
     - *Activation:* None
@@ -73,8 +73,8 @@
   - **Data Augmentation & DeDuplication:** The filtered positions are augmented by rotating each board state 180 degrees. The positions are then deduplicationed. This yields a total of **392,386,524 unique positions**.
 
     ### **1. High-Fidelity Data Distribution Matrix**    
-    * **Total Training Positions:** **111,319,560 positions**
-    * **Total Validation Positions:** **1,124,440 positions**
+    * **Total Training Positions:** **112,205,824 positions**
+    * **Total Validation Positions:** **2,292,981 positions**
 
     * **Final Operational Phase Split:** **20.00% Early** / **45.00% Mid** / **35.00% Late**
 

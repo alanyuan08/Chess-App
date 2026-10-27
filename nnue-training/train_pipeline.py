@@ -116,34 +116,6 @@ class CustomWarmupCosineSchedule(keras.optimizers.schedules.LearningRateSchedule
         config["cosine_schedule"] = keras.optimizers.schedules.deserialize(config["cosine_schedule"])
         return cls(**config)
 
-@keras.utils.register_keras_serializable()
-class SharedAccumulatorBias(layers.Layer):
-    """
-    Custom Keras layer hosting a single, shared trainable 
-    256-dimensional accumulator bias vector (b1) applied to a single perspective.
-    """
-    def __init__(self, output_dim=256, **kwargs):
-        super().__init__(**kwargs)
-        self.output_dim = output_dim
-
-    def build(self, input_shape):
-        self.bias = self.add_weight(
-            shape=(self.output_dim,),
-            initializer="zeros",
-            trainable=True,
-            name="accumulator_bias_vector"
-        )
-        super().build(input_shape)
-
-    def call(self, inputs):
-        # Broadcasts the (256,) bias vector across the (Batch, 256) incoming tensor
-        return inputs + self.bias
-
-    def get_config(self):
-        config = super().get_config()
-        config.update({"output_dim": self.output_dim})
-        return config
-
 def get_local_shard_directories():
     """
     Defines the storage locations for your exported clean Parquet files.
@@ -158,7 +130,7 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
     with open(file_path, "wb") as f:
         print("--- Commencing Weight Quantization & Serialization for Rust ---")
         
-        # 1. Accumulator Layer (7040 -> 512)
+        # 1. Accumulator Layer (7040 -> 1024)
         # Input: Binary (0/1) | Weights: i16 | Bias/Output Accumulator: i32
         acc_layer = model.get_layer("accumulator_layer")
         embedding_weights = acc_layer.get_weights()[0]
@@ -176,7 +148,7 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
         f.write(b1_quant.tobytes())
         print(f"-> Accumulator Layer serialized. Shape: {w1_real.shape} (Weights: i16 / Synthetic Bias: i32)")
 
-        # 2. Hidden Layer 2 (256*2 -> 32)
+        # 2. Hidden Layer 2 (256*2 -> 64)
         # Input: i16 (Clipped from Accumulator) | Weights: i8 | Bias/Output: i32
         # Shift Right by 7 (>> 7) before clipping to next input scale.
         layer2 = model.get_layer("hidden_layer_2") 
@@ -187,7 +159,7 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
         f.write(b2_quant.tobytes())
         print(f"-> Hidden Layer 2 serialized. Shape: {w2.shape} (Weights: i8 / Bias: i32) [Rust -> Shift >> 7]")
 
-        # 3. Hidden Layer 3 (32 -> 32)
+        # 3. Hidden Layer 3 (64 -> 32)
         # Input: i16 | Weights: i8 | Bias/Output: i32 
         # Shift Right by 5 (>> 5) before clipping to next input scale.
         layer3 = model.get_layer("hidden_layer_3")
@@ -256,7 +228,7 @@ def train_nnue_on_fens():
 
     # 7. Hidden Layer 2 with ReLU1 activation
     x = layers.Dense(
-        32, 
+        64, 
         activation=None, 
         use_bias=True, 
         kernel_initializer=sub_layer_init,
@@ -382,10 +354,10 @@ def train_nnue_on_fens():
         generator=lambda: train_manager.generator_fn(total_epoch_steps=STEPS_PER_EPOCH),
         output_signature=(
             {
-                "active_features": tf.TensorSpec(shape=(BATCH_SIZE, MAX_PIECES), dtype=tf.int32),
-                "passive_features": tf.TensorSpec(shape=(BATCH_SIZE, MAX_PIECES), dtype=tf.int32),
+                "active_features": tf.TensorSpec(shape=(None, MAX_PIECES), dtype=tf.int32),
+                "passive_features": tf.TensorSpec(shape=(None, MAX_PIECES), dtype=tf.int32),
             },
-            tf.TensorSpec(shape=(BATCH_SIZE, 1), dtype=tf.float32)
+            tf.TensorSpec(shape=(None, 1), dtype=tf.float32)
         )
     ).prefetch(tf.data.AUTOTUNE)
 
@@ -394,10 +366,10 @@ def train_nnue_on_fens():
         generator=lambda: val_manager.generator_fn(total_epoch_steps=VALIDATION_PER_EPOCH),
         output_signature=(
             {
-                "active_features": tf.TensorSpec(shape=(BATCH_SIZE, MAX_PIECES), dtype=tf.int32),
-                "passive_features": tf.TensorSpec(shape=(BATCH_SIZE, MAX_PIECES), dtype=tf.int32),
+                "active_features": tf.TensorSpec(shape=(None, MAX_PIECES), dtype=tf.int32),
+                "passive_features": tf.TensorSpec(shape=(None, MAX_PIECES), dtype=tf.int32),
             },
-            tf.TensorSpec(shape=(BATCH_SIZE, 1), dtype=tf.float32)
+            tf.TensorSpec(shape=(None, 1), dtype=tf.float32)
         )
     ).prefetch(tf.data.AUTOTUNE)
 
