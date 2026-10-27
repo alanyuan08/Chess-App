@@ -1,6 +1,7 @@
 import os
 import sys
 import glob
+import gc
 import numpy as np
 import polars as pl
 import chess
@@ -146,102 +147,6 @@ def _worker_process_bucket_group(
     target_ratios
 ):
     """
-    Isolated worker process. Natively balances and writes strict shards
-    without invoking the Python interpreter loop.
-    """
-    CHUNK_MULTIPLE = 8192
-    processed_strata = []
-    
-    for bucket_id in bucket_ids:
-        frag_pattern = os.path.join(source_dir, f"bucket_{bucket_id}_raw_*.parquet")
-        fragments = glob.glob(frag_pattern)
-        if not fragments:
-            continue
-            
-        # 1. Native Fast Concat of raw split chunks
-        df_processed = pl.concat([pl.read_parquet(f) for f in fragments])
-        
-        # Immediate disk cleanup to maximize host capacity
-        for frag_path in fragments:
-            try: os.remove(frag_path)
-            except OSError: pass
-                
-        # 2. Stratification and Filtering using primitive parameters
-        for (strata_k,), sub_df in df_processed.group_by("strata_key"):
-            fraction = retention_fractions.get(strata_k, 0.0)
-            if fraction <= 0.0 or strata_k not in target_ratios:
-                continue
-                
-            target_rows = int(len(sub_df) * fraction)
-            
-            if fraction <= 1.0:
-                # OPTIMIZED SHARD PRUNING: Sort by king_bucket descending to preserve 
-                # endgames/mid-boards (8 -> 7 -> 6...) and tie-break with deep Stockfish depths first.
-                sub_df_sorted = sub_df.sort(by=["king_bucket", "depth"], descending=[True, True])
-                sub_df_slice = sub_df_sorted.head(target_rows)
-                
-                sub_df_shuffled = sub_df_slice.sample(fraction=1.0, shuffle=True, seed=1337 + bucket_id)
-                processed_strata.append(sub_df_shuffled)
-            else:
-                # Pad starved strata cleanly while maximizing positional depth and advanced buckets
-                sub_df_starved = (
-                    sub_df.sort(by=["king_bucket", "depth"], descending=[True, True])
-                    .unique(subset=["fen"], keep="first")
-                )
-                sub_df_shuffled = sub_df_starved.sample(fraction=1.0, shuffle=True, seed=1337 + bucket_id)
-                
-                full_replications = int(fraction)
-                remainder_fraction = fraction - full_replications
-                
-                for _ in range(full_replications):
-                    processed_strata.append(sub_df_shuffled)
-                
-                remainder_count = int(len(sub_df_shuffled) * remainder_fraction)
-                if remainder_count > 0:
-                    processed_strata.append(sub_df_shuffled.head(remainder_count))
-
-    # 3. Stream Assembly & Strict Chunk Serialization
-    if not processed_strata:
-        return
-
-    # Consolidate all balanced strata components into a unified bucket frame
-    df_balanced_pool = pl.concat(processed_strata)
-    
-    # Global shuffle to eliminate sequential strata bias inside the training stream
-    df_final_shuffled = df_balanced_pool.sample(fraction=1.0, shuffle=True, seed=42 + worker_id)
-    
-    total_balanced_rows = len(df_final_shuffled)
-    shard_idx = 0
-    
-    # 4. Flush perfectly sized chunks to disk (Ensuring blocks are clean multiples of 8192)
-    for start_row in range(0, total_balanced_rows, CHUNK_SIZE):
-        df_chunk = df_final_shuffled.slice(start_row, CHUNK_SIZE)
-        
-        # If the trailing slice is partial, skip it during training to enforce strict tensor dimensions
-        if len(df_chunk) < CHUNK_SIZE and not is_validation:
-            continue
-            
-        out_name = f"{file_prefix}_worker_{worker_id}_shard_{shard_idx}.parquet"
-        out_path = os.path.join(output_dir, out_name)
-        
-        # Native, high-performance Snappy compression write
-        df_chunk.write_parquet(out_path, compression="snappy")
-        shard_idx += 1
-
-import gc
-
-def _worker_process_bucket_group(
-    worker_id, 
-    bucket_ids, 
-    source_dir, 
-    output_dir, 
-    file_prefix, 
-    is_validation, 
-    num_buckets, 
-    retention_fractions, 
-    target_ratios
-):
-    """
     Memory-optimized streaming worker process. Balances and writes shards 
     one bucket at a time to prevent RAM starvation on massive datasets.
     """
@@ -328,7 +233,70 @@ def _worker_process_bucket_group(
         del bucket_strata
         del df_bucket_pool
         del df_final_shuffled
-        gc.collect()  # Forces Python to immediately release heap memory back to the OS
+        gc.collect() 
+
+def produce_strict_blocks_parallel(
+    source_dir, 
+    output_dir, 
+    file_prefix, 
+    num_buckets, 
+    retention_fractions, 
+    target_ratios, 
+    is_validation=False, 
+    num_workers=4
+):
+    """Orchestrates parallel workers across the distributed bucket groups."""
+    mode_str = "VALIDATION" if is_validation else "TRAINING"
+    print(f"\n[{mode_str}] -> Commencing {num_workers}-worker leak-proof strict 8192 block production...")
+    
+    # 1. Distribute bucket shards evenly across workers
+    all_buckets = list(range(num_buckets))
+    avg = len(all_buckets) // num_workers
+    worker_groups = [all_buckets[i * avg : (i + 1) * avg] for i in range(num_workers)]
+    
+    # Handle remainder buckets if num_buckets doesn't divide evenly by num_workers
+    for r_idx in range(num_workers * avg, len(all_buckets)):
+        worker_groups[r_idx % num_workers].append(all_buckets[r_idx])
+    
+    # 2. Fire multi-processed worker executors
+    with ProcessPoolExecutor(max_workers=num_workers) as executor:
+        futures = {
+            executor.submit(
+                _worker_process_bucket_group, 
+                w_id, worker_groups[w_id], source_dir, output_dir, file_prefix, 
+                is_validation, num_buckets, retention_fractions, target_ratios
+            ): w_id for w_id in range(num_workers)
+        }
+        
+        for future in as_completed(futures):
+            w_id = futures[future]
+            try:
+                # Workers execute and write files natively, returning None
+                future.result()
+                print(f"  > Worker {w_id} executed successfully and flushed shards to disk.")
+            except Exception as e:
+                print(f"  > Worker {w_id} encountered critical failure: {e}")
+                raise e
+
+    # 3. Post-Process Scan for telemetry tracking
+    # Fast native file count avoids passing integer states across process pipes
+    written_files = glob.glob(os.path.join(output_dir, f"{file_prefix}_worker_*_shard_*.parquet"))
+    total_shards_written = len(written_files)
+
+    print(f"[EXPORTED] Total of {total_shards_written} strict 8192 production shards written across all workers.")
+        
+    # 4. Clean up source directory now that workers have detached
+    # Removes raw un-balanced frag chunks to keep your storage pristine
+    try:
+        raw_remnants = glob.glob(os.path.join(source_dir, "*.parquet"))
+        for f in raw_remnants:
+            os.remove(f)
+        os.rmdir(source_dir)
+    except OSError:
+        pass
+        
+    print(f"[SUCCESS] {mode_str} stream parallel compilation complete! Target: {output_dir}\n")
+
 
 def run_unified_mixer_balancer():
     os.makedirs(TRAIN_DIR, exist_ok=True)
