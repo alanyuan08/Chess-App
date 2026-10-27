@@ -848,7 +848,7 @@ impl ChessBoard {
                 sum += (l2_inputs[i] as i32) * (row[i] as i32);
             }
 
-            let activated = sum >> 6;
+            let activated = sum >> 7;
             l3_inputs[neuron] = activated.clamp(0, 127) as i8;
         }
 
@@ -865,7 +865,7 @@ impl ChessBoard {
                 sum += (l3_inputs[i] as i32) * (row[i] as i32);
             }
 
-            let activated = sum >> 6;
+            let activated = sum >> 5;
             l4_inputs[neuron] = activated.clamp(0, 127) as i8;
         }
 
@@ -877,9 +877,10 @@ impl ChessBoard {
             final_sum += (l4_inputs[i] as i32) * (row[i] as i32);
         }
 
-        let score_scaled = (final_sum * 100) >> 12;
+        // --- STEP 5: FINAL OUTPUT SCALING & SHIFT ---
+        let final_score = final_sum >> 12;
 
-        score_scaled as i16
+        final_score as i16
     }
 
     /// Progresses the network forward incrementally during move making
