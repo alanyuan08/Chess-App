@@ -167,28 +167,30 @@ pub fn flip_square(sq: u8) -> u8 {
     sq ^ 63
 }
 
-// The 14-bucket coordinate mapping layout array with horizontal mirroring.
-// Re-indexed to 14 buckets (0..13) instead of 16 to match the exact mathematical dimension.
+// The 10-bucket coordinate mapping layout array with horizontal mirroring.
+// Preserves absolute file resolution on Rank 1, splits Rank 2 into Corner (A/H), Fianchetto (B/G),
+// and Center (C-F) zones, and collapses Ranks 3+ to eliminate data starvation.
 pub const KING_BUCKET_MAP: [u8; 64] = [
-    // Rank 1 (Each file A-D gets its own unique bucket)
+    // Rank 1: Full file resolution strictly preserved (Buckets 0-3)
     0,  1,  2,  3,    3,  2,  1,  0,
-    // Rank 2 (Each file A-D gets its own unique bucket)
-    4,  5,  6,  7,    7,  6,  5,  4,
     
-    // Rank 3 & 4 (Combined 2x2 grids to combat mid-board data starvation)
-    8,  8,  9,  9,    9,  9,  8,  8,
-    8,  8,  9,  9,    9,  9,  8,  8,
+    // Rank 2: Split defensive tier (Corner vs Fianchetto vs Center) (Buckets 4-6)
+    4,  5,  6,  6,    6,  6,  5,  4,
     
-    // Rank 5 & 6 (Combined 2x2 quadrant blocks to isolate edge vs center)
-    10, 10, 11, 11,  11, 11, 10, 10,
-    10, 10, 11, 11,  11, 11, 10, 10,
+    // Rank 3 & 4: Merged Midgame Transition Zone (All files unified) (Bucket 7)
+    7,  7,  7,  7,    7,  7,  7,  7,
+    7,  7,  7,  7,    7,  7,  7,  7,
     
-    // Rank 7 & 8 (Combined 2x2 quadrant blocks to isolate edge vs center)
-    12, 12, 13, 13,  13, 13, 12, 12,
-    12, 12, 13, 13,  13, 13, 12, 12
+    // Rank 5 & 6: Merged Active Attacking Zone (All files unified) (Bucket 8)
+    8,  8,  8,  8,    8,  8,  8,  8,
+    8,  8,  8,  8,    8,  8,  8,  8,
+    
+    // Rank 7 & 8: High-Density Aggregated Endgame Pool (All files unified) (Bucket 9)
+    9,  9,  9,  9,    9,  9,  9,  9,
+    9,  9,  9,  9,    9,  9,  9,  9
 ];
 
-/// Computes the unique index [0..9856] for a piece from a specific player's perspective.
+/// Computes the unique index [0..7040] for a piece from a specific player's perspective.
 /// Returns `None` if the piece is a King, signaling that it should not be added to the features.
 #[inline(always)]
 pub fn get_feature_index(

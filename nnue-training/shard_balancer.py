@@ -81,8 +81,8 @@ def process_single_shard(args):
         
     df_filtered = df_shard.filter(
         ((piece_count_expr >= 26) & (pl.col("depth") >= 26)) |
-        ((piece_count_expr.is_between(13, 25)) & (pl.col("depth") >= 28)) |
-        ((piece_count_expr < 13) & (pl.col("depth") >= 32))
+        ((piece_count_expr.is_between(13, 25)) & (pl.col("depth") >= 26)) |
+        ((piece_count_expr < 13) & (pl.col("depth") >= 26))
     )
     if len(df_filtered) == 0: 
         return
@@ -158,20 +158,15 @@ def _worker_process_bucket_group(
         if not fragments:
             continue
             
-        # 1. Native Fast Concat
-        df_raw = pl.concat([pl.read_parquet(f) for f in fragments])
+        # 1. Native Fast Concat of raw split chunks
+        df_processed = pl.concat([pl.read_parquet(f) for f in fragments])
         
-        # 2. Native Mirror Tagging (Instantaneous Rust check)
-        df_processed = df_raw.with_columns(
-            is_mirror=(pl.col("fen") != pl.col("canonical_fen"))
-        )
-        
-        # Immediate disk cleanup to save space
+        # Immediate disk cleanup to maximize host capacity
         for frag_path in fragments:
             try: os.remove(frag_path)
             except OSError: pass
                 
-        # 3. Stratification and Filtering using passed parameters
+        # 2. Stratification and Filtering using primitive parameters
         for (strata_k,), sub_df in df_processed.group_by("strata_key"):
             fraction = retention_fractions.get(strata_k, 0.0)
             if fraction <= 0.0 or strata_k not in target_ratios:
@@ -180,19 +175,18 @@ def _worker_process_bucket_group(
             target_rows = int(len(sub_df) * fraction)
             
             if fraction <= 1.0:
-                # Pull unique originals first (is_mirror == False), then high depth
-                sub_df_sorted = sub_df.sort(by=["is_mirror", "depth"], descending=[False, True])
+                # OPTIMIZED SHARD PRUNING: Sort by king_bucket descending to preserve 
+                # endgames/mid-boards (8 -> 7 -> 6...) and tie-break with deep Stockfish depths first.
+                sub_df_sorted = sub_df.sort(by=["king_bucket", "depth"], descending=[True, True])
                 sub_df_slice = sub_df_sorted.head(target_rows)
-                sub_df_final = sub_df_slice.drop(["canonical_fen", "is_mirror"])
                 
-                sub_df_shuffled = sub_df_final.sample(fraction=1.0, shuffle=True, seed=1337 + bucket_id)
+                sub_df_shuffled = sub_df_slice.sample(fraction=1.0, shuffle=True, seed=1337 + bucket_id)
                 processed_strata.append(sub_df_shuffled)
             else:
-                # Pad starved strata
+                # Pad starved strata cleanly while maximizing positional depth and advanced buckets
                 sub_df_starved = (
-                    sub_df.sort("depth", descending=True)
+                    sub_df.sort(by=["king_bucket", "depth"], descending=[True, True])
                     .unique(subset=["fen"], keep="first")
-                    .drop(["canonical_fen", "is_mirror"])
                 )
                 sub_df_shuffled = sub_df_starved.sample(fraction=1.0, shuffle=True, seed=1337 + bucket_id)
                 
@@ -205,36 +199,34 @@ def _worker_process_bucket_group(
                 remainder_count = int(len(sub_df_shuffled) * remainder_fraction)
                 if remainder_count > 0:
                     processed_strata.append(sub_df_shuffled.head(remainder_count))
-                    
+
+    # 3. Stream Assembly & Strict Chunk Serialization
     if not processed_strata:
-        return 0, 0
-        
-    # 4. Consolidated Local Worker Accumulation
-    df_worker_global = pl.concat(processed_strata).drop(["mix_hash", "strata_key"])
-    del processed_strata
+        return
+
+    # Consolidate all balanced strata components into a unified bucket frame
+    df_balanced_pool = pl.concat(processed_strata)
     
-    # High-Entropy shuffle restricted to the worker's allocation pool
-    df_worker_global = df_worker_global.sample(fraction=1.0, shuffle=True, seed=4242 + worker_id)
+    # Global shuffle to eliminate sequential strata bias inside the training stream
+    df_final_shuffled = df_balanced_pool.sample(fraction=1.0, shuffle=True, seed=42 + worker_id)
     
-    total_rows = len(df_worker_global)
-    num_chunks_to_write = total_rows // CHUNK_MULTIPLE
-    rows_to_write = num_chunks_to_write * CHUNK_MULTIPLE
+    total_balanced_rows = len(df_final_shuffled)
+    shard_idx = 0
     
-    # 5. Flush strictly aligned production blocks to disk
-    shard_counter = 0
-    start_row = 0
-    while start_row < rows_to_write:
-        df_production_shard = df_worker_global.slice(start_row, CHUNK_MULTIPLE)
+    # 4. Flush perfectly sized chunks to disk (Ensuring blocks are clean multiples of 8192)
+    for start_row in range(0, total_balanced_rows, CHUNK_SIZE):
+        df_chunk = df_final_shuffled.slice(start_row, CHUNK_SIZE)
         
-        # Worker ID suffix enforces race-condition free multi-process writing
-        final_out_path = os.path.join(output_dir, f"{file_prefix}_w{worker_id}_{shard_counter}.parquet")
-        df_production_shard.write_parquet(final_out_path, compression="snappy")
+        # If the trailing slice is partial, skip it during training to enforce strict tensor dimensions
+        if len(df_chunk) < CHUNK_SIZE and not is_validation:
+            continue
+            
+        out_name = f"{file_prefix}_worker_{worker_id}_shard_{shard_idx}.parquet"
+        out_path = os.path.join(output_dir, out_name)
         
-        start_row += CHUNK_MULTIPLE
-        shard_counter += 1
-        
-    remainder_dropped = total_rows - rows_to_write
-    return shard_counter, remainder_dropped
+        # Native, high-performance Snappy compression write
+        df_chunk.write_parquet(out_path, compression="snappy")
+        shard_idx += 1
 
 def produce_strict_blocks_parallel(
     source_dir, 
@@ -250,13 +242,16 @@ def produce_strict_blocks_parallel(
     mode_str = "VALIDATION" if is_validation else "TRAINING"
     print(f"\n[{mode_str}] -> Commencing {num_workers}-worker leak-proof strict 8192 block production...")
     
+    # 1. Distribute bucket shards evenly across workers
     all_buckets = list(range(num_buckets))
     avg = len(all_buckets) // num_workers
     worker_groups = [all_buckets[i * avg : (i + 1) * avg] for i in range(num_workers)]
     
-    total_shards_written = 0
-    total_rows_truncated = 0
+    # Handle remainder buckets if num_buckets doesn't divide evenly by num_workers
+    for r_idx in range(num_workers * avg, len(all_buckets)):
+        worker_groups[r_idx % num_workers].append(all_buckets[r_idx])
     
+    # 2. Fire multi-processed worker executors
     with ProcessPoolExecutor(max_workers=num_workers) as executor:
         futures = {
             executor.submit(
@@ -269,25 +264,32 @@ def produce_strict_blocks_parallel(
         for future in as_completed(futures):
             w_id = futures[future]
             try:
-                shards, truncated = future.result()
-                total_shards_written += shards
-                total_rows_truncated += truncated
-                print(f"  > Worker {w_id} complete. Shards: {shards} | Dropped remainders: {truncated}")
+                # Workers execute and write files natively, returning None
+                future.result()
+                print(f"  > Worker {w_id} executed successfully and flushed shards to disk.")
             except Exception as e:
                 print(f"  > Worker {w_id} encountered critical failure: {e}")
                 raise e
 
+    # 3. Post-Process Scan for telemetry tracking
+    # Fast native file count avoids passing integer states across process pipes
+    written_files = glob.glob(os.path.join(output_dir, f"{file_prefix}_worker_*_shard_*.parquet"))
+    total_shards_written = len(written_files)
+
     print(f"[EXPORTED] Total of {total_shards_written} strict 8192 production shards written across all workers.")
-    if total_rows_truncated > 0:
-        print(f"[TRUNCATED] Dropped exactly {total_rows_truncated} trailing rows across worker boundaries.")
         
-    # Safely remove source directory now that workers have fully detached
+    # 4. Clean up source directory now that workers have detached
+    # Removes raw un-balanced frag chunks to keep your storage pristine
     try:
+        raw_remnants = glob.glob(os.path.join(source_dir, "*.parquet"))
+        for f in raw_remnants:
+            os.remove(f)
         os.rmdir(source_dir)
     except OSError:
         pass
         
     print(f"[SUCCESS] {mode_str} stream parallel compilation complete! Target: {output_dir}\n")
+
 
 def run_unified_mixer_balancer():
     os.makedirs(TRAIN_DIR, exist_ok=True)
@@ -360,19 +362,19 @@ def run_unified_mixer_balancer():
 
     # 2. Define stratified amplification limits by phase to eliminate over-fitting risks
     AMPLIFICATION_LIMITS = {
-        "early": 2.0,   # Avoids over-memorizing specific engine opening lines
-        "mid": 3.5,     # Protects middlegame tactical volatility horizons
-        "late": 6.0     # Safely upscales scarce, pure depth-32+ endgames
+        "early": 1.5,   # Avoids over-memorizing specific engine opening lines
+        "mid": 2.0,     # Protects middlegame tactical volatility horizons
+        "late": 2.5     # Safely upscales scarce, pure depth-32+ endgames
     }
 
     TARGET_RATIOS = {
-        "early_dead_equal": 0.080, "early_slight_pull": 0.060, "early_micro_advantage": 0.035,
-        "early_solid_edge": 0.015, "early_clear_dominance": 0.007, "early_decisive_zone": 0.003,
+        "early_dead_equal": 0.100, "early_slight_pull": 0.075, "early_micro_advantage": 0.065,
+        "early_solid_edge": 0.025, "early_clear_dominance": 0.010, "early_decisive_zone": 0.003,
         
-        "mid_dead_equal": 0.140, "mid_slight_pull": 0.120, "mid_micro_advantage": 0.100,
-        "mid_solid_edge": 0.065, "mid_clear_dominance": 0.020, "mid_decisive_zone": 0.005,  
+        "mid_dead_equal": 0.145, "mid_slight_pull": 0.140, "mid_micro_advantage": 0.115,
+        "mid_solid_edge": 0.070, "mid_clear_dominance": 0.020, "mid_decisive_zone": 0.005,  
         
-        "late_dead_equal": 0.110, "late_slight_pull": 0.100, "late_micro_advantage": 0.085,
+        "late_dead_equal": 0.110, "late_slight_pull": 0.040, "late_micro_advantage": 0.022,
         "late_solid_edge": 0.040, "late_clear_dominance": 0.010, "late_decisive_zone": 0.005,
     }
     

@@ -466,45 +466,38 @@ impl ChessBoard {
     }
 
     #[inline(always)]
+    fn get_normalized_king_state(king_sq: u8, is_black: bool) -> (u8, bool) {
+        // 1. If it's a black king, swap it to a white "side to move" king via vertical flip
+        let k_sq = if is_black { king_sq ^ 63 } else { king_sq };
+        
+        // 2. Resolve horizontal wing mirroring (Files E-H map to A-D)
+        let is_mirrored = (k_sq % 8) >= 4;
+        let lookup_sq = if is_mirrored { k_sq ^ 7 } else { k_sq };
+        
+        (KING_BUCKET_MAP[lookup_sq as usize], is_mirrored)
+    }
+
     pub fn does_move_cross_king_bucket(&self, forward_move: ForwardMove) -> bool {
         let move_piece = self.mailbox_piece(forward_move.start_sq);
-        let moving_side = piece_player(move_piece);
         
-        // 1. Fetch current king squares and bucket configurations
+        // 1. Extract baseline king squares from bitboard registers
         let w_king_before = self.kings[0].trailing_zeros() as u8;
         let b_king_before = self.kings[1].trailing_zeros() as u8;
-        
-        let w_bucket_before = KING_BUCKET_MAP[w_king_before as usize];
-        let b_bucket_before = KING_BUCKET_MAP[b_king_before as usize ^ 63];
 
-        // 2. Project king destinations based on piece type or castling flags
-        let mut w_king_after = w_king_before;
-        let mut b_king_after = b_king_before;
-        
-        if move_piece == BoardPiece::WKING {
-            w_king_after = forward_move.end_sq;
-        } else if move_piece == BoardPiece::BKING {
-            b_king_after = forward_move.end_sq;
-        } else if forward_move.move_type == MoveFlag::KINGSIDECASTLE {
-            match moving_side {
-                Side::WHITE => w_king_after = 6,  // G1
-                Side::BLACK => b_king_after = 62, // G8
-                _ => {}
-            }
-        } else if forward_move.move_type == MoveFlag::QUEENSIDECASTLE {
-            match moving_side {
-                Side::WHITE => w_king_after = 2,  // C1
-                Side::BLACK => b_king_after = 58, // C8
-                _ => {}
-            }
-        }
+        // 2. Project destinations assuming start/end squares are correct for king tracking
+        let w_king_after = if move_piece == BoardPiece::WKING { forward_move.end_sq } else { w_king_before };
+        let b_king_after = if move_piece == BoardPiece::BKING { forward_move.end_sq } else { b_king_before };
 
-        // 3. Resolve the prospective post-move buckets
-        let w_bucket_after = KING_BUCKET_MAP[w_king_after as usize];
-        let b_bucket_after = KING_BUCKET_MAP[b_king_after as usize ^ 63];
-        
-        // Return true if either network boundary was broken
-        (w_bucket_before != w_bucket_after) || (b_bucket_before != b_bucket_after)
+        // 3. Normalize both sides into their own side-to-move frames
+        let (w_bucket_before, w_mirror_before) =  Self::get_normalized_king_state(w_king_before, false);
+        let (w_bucket_after, w_mirror_after) =  Self::get_normalized_king_state(w_king_after, false);
+
+        let (b_bucket_before, b_mirror_before) =  Self::get_normalized_king_state(b_king_before, true);
+        let (b_bucket_after, b_mirror_after) =  Self::get_normalized_king_state(b_king_after, true);
+
+        // 4. Return true if a bucket boundary OR a horizontal reflection line is crossed
+        (w_bucket_before != w_bucket_after) || (w_mirror_before != w_mirror_after) ||
+        (b_bucket_before != b_bucket_after) || (b_mirror_before != b_mirror_after)
     }
 
     pub fn execute_move(&mut self, move_command: ForwardMove) -> BoardPiece {
@@ -767,16 +760,6 @@ impl ChessBoard {
         let current_frame = &mut accumulators.moves[self.ply];
         let target_white: &mut [i16; 256] = &mut current_frame.white;
         let target_black: &mut [i16; 256] = &mut current_frame.black;
-
-        // Initialize both sides with biases first (casting i32 to i16)
-        let biases = &self.nnue_network.l1_biases;
-
-        // Using zip allows the compiler to optimize the loop boundaries and apply SIMD
-        for (i, &bias) in biases.iter().enumerate().take(256) {
-            let casted_bias = bias as i16;
-            target_white[i] = casted_bias;
-            target_black[i] = casted_bias;
-        }
 
         // Combine ALL piece bitboards
         let mut pieces_bitboard = (self.pawns[0] | self.pawns[1])
@@ -1282,7 +1265,6 @@ impl ChessBoard {
             occupancy |= 1u64 << target_sq;
         }
 
-        // PERFORMANCE OPTIMIZATION: Compute pins once at the start, or pass pre-computed masks
         let initial_pinned_white = self.compute_pinned_mask_with_custom_state(self.occupied, self.all_pieces[0], 0);
         let initial_pinned_black = self.compute_pinned_mask_with_custom_state(self.occupied, self.all_pieces[1], 1);
         let pinned_masks = [initial_pinned_white, initial_pinned_black];

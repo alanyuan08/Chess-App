@@ -219,19 +219,12 @@ impl SearchWorker {
             self.chess_board.execute_move(forward_move); 
             self.chess_board.null_move_accumulator(&mut self.board_accumulator);
         } else {
-            let bucket_boundary_crossed = self.chess_board.does_move_cross_king_bucket(forward_move);
-
-            // 2. Perform the Accumulator Update while chess_board still holds the PREVIOUS state
-            if !bucket_boundary_crossed {
-                self.chess_board.make_move(forward_move, &mut self.board_accumulator);
-            }
-
-            // 3. Mutate the board state
-            captured_piece = self.chess_board.execute_move(forward_move);
-
-            // 4. If a bucket boundary was crossed, discard incremental work and force a full recompute
-            if bucket_boundary_crossed {
+            if self.chess_board.does_move_cross_king_bucket(forward_move) {
+                captured_piece = self.chess_board.execute_move(forward_move);
                 self.chess_board.create_accumulator_from_scratch(&mut self.board_accumulator);
+            } else {
+                self.chess_board.make_move(forward_move, &mut self.board_accumulator);
+                captured_piece = self.chess_board.execute_move(forward_move);
             }
         }
 

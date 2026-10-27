@@ -14,8 +14,8 @@ from keras import layers
 from permanent_dataset_manager import EpochSynchronizedDatasetManager
 
 # --- Global Configurations ---
-# 14 Buckets * 11 Active Pieces (excluding own King) * 64 Squares = 9,856
-INPUT_FEATURES = 14 * 11 * 64  # Dual-Perspective HalfKA Dimension (9,856)
+# 10 Buckets * 11 Active Pieces (excluding own King) * 64 Squares = 7040
+INPUT_FEATURES = 10 * 11 * 64  # Dual-Perspective HalfKA Dimension (7040)
 MAX_PIECES = 32                # Uniform layout array padding bound
 SCALE_MAX = 1.0                # Bounded Clipped ReLU limit 
 
@@ -158,12 +158,12 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
     with open(file_path, "wb") as f:
         print("--- Commencing Weight Quantization & Serialization for Rust ---")
         
-        # 1. Accumulator Layer (9,856 -> 256)
+        # 1. Accumulator Layer (7040 -> 512)
         # Input: Binary (0/1) | Weights: i16 | Bias/Output Accumulator: i32
         acc_layer = model.get_layer("accumulator_layer")
         embedding_weights = acc_layer.get_weights()[0]
         # Accumulator Weights (Updated dimension bound for 16-bucket layout)
-        w1_real = embedding_weights[:9856, :]
+        w1_real = embedding_weights[:7040, :]
         w1_quant = np.ascontiguousarray(np.round(w1_real * 128.0)).astype(np.int16)
 
         # Accumulator Bias
@@ -217,7 +217,7 @@ def train_nnue_on_fens():
     passive_input = keras.Input(shape=(MAX_PIECES,), dtype="int32", name="passive_features")
 
     # 2. Shared Accumulator Layer (Using Embedding Reduction to replace the old sparse matrix bottleneck)
-    nnue_accumulator_init = keras.initializers.TruncatedNormal(mean=0.0, stddev=0.005)
+    nnue_accumulator_init = keras.initializers.TruncatedNormal(mean=0.0, stddev=0.01, seed=42)
     
     # We dimension the lookup array to INPUT_FEATURES + 1 to house the positive padding index row
     embedding_layer = layers.Embedding(
@@ -227,12 +227,6 @@ def train_nnue_on_fens():
         mask_zero=True,
         name="accumulator_layer"
     )
-
-    accumulator_bias_layer = SharedAccumulatorBias(
-        name="accumulator_bias", 
-        output_dim=256
-    )
-
     # 3. Pull dense weights representations for all slots
     a_embed = embedding_layer(active_input) # Target shape: (Batch, 16, 256)
     p_embed = embedding_layer(passive_input) # Target shape: (Batch, 16, 256)
@@ -249,23 +243,24 @@ def train_nnue_on_fens():
     a_acc_raw = keras.ops.sum(a_embed * a_mask, axis=1)  # Target shape: (Batch, 256)
     p_acc_raw = keras.ops.sum(p_embed * p_mask, axis=1)  # Target shape: (Batch, 256)
 
-    # INJECT THE ACCUMULATOR BIAS BEFORE CLIP/RELU
-    a_acc_biased = accumulator_bias_layer(a_acc_raw)
-    p_acc_biased = accumulator_bias_layer(p_acc_raw)
-
     # 5. Clipped ReLU Activation (ReLU1 / Bounded ReLU)
-    a_act = keras.ops.clip(a_acc_biased, 0.0, SCALE_MAX)
-    p_act = keras.ops.clip(p_acc_biased, 0.0, SCALE_MAX)
+    a_act = keras.ops.clip(a_acc_raw, 0.0, SCALE_MAX)
+    p_act = keras.ops.clip(p_acc_raw, 0.0, SCALE_MAX)
     
     # 6. Perspective Multiplexing Layer (Shape: Batch, 256*2)
     merged = layers.Concatenate(name="perspective_multiplex")([a_act, p_act]) 
     
+    # --- DEEP LAYER INITIALIZATION BLUEPRINT ---
+    sub_layer_init = keras.initializers.RandomUniform(minval=-0.04, maxval=0.04, seed=42)
+    hidden_bias_init = keras.initializers.Constant(value=0.005)
+
     # 7. Hidden Layer 2 with ReLU1 activation
     x = layers.Dense(
         32, 
         activation=None, 
         use_bias=True, 
-        kernel_initializer=keras.initializers.HeNormal(),
+        kernel_initializer=sub_layer_init,
+        bias_initializer=hidden_bias_init,
         name="hidden_layer_2"
     )(merged)
     x = keras.ops.clip(x, 0.0, SCALE_MAX)
@@ -275,7 +270,8 @@ def train_nnue_on_fens():
         32, 
         activation=None, 
         use_bias=True, 
-        kernel_initializer=keras.initializers.HeNormal(),
+        kernel_initializer=sub_layer_init,
+        bias_initializer=hidden_bias_init,
         name="hidden_layer_3"
     )(x)
     x = keras.ops.clip(x, 0.0, SCALE_MAX)
@@ -285,7 +281,8 @@ def train_nnue_on_fens():
         1, 
         activation=None, 
         use_bias=True, 
-        kernel_initializer=keras.initializers.HeNormal(),
+        kernel_initializer=sub_layer_init,
+        bias_initializer=keras.initializers.Zeros(),
         name="chess_eval"
     )(x)
 

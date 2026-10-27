@@ -51,10 +51,10 @@
   - **Input Preprocessing:** 
     - Convert to CentiPawn: ($\text{Centipawn / 100.0}$) -> pawn_units
 
-  $$\text{Inputs (11,264)} \rightarrow \text{Accumulator (256)} \rightarrow \text{Multiplexed Perspective (256*2)} \rightarrow \text{Hidden 2 (32)} \rightarrow \text{Hidden 3 (32)} \rightarrow \text{Output (1)}$$
+  $$\text{Inputs (7040)} \rightarrow \text{Accumulator (256)} \rightarrow \text{Multiplexed Perspective (256*2)} \rightarrow \text{Hidden 2 (32)} \rightarrow \text{Hidden 3 (32)} \rightarrow \text{Output (1)}$$
 
-  - **Input Layer:** $14 \times 11 \times 64 = 9,856$ sparse features mapping active piece-square configurations relative to your own active King's position.
-  - **Accumulator Layer:** Shapes into $(9,856, 256)$ weights and $(256,)$ biases quantized to signed 16-bit integers (`i16`). Uses branchless tensor multiplexing to concatenate White/Black points of view into a unified $256$-dimensional vector.
+  - **Input Layer:** $10 \times 11 \times 64 = 7040$ sparse features mapping active piece-square configurations relative to your own active King's position.
+  - **Accumulator Layer:** Shapes into $(7040, 256)$ weights quantized to signed 16-bit integers (`i16`). Uses branchless tensor multiplexing to concatenate White/Black points of view into a unified $256$-dimensional vector.
     - *Activation:* Clipped/Bounded Linear ReLU ($\text{ReLU1}$) bounded strictly between `0.0` and `1.0`.
   - **Hidden Layer 2:** Matrix transformation mapping $(256*2, 32)$ quantized to signed 8-bit weights (`i8`) and 32-bit biases (`i32`).
     - *Activation:* Clipped/Bounded Linear ReLU ($\text{ReLU1}$) bounded strictly between `0.0` and `1.0`.
@@ -78,20 +78,22 @@
 
     * **Final Operational Phase Split:** **20.00% Early** / **45.00% Mid** / **35.00% Late**
 
-    | Score Phase | Early (Opening) | Mid (Midgame) | Late (All Endgames) | Total By Type |
+    | Score Phase & Advantage Tier | Early (Opening) | Mid (Midgame) | Late (All Endgames) | Total By Advantage |
     | :--- | :---: | :---: | :---: | :---: |
-    | **`0` to `45 cp` (Dead Equal)** | 8.00% | 14.00% | 11.00% | **33.00%** |
-    | **`45` to `95 cp` (Slight Pull)** | 6.00% | 12.00% | 10.00% | **28.00%** |
-    | **`95` to `175 cp` (Micro Advantage)** | 3.50% | 10.00% | 8.50% | **22.00%** |
-    | **`175` to `350 cp` (Solid Edge)** | 1.50% | 6.50% | 4.00% | **12.00%** |
-    | **`350` to `600 cp` (Clear Dominance)** | 0.70% | 2.00% | 1.00% | **3.70%** |
+    | **`0` to `45 cp` (Dead Equal)** | 10.00% | 14.50% | 11.00% | **35.50%** |
+    | **`45` to `95 cp` (Slight Pull)** | 7.50% | 14.00% | 4.00% | **25.50%** |
+    | **`95` to `175 cp` (Micro Advantage)** | 6.50% | 11.50% | 2.20% | **20.20%** |
+    | **`175` to `350 cp` (Solid Edge)** | 2.50% | 7.00% | 4.00% | **13.50%** |
+    | **`350` to `600 cp` (Clear Dominance)** | 1.00% | 2.00% | 1.00% | **4.00%** |
     | **`600` to `1500 cp` (Decisive Zone)** | 0.30% | 0.50% | 0.50% | **1.30%** |
-    | **Total By Phase** | **20.00%** | **45.00%** | **35.00%** | **100.00%** |
+    | **Total By Game Phase** | **27.80%** | **49.50%** | **22.70%** | **100.00%** |
 
     #### Piece Count Definitions by Game Phase
-    * **Early (Opening):** >= 26 active pieces remaining on the board / Min Depth 26
-    * **Mid (Midgame):** 13 to 25 active pieces remaining on the board / Min Depth 28
-    * **Late (All Endgames):** <= 13 active pieces remaining on the board / Min Depth 32
+    * **Early (Opening):** >= 26 active pieces remaining on the board
+    * **Mid (Midgame):** 13 to 25 active pieces remaining on the board 
+    * **Late (All Endgames):** <= 13 active pieces remaining on the board
+
+    Min Depth 26
 
     ### **2. Dataset Stratification**
 
