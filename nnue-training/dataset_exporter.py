@@ -207,7 +207,7 @@ def parse_fen_to_features(fen_string):
 
 
 def is_invalid_training_row(depth_str) -> bool:
-    return int(depth_str) < 20
+    return int(depth_str) < 26
 
 def pad_indices(a_idx, p_idx):
     a_pad = np.full(MAX_PIECES, INPUT_FEATURES, dtype=np.int32)
