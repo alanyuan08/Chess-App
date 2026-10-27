@@ -303,19 +303,16 @@ impl SearchWorker {
     }
 
     // Store Killer Move - No Captures (Entirely Branchless)
-    fn store_killer_move(&mut self, new_killer_move: ForwardMove, ply: i16) {
+    pub fn store_killer_move(&mut self, new_killer_move: ForwardMove, ply: i16) {
         let ply_idx = (ply as usize) & 127;
 
         let k0 = self.killer_move_table[ply_idx][0];
         let k1 = self.killer_move_table[ply_idx][1];
 
-        // Evaluate match statuses
         let match_k0 = k0 == new_killer_move;
         let match_k1 = k1 == new_killer_move;
 
-        // Determine the next state for Slot 0 and Slot 1 
-        // These clean conditional selections compile to zero-branch hardware instructions (CMOV)
-        let next_slot0 = if match_k0 { k0 } else { new_killer_move };
+        let next_slot0 = if match_k0 { k0 } else if match_k1 { k1 } else { new_killer_move };
         let next_slot1 = if match_k0 { k1 } else { k0 };
 
         // Save states back down into the table
