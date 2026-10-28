@@ -68,7 +68,7 @@
 - **Training Data:** The model is trained on **394,669,566 chess positions** sourced from the [Lichess Chess Position Evaluations](https://huggingface.co/datasets/Lichess/chess-position-evaluations) dataset, which features evaluations calculated by Stockfish at various depths. To ensure an even and unbiased distribution, the training and validation sets utilize separate shards, and the training data is thoroughly shuffled.
 
 - **Preprocessing & Data Preparation:**
-  - **Quiet Position Filtering:** The dataset is filtered to include only "quiet" positions. Board states are excluded if the king is in check, an immediate tactical win is available via captures, or a forced checkmate sequence exists. It also filters out positions with 6+ pawn advantage
+  - **Quiet Position Filtering:** The dataset is filtered to include only "quiet" positions. Board states are excluded if the king is in check, an immediate tactical win is available via captures, or a forced checkmate sequence exists. It also filters out positions with 6+ pawn advantage and filter out all positions under Depth 26 to remove positions from 1 Second Blitz or 3 Minute Games.
 
   - **Data Augmentation & DeDuplication:** The filtered positions are augmented by rotating each board state 180 degrees. The positions are then deduplicationed. This yields a total of **392,386,524 unique positions**.
 
@@ -92,8 +92,6 @@
     * **Mid (Midgame):** 13 to 25 active pieces remaining on the board 
     * **Late (All Endgames):** <= 13 active pieces remaining on the board
 
-    Min Depth 26 to remove positions from 1 Second Blitz or 3 Minute Games 
-
     ### **2. Dataset Stratification (Post-Reduce)**
 
     | Strata Key | Raw Count | Target Pct | Target Count | Factor |
@@ -114,6 +112,8 @@
     | `late_solid_edge` | 2,962,220 | 2.5% | 2,610,309 | 0.88x |
     | `late_clear_dominance` | 5,975,632 | 1.0% | 1,044,123 | 0.17x |
     | **TOTALS** | **208,733,673** | **100.0%** | **102,211,583** | — |
+
+    Downscaling will sample positions proportionally from the 10 king buckets and will prioritze deeper evaluations.
 
 - **Training Configuration:**
     - **Target Optimization & Value Mapping:** The model transforms raw evaluation scores ($y_{\text{pawn}}$) into a bounded win probability scale $[0.0, 1.0]$, where 1.0 represents a guaranteed win, 0.5 a draw, and 0.0 a loss. This bounding suppresses extreme outliers and forces the network to focus its learning capacity on highly competitive positions.

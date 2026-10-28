@@ -168,23 +168,37 @@ def _worker_process_bucket_group(
             target_rows = int(len(sub_df) * fraction)
             
             if fraction <= 1.0:
-                # Sort by king_bucket and depth descending to prioritize high-value endgame metrics
-                sub_df_sorted = sub_df.sort(by=["king_bucket", "depth"], descending=[True, True])
-                sub_df_slice = sub_df_sorted.head(target_rows)
+                # 1. Calculate the target rows required per physical bucket head
+                # Prevents high buckets from over-consuming the global allocation
+                target_per_bucket = max(1, target_rows // 10)
                 
-                sub_df_shuffled = sub_df_slice.sample(fraction=1.0, shuffle=True, seed=1337 + bucket_id)
+                # 2. Arrange buckets linearly (0->9) but push the deepest calculations to the top
+                sub_df_slice = (
+                    sub_df
+                    .sort(by=["king_bucket", "depth"], descending=[False, True])
+                    .group_by("king_bucket")
+                    .head(target_per_bucket)
+                )
+                
+                # 3. Secure a bulletproof, unique dynamic seed based on the slice schema shape
+                dynamic_seed = 1337 + sub_df_slice.shape[0]
+                sub_df_shuffled = sub_df_slice.sample(fraction=1.0, shuffle=True, seed=dynamic_seed)
                 bucket_strata.append(sub_df_shuffled)
             else:
-                # Pad starved strata cleanly without over-duplicating noise
+                # 1. Pull the deepest unique engine calculations first across all buckets cleanly
                 sub_df_starved = (
-                    sub_df.sort(by=["king_bucket", "depth"], descending=[True, True])
+                    sub_df
+                    .sort(by=["king_bucket", "depth"], descending=[False, True])
                     .unique(subset=["fen"], keep="first")
                 )
-                sub_df_shuffled = sub_df_starved.sample(fraction=1.0, shuffle=True, seed=1337 + bucket_id)
+                
+                dynamic_seed = 1337 + sub_df_starved.shape[0]
+                sub_df_shuffled = sub_df_starved.sample(fraction=1.0, shuffle=True, seed=dynamic_seed)
                 
                 full_replications = int(fraction)
                 remainder_fraction = fraction - full_replications
                 
+                # 2. Pad starved strata evenly
                 for _ in range(full_replications):
                     bucket_strata.append(sub_df_shuffled)
                 
