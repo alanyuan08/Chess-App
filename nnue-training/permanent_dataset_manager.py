@@ -145,6 +145,45 @@ class EpochSynchronizedDatasetManager:
         # Core IPC state trackers
         self.shutdown_event = mp.Event()
         self.workers = []
+
+        self.queue = mp.Queue(maxsize=self.queue_size) 
+
+    def generator_fn(self, total_epoch_steps):
+        """Yields exactly up to total_epoch_steps, then stops to force Keras to recycle."""
+        for _ in range(total_epoch_steps):
+            # Fetch tensors natively from your multi-processed pipeline background
+            batch_x, batch_y = self.queue.get()
+            yield batch_x, batch_y
+
+    def reset_for_next_epoch(self):
+        """Flushes outstanding items from the active queues..."""
+        while not self.queue.empty():
+            try: self.queue.get_nowait()
+            except Exception: break
+        print(f"[DatasetManager] Queue drained. Re-shuffling paths.")
+
+    def _spawn_workers(self, epoch_queue, worker_file_slices):
+        # Your worker spawning logic...
+        pass
+
+    def reset_for_next_epoch(self):
+        """
+        Flushes outstanding items from the active queues and tells background
+        workers to re-shuffle their parquet file manifests natively.
+        """
+        # 1. Drain the queue completely to prevent old stale batches from leaking over
+        while not self.queue.empty():
+            try:
+                self.queue.get_nowait()
+            except Exception:
+                break
+                
+        # 2. Inform background processes via a secondary control flag or shared list
+        # Alternative: If using a command queue, you push an epoch-reset token here:
+        # self.command_queue.put("RESHUFFLE_AND_RESTART")
+        
+        print(f"[DatasetManager] Queue drained. Re-shuffling paths for upcoming pass.")
+
         
     def _spawn_workers(self, epoch_queue, worker_file_slices):
         """

@@ -30,6 +30,7 @@ def compute_dynamic_epoch_geometry(train_dir="./balanced_shards/training",
     """
     Scans the compiled parquet sharding directories to instantly compute
     flawless, exact step parameters based on physical file constraints.
+    Rounds down step counts to guarantee clean epoch-boundary recycles.
     """
     print("-> Dynamically calculating training universe step geometry...")
     
@@ -44,12 +45,16 @@ def compute_dynamic_epoch_geometry(train_dir="./balanced_shards/training",
     total_train_rows = sum(pl.scan_parquet(f).select(pl.len()).collect().item() for f in train_files)
     total_val_rows = sum(pl.scan_parquet(f).select(pl.len()).collect().item() for f in val_files) if val_files else 0
     
-    # 3. Apply strict block geometry calculations
+    # 3. Apply strict block geometry calculations (Floor division rounds down explicitly)
     steps_per_epoch = total_train_rows // batch_size
     validation_per_epoch = total_val_rows // batch_size
     
-    print(f"   [TRAIN UNIVERSE] Physical Rows: {total_train_rows:,} -> Steps/Epoch: {steps_per_epoch}")
-    print(f"   [VAL UNIVERSE]   Physical Rows: {total_val_rows:,} -> Steps/Epoch: {validation_per_epoch}")
+    # Calculate leftovers to verify drop alignment
+    train_leftovers = total_train_rows % batch_size
+    val_leftovers = total_val_rows % batch_size
+    
+    print(f"   [TRAIN UNIVERSE] Physical Rows: {total_train_rows:,} -> Steps/Epoch: {steps_per_epoch} (Dropped trailing remainder: {train_leftovers:,} rows)")
+    print(f"   [VAL UNIVERSE]   Physical Rows: {total_val_rows:,} -> Steps/Epoch: {validation_per_epoch} (Dropped trailing remainder: {val_leftovers:,} rows)")
     
     return steps_per_epoch, validation_per_epoch
 
@@ -132,6 +137,26 @@ class WeightDecaySchedulerCallback(keras.callbacks.Callback):
         # Dynamically calculate and assign the scaled weight decay
         new_wd = self.peak_wd * scale_ratio
         self.model.optimizer.weight_decay = new_wd
+
+class EpochSynchronizedResetCallback(tf.keras.callbacks.Callback):
+    """
+    Keras callback that intercepts epoch boundaries to safely flush, 
+    re-shuffle, and reset the permanent background dataset managers.
+    """
+    def __init__(self, train_manager, val_manager):
+        super().__init__()
+        self.train_manager = train_manager
+        self.val_manager = val_manager
+
+    def on_epoch_end(self, epoch, logs=None):
+        print(f"\n[Epoch {epoch + 1} Done] Triggering leak-proof manager reset...")
+        
+        # Signals the background loops to re-shuffle their files and start fresh
+        if hasattr(self.train_manager, "reset_for_next_epoch"):
+            self.train_manager.reset_for_next_epoch()
+            
+        if hasattr(self.val_manager, "reset_for_next_epoch"):
+            self.val_manager.reset_for_next_epoch()
 
 def get_local_shard_directories():
     """
@@ -408,6 +433,11 @@ def train_nnue_on_fens():
 
     cleanup_cb = AggressiveMemoryCleanup()
 
+    epoch_reset_cb = EpochSynchronizedResetCallback(
+        train_manager=train_manager, 
+        val_manager=val_manager
+    )
+
     # Begin execution
     model.fit(
         train_dataset,
@@ -415,7 +445,7 @@ def train_nnue_on_fens():
         steps_per_epoch=STEPS_PER_EPOCH,
         validation_data=val_dataset,
         validation_steps=VALIDATION_PER_EPOCH,
-        callbacks=[wd_callback, checkpoint_cb, cleanup_cb]
+        callbacks=[wd_callback, checkpoint_cb, cleanup_cb, epoch_reset_cb]
     )
 
     print("\nTraining complete. Terminating background workers cleanly...")

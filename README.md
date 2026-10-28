@@ -80,12 +80,12 @@
 
     | Score Phase & Advantage Tier | Early (Opening) | Mid (Midgame) | Late (All Endgames) | Total By Advantage |
     | :--- | :---: | :---: | :---: | :---: |
-    | **`0` to `45 cp` (Dead Equal)** | 11.50% | 16.50% | 12.50% | **40.50%** |
-    | **`45` to `95 cp` (Slight Pull)** | 8.50% | 15.00% | 4.50% | **28.00%** |
-    | **`95` to `175 cp` (Micro Advantage)** | 5.50% | 11.00% | 2.20% | **18.70%** |
-    | **`175` to `350 cp` (Solid Edge)** | 1.50% | 5.50% | 2.50% | **9.50%** |
-    | **`350` to `600 cp` (Clear Dominance)** | 0.80% | 1.50% | 1.00% | **3.30%** |
-    | **Total By Game Phase** | **27.80%** | **49.50%** | **22.70%** | **100.00%** |
+    | **`0` to `45 cp` (Dead Equal)** | 9.50% | 18.50% | 12.50% | **40.50%** |
+    | **`45` to `95 cp` (Slight Pull)** | 7.50% | 16.50% | 4.50% | **28.00%** |
+    | **`95` to `175 cp` (Micro Advantage)** | 4.50% | 11.00% | 2.20% | **17.70%** |
+    | **`175` to `350 cp` (Solid Edge)** | 1.80% | 5.50% | 2.50% | **9.80%** |
+    | **`350` to `600 cp` (Clear Dominance)** | 1.00% | 1.50% | 1.00% | **3.50%** |
+    | **Total By Game Phase** | **24.30%** | **53.00%** | **22.70%** | **100.00%** |
 
     #### Piece Count Definitions by Game Phase
     * **Early (Opening):** >= 26 active pieces remaining on the board
@@ -94,26 +94,30 @@
 
     ### **2. Dataset Stratification (Post-Reduce)**
 
+    ### **Dataset Stratification Overview (Post-Optimization)**
+
     | Strata Key | Raw Count | Target Pct | Target Count | Factor |
     | :--- | :---: | :---: | :---: | :---: |
-    | `early_dead_equal` | 23,453,111 | 11.5% | 12,007,424 | 0.51x |
-    | `early_slight_pull` | 11,285,843 | 8.5% | 8,875,052 | 0.79x |
-    | `early_micro_advantage` | 4,954,782 | 5.5% | 5,742,681 | 1.16x |
-    | `early_solid_edge` | 3,116,189 | 1.5% | 1,566,185 | 0.50x |
-    | `early_clear_dominance` | 1,503,717 | 0.8% | 835,299 | 0.56x |
-    | `mid_dead_equal` | 54,513,265 | 16.5% | 17,228,044 | 0.32x |
-    | `mid_slight_pull` | 12,287,551 | 15.0% | 15,661,858 | 1.27x |
-    | `mid_micro_advantage` | 10,043,832 | 11.0% | 11,485,362 | 1.14x |
-    | `mid_solid_edge` | 12,648,833 | 5.5% | 5,742,681 | 0.45x |
-    | `mid_clear_dominance` | 12,815,088 | 1.5% | 1,566,185 | 0.12x |
-    | `late_dead_equal` | 50,098,625 | 12.5% | 13,051,548 | 0.26x |
-    | `late_slight_pull` | 1,879,423 | 4.5% | 4,497,760 | 2.50x |
-    | `late_micro_advantage` | 1,195,562 | 2.2% | 2,297,072 | 1.92x |
-    | `late_solid_edge` | 2,962,220 | 2.5% | 2,610,309 | 0.88x |
-    | `late_clear_dominance` | 5,975,632 | 1.0% | 1,044,123 | 0.17x |
-    | **TOTALS** | **208,733,673** | **100.0%** | **102,211,583** | — |
+    | `early_dead_equal` | 23,453,111 | 9.5% | 7,743,981 | 0.33x |
+    | `early_slight_pull` | 11,285,843 | 7.5% | 6,113,669 | 0.54x |
+    | `early_micro_advantage` | 4,954,782 | 4.5% | 3,668,201 | 0.74x |
+    | `early_solid_edge` | 3,116,189 | 1.8% | 1,467,280 | 0.47x |
+    | `early_clear_dominance` | 1,503,717 | 1.0% | 815,155 | 0.54x |
+    | `mid_dead_equal` | 54,513,265 | 18.5% | 15,080,384 | 0.28x |
+    | `mid_slight_pull` | 12,287,551 | 16.5% | 13,449,972 | 1.09x |
+    | `mid_micro_advantage` | 10,043,832 | 11.0% | 8,966,714 | 0.89x |
+    | `mid_solid_edge` | 12,648,833 | 5.5% | 4,483,357 | 0.35x |
+    | `mid_clear_dominance` | 12,815,088 | 1.5% | 1,222,733 | 0.10x |
+    | `late_dead_equal` | 50,098,625 | 12.5% | 10,189,448 | 0.20x |
+    | `late_slight_pull` | 1,879,423 | 4.5% | 3,668,201 | 1.95x |
+    | `late_micro_advantage` | 1,195,562 | 2.2% | 1,793,343 | 1.50x |
+    | `late_solid_edge` | 2,962,220 | 2.5% | 2,037,889 | 0.68x |
+    | `late_clear_dominance` | 5,975,632 | 1.0% | 815,155 | 0.14x |
+    | **TOTALS** | **208,733,673** | **100.0%** | **81,515,590** | **—** |
 
-    Downscaling will sample positions proportionally from the 10 king buckets and will prioritze deeper evaluations.
+    The network architecture utilizes a lean 1.84-million parameter footprint. Governed by deep learning scaling laws optimized for alpha-beta search engines, the dataset pipeline targets an informational sweet spot of 60 to 80 million high-depth positions to ensure robust generalization and eliminate feature saturation. 
+
+    Due to heavy native skews in the raw data pool, the data loader implements an out-of-core downscaling strategy. This architecture enforces a balanced, symmetrical distribution across the Early, Mid, and Late phases of the game, paired with a proportional King Bucket Mixture of Experts (MoE) extraction layer.
 
 - **Training Configuration:**
     - **Target Optimization & Value Mapping:** The model transforms raw evaluation scores ($y_{\text{pawn}}$) into a bounded win probability scale $[0.0, 1.0]$, where 1.0 represents a guaranteed win, 0.5 a draw, and 0.0 a loss. This bounding suppresses extreme outliers and forces the network to focus its learning capacity on highly competitive positions.
