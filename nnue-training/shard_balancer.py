@@ -144,14 +144,26 @@ def _worker_process_bucket_group(
     CHUNK_SIZE = 8192
     shard_idx = 0
     
+    # Define your exact canonical column ordering to eliminate vstack layout drift
+    CANONICAL_COLUMNS = [
+        "active_indices", 
+        "passive_indices", 
+        "target", 
+        "depth", 
+        "fen", 
+        "king_bucket", 
+        "strata_key"
+    ]
+    
     for bucket_id in bucket_ids:
         frag_pattern = os.path.join(source_dir, f"bucket_{bucket_id}_raw_*.parquet")
         fragments = glob.glob(frag_pattern)
         if not fragments:
             continue
             
-        # 1. Native Fast Concat for a SINGLE bucket index
-        df_processed = pl.concat([pl.read_parquet(f) for f in fragments])
+        # 1. Native Fast Parallel Read for all matching bucket fragments at once
+        df_processed = pl.read_parquet(frag_pattern)
+        df_processed = df_processed.select(CANONICAL_COLUMNS)
         
         # Immediate disk cleanup of raw fragments to save hosting storage space
         for frag_path in fragments:
@@ -169,7 +181,6 @@ def _worker_process_bucket_group(
             
             if fraction <= 1.0:
                 # 1. Calculate the target rows required per physical bucket head
-                # Prevents high buckets from over-consuming the global allocation
                 target_per_bucket = max(1, target_rows // 10)
                 
                 # 2. Arrange buckets linearly (0->9) but push the deepest calculations to the top
@@ -183,7 +194,8 @@ def _worker_process_bucket_group(
                 # 3. Secure a bulletproof, unique dynamic seed based on the slice schema shape
                 dynamic_seed = 1337 + sub_df_slice.shape[0]
                 sub_df_shuffled = sub_df_slice.sample(fraction=1.0, shuffle=True, seed=dynamic_seed)
-                bucket_strata.append(sub_df_shuffled)
+                
+                bucket_strata.append(sub_df_shuffled.select(CANONICAL_COLUMNS))
             else:
                 # 1. Pull the deepest unique engine calculations first across all buckets cleanly
                 sub_df_starved = (
@@ -194,6 +206,7 @@ def _worker_process_bucket_group(
                 
                 dynamic_seed = 1337 + sub_df_starved.shape[0]
                 sub_df_shuffled = sub_df_starved.sample(fraction=1.0, shuffle=True, seed=dynamic_seed)
+                sub_df_shuffled = sub_df_shuffled.select(CANONICAL_COLUMNS)
                 
                 full_replications = int(fraction)
                 remainder_fraction = fraction - full_replications
@@ -233,12 +246,11 @@ def _worker_process_bucket_group(
             shard_idx += 1
 
         # 5. FORCE MEMORY PURGE BEFORE THE NEXT LOOP ITERATION
-        # This completely drops the local dataframe scopes and clears the cache lines
         del df_processed
         del bucket_strata
         del df_bucket_pool
         del df_final_shuffled
-        gc.collect() 
+        gc.collect()
 
 def produce_strict_blocks_parallel(
     source_dir, 
