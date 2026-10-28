@@ -46,7 +46,6 @@ def get_strata_expressions():
         .when(abs_score_expr <= 1.75).then(pl.lit("micro_advantage"))
         .when(abs_score_expr <= 3.50).then(pl.lit("solid_edge"))
         .when(abs_score_expr <= 6.00).then(pl.lit("clear_dominance"))    
-        .when(abs_score_expr <= 15.00).then(pl.lit("decisive_zone"))
         .otherwise(pl.lit("dropped")) 
     )
 
@@ -361,22 +360,31 @@ def run_unified_mixer_balancer():
 
     # 2. Define stratified amplification limits by phase to eliminate over-fitting risks
     AMPLIFICATION_LIMITS = {
-        "early": 1.5,   # Avoids over-memorizing specific engine opening lines
-        "mid": 2.0,     # Protects middlegame tactical volatility horizons
-        "late": 2.5     # Safely upscales scarce, pure depth-32+ endgames
+        "early": 1.5,
+        "mid": 2.0,
+        "late": 2.5
     }
 
     TARGET_RATIOS = {
-        "early_dead_equal": 0.100, "early_slight_pull": 0.075, "early_micro_advantage": 0.065,
-        "early_solid_edge": 0.025, "early_clear_dominance": 0.010, "early_decisive_zone": 0.003,
+        "early_dead_equal": 0.115, 
+        "early_slight_pull": 0.085, 
+        "early_micro_advantage": 0.055,
+        "early_solid_edge": 0.015, 
+        "early_clear_dominance": 0.008,
         
-        "mid_dead_equal": 0.145, "mid_slight_pull": 0.140, "mid_micro_advantage": 0.115,
-        "mid_solid_edge": 0.070, "mid_clear_dominance": 0.020, "mid_decisive_zone": 0.005,  
+        "mid_dead_equal": 0.165, 
+        "mid_slight_pull": 0.150, 
+        "mid_micro_advantage": 0.110,
+        "mid_solid_edge": 0.055, 
+        "mid_clear_dominance": 0.015,
         
-        "late_dead_equal": 0.110, "late_slight_pull": 0.040, "late_micro_advantage": 0.022,
-        "late_solid_edge": 0.040, "late_clear_dominance": 0.010, "late_decisive_zone": 0.005,
+        "late_dead_equal": 0.125, 
+        "late_slight_pull": 0.045, 
+        "late_micro_advantage": 0.022,
+        "late_solid_edge": 0.025, 
+        "late_clear_dominance": 0.010,
     }
-    
+        
     max_possible_scale = float('inf')
     missing_strata = []
     

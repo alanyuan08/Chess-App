@@ -58,7 +58,6 @@ STEPS_PER_EPOCH, VALIDATION_PER_EPOCH = compute_dynamic_epoch_geometry(
     val_dir="./balanced_shards/validation",
     batch_size=BATCH_SIZE
 )
-WARMUP_STEPS = int(STEPS_PER_EPOCH * 0.25) 
 
 # Mixed Data Sets
 CLEAN_DATASET_DIR = "./balanced_shards" 
@@ -74,47 +73,65 @@ class AggressiveMemoryCleanup(keras.callbacks.Callback):
 
 # --- THE TELEMETRY TRACKER CALLBACK ---
 @keras.utils.register_keras_serializable(package="CustomSchedules")
-class CustomWarmupCosineSchedule(keras.optimizers.schedules.LearningRateSchedule):
-    def __init__(self, warmup_steps, cosine_schedule, initial_lr=1e-6):
-        super().__init__()
-        self.warmup_steps = warmup_steps
-        self.cosine_schedule = cosine_schedule
-        self.initial_lr = initial_lr
-        
-        # Dynamically extract peak LR from the underlying cosine schedule config
-        if hasattr(cosine_schedule, 'initial_learning_rate'):
-            self.peak_lr = cosine_schedule.initial_learning_rate
-        else:
-            # Fallback if config structure varies
-            self.peak_lr = cosine_schedule.get_config().get('initial_learning_rate', 3e-4)
+class CustomWarmupCosineSchedule(keras.optimizers.schedules.CosineDecay):
+    def __init__(self, initial_learning_rate, decay_steps, warmup_steps, alpha=0.0167, initial_lr=1e-6, weight_decay_ratio=None):
+        # Initialize the underlying Keras CosineDecay schedule natively
+        super().__init__(initial_learning_rate=initial_learning_rate, decay_steps=decay_steps, alpha=alpha)
+        self.warmup_steps = int(warmup_steps)
+        self.initial_lr = float(initial_lr)
+        self.weight_decay_ratio = float(weight_decay_ratio) if weight_decay_ratio is not None else None
 
     def __call__(self, step):
         step_f = tf.cast(step, tf.float32)
         warmup_steps_f = tf.cast(self.warmup_steps, tf.float32)
+        peak_lr_f = tf.cast(self.initial_learning_rate, tf.float32)
         
-        # Epoch 1: Linear upward ramp
-        warmup_lr = self.initial_lr + (self.peak_lr - self.initial_lr) * (step_f / warmup_steps_f)
+        # 1. Linear upward warmup ramp
+        warmup_lr = self.initial_lr + (peak_lr_f - self.initial_lr) * (step_f / warmup_steps_f)
         
-        # Epochs 2-30: Native Cosine Decay tracking steps past warmup
+        # 2. Native Cosine Decay tracking steps past warmup
         decay_step = tf.maximum(step_f - warmup_steps_f, 0.0)
-        cosine_lr = self.cosine_schedule(decay_step)
+        cosine_lr = super().__call__(decay_step)
         
-        # Graph-safe conditional selection
-        return tf.where(step_f < warmup_steps_f, warmup_lr, cosine_lr)
+        # 3. Graph-safe conditional selection
+        current_lr = tf.where(step_f < warmup_steps_f, warmup_lr, cosine_lr)
+        
+        # Scale output if this instance behaves as a decoupled weight decay tracker
+        if self.weight_decay_ratio is not None:
+            return current_lr * self.weight_decay_ratio
+            
+        return current_lr
 
     def get_config(self):
-        # Must return primitive types or serializable Keras objects
-        return {
+        config = super().get_config()
+        config.update({
             "warmup_steps": self.warmup_steps,
-            "cosine_schedule": keras.optimizers.schedules.serialize(self.cosine_schedule),
-            "initial_lr": self.initial_lr
-        }
+            "initial_lr": self.initial_lr,
+            "weight_decay_ratio": self.weight_decay_ratio
+        })
+        return config
 
-    @classmethod
-    def from_config(cls, config):
-        # Correctly deserializes the nested schedule upon loading
-        config["cosine_schedule"] = keras.optimizers.schedules.deserialize(config["cosine_schedule"])
-        return cls(**config)
+class WeightDecaySchedulerCallback(keras.callbacks.Callback):
+    def __init__(self, schedule_instance, peak_wd=0.01):
+        super().__init__()
+        self.schedule = schedule_instance
+        self.peak_wd = peak_wd
+        # Target peak LR to extract current scale factor
+        self.peak_lr = schedule_instance.initial_learning_rate
+
+    def on_train_batch_begin(self, batch, logs=None):
+        # Retrieve the true current global training step from the optimizer
+        global_step = self.model.optimizer.iterations
+        
+        # Query your custom schedule to get the active learning rate
+        current_lr = self.schedule(global_step)
+        
+        # Calculate scale ratio (current_lr / peak_lr)
+        scale_ratio = current_lr / self.peak_lr
+        
+        # Dynamically calculate and assign the scaled weight decay
+        new_wd = self.peak_wd * scale_ratio
+        self.model.optimizer.weight_decay = new_wd
 
 def get_local_shard_directories():
     """
@@ -130,7 +147,7 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
     with open(file_path, "wb") as f:
         print("--- Commencing Weight Quantization & Serialization for Rust ---")
         
-        # 1. Accumulator Layer (7040 -> 1024)
+        # 1. Accumulator Layer (7040 -> 256)
         # Input: Binary (0/1) | Weights: i16 | Bias/Output Accumulator: i32
         acc_layer = model.get_layer("accumulator_layer")
         embedding_weights = acc_layer.get_weights()[0]
@@ -312,23 +329,25 @@ def train_nnue_on_fens():
         return tf.math.divide_no_nan(total_error, valid_count)
 
     # 2. Bind directly to your engineered AdamW
-    base_cosine_schedule = keras.optimizers.schedules.CosineDecay(
-        initial_learning_rate=3e-4,
-        decay_steps=(TOTAL_EPOCHS - 1) * STEPS_PER_EPOCH,
-        alpha=0.0167
-    )
-    
+    decay_steps_calculated = (TOTAL_EPOCHS - 1) * STEPS_PER_EPOCH
+
+    # Keep the schedule strictly on the learning rate
     lr_schedule = CustomWarmupCosineSchedule(
-        warmup_steps=STEPS_PER_EPOCH, 
-        cosine_schedule=base_cosine_schedule
+        initial_learning_rate=3e-4,
+        decay_steps=decay_steps_calculated,
+        warmup_steps=STEPS_PER_EPOCH,
+        alpha=0.0167,
+        initial_lr=1e-6
     )
 
+    # Initialize AdamW with a simple float for weight decay
     stockfish_optimizer = keras.optimizers.AdamW(
         learning_rate=lr_schedule,
-        weight_decay=0.01,
+        weight_decay=0.01, # Initialize with maximum desired weight decay
         epsilon=1e-8,
         global_clipnorm=1.0
     )
+
     # --- Compile the model ---
     model.compile(
         optimizer=stockfish_optimizer,
@@ -374,6 +393,11 @@ def train_nnue_on_fens():
     ).prefetch(tf.data.AUTOTUNE)
 
     print("\n--- Model compilation complete. Commencing Training Step ---")
+    wd_callback = WeightDecaySchedulerCallback(
+        schedule_instance=lr_schedule, 
+        peak_wd=0.01
+    )
+
     checkpoint_path = "best_chess_nnue.keras"
     checkpoint_cb = tf.keras.callbacks.ModelCheckpoint(
         filepath=checkpoint_path,
@@ -384,14 +408,14 @@ def train_nnue_on_fens():
 
     cleanup_cb = AggressiveMemoryCleanup()
 
-    # Train model execution call
+    # Begin execution
     model.fit(
-        train_dataset, 
+        train_dataset,
+        epochs=TOTAL_EPOCHS,
         steps_per_epoch=STEPS_PER_EPOCH,
-        epochs=TOTAL_EPOCHS, 
         validation_data=val_dataset,
         validation_steps=VALIDATION_PER_EPOCH,
-        callbacks=[checkpoint_cb, cleanup_cb]
+        callbacks=[wd_callback, checkpoint_cb, cleanup_cb]
     )
 
     print("\nTraining complete. Terminating background workers cleanly...")

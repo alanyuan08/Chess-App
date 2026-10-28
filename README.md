@@ -68,7 +68,7 @@
 - **Training Data:** The model is trained on **394,669,566 chess positions** sourced from the [Lichess Chess Position Evaluations](https://huggingface.co/datasets/Lichess/chess-position-evaluations) dataset, which features evaluations calculated by Stockfish at various depths. To ensure an even and unbiased distribution, the training and validation sets utilize separate shards, and the training data is thoroughly shuffled.
 
 - **Preprocessing & Data Preparation:**
-  - **Quiet Position Filtering:** The dataset is filtered to include only "quiet" positions. Board states are excluded if the king is in check, an immediate tactical win is available via captures, or a forced checkmate sequence exists.
+  - **Quiet Position Filtering:** The dataset is filtered to include only "quiet" positions. Board states are excluded if the king is in check, an immediate tactical win is available via captures, or a forced checkmate sequence exists. It also filters out positions with 6+ pawn advantage
 
   - **Data Augmentation & DeDuplication:** The filtered positions are augmented by rotating each board state 180 degrees. The positions are then deduplicationed. This yields a total of **392,386,524 unique positions**.
 
@@ -80,12 +80,11 @@
 
     | Score Phase & Advantage Tier | Early (Opening) | Mid (Midgame) | Late (All Endgames) | Total By Advantage |
     | :--- | :---: | :---: | :---: | :---: |
-    | **`0` to `45 cp` (Dead Equal)** | 10.00% | 14.50% | 11.00% | **35.50%** |
-    | **`45` to `95 cp` (Slight Pull)** | 7.50% | 14.00% | 4.00% | **25.50%** |
-    | **`95` to `175 cp` (Micro Advantage)** | 6.50% | 11.50% | 2.20% | **20.20%** |
-    | **`175` to `350 cp` (Solid Edge)** | 2.50% | 7.00% | 4.00% | **13.50%** |
-    | **`350` to `600 cp` (Clear Dominance)** | 1.00% | 2.00% | 1.00% | **4.00%** |
-    | **`600` to `1500 cp` (Decisive Zone)** | 0.30% | 0.50% | 0.50% | **1.30%** |
+    | **`0` to `45 cp` (Dead Equal)** | 11.50% | 16.50% | 12.50% | **40.50%** |
+    | **`45` to `95 cp` (Slight Pull)** | 8.50% | 15.00% | 4.50% | **28.00%** |
+    | **`95` to `175 cp` (Micro Advantage)** | 5.50% | 11.00% | 2.20% | **18.70%** |
+    | **`175` to `350 cp` (Solid Edge)** | 1.50% | 5.50% | 2.50% | **9.50%** |
+    | **`350` to `600 cp` (Clear Dominance)** | 0.80% | 1.50% | 1.00% | **3.30%** |
     | **Total By Game Phase** | **27.80%** | **49.50%** | **22.70%** | **100.00%** |
 
     #### Piece Count Definitions by Game Phase
@@ -123,10 +122,8 @@
 
 - **Training Configuration:**
     - **Target Optimization & Value Mapping:** The model transforms raw evaluation scores ($y_{\text{pawn}}$) into a bounded win probability scale $[0.0, 1.0]$, where 1.0 represents a guaranteed win, 0.5 a draw, and 0.0 a loss. This bounding suppresses extreme outliers and forces the network to focus its learning capacity on highly competitive positions.
-    - **Probability Smoothing Function:** To smooth out large evaluation spikes (such as $+4.00$ centipawn values) into stable target probabilities, raw scores are scaled before applying the sigmoid activation:
-      $$\text{Win Probability} = \sigma(y_{\text{pawn}} \times 0.639607)$$
     - **Loss Function:** Network performance is optimized using Mean Squared Error (MSE) between the predicted and target win probabilities: 
-      $$\text{MSE} = (Y_{\text{pred}} - Y_{\text{expected}})^2$$
+      $$\text{Win Probability} = \sigma(y_{\text{pawn}} \times 0.639607)$$
     - **Schedule & Batching Dynamics:** 
       * **Total Duration:** 30 epochs.
       * **Training Throughput:** 3,168 steps per epoch.
