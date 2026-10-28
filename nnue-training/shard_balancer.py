@@ -71,60 +71,45 @@ telemetry_lock = Lock()
 global_strata_counts = {}
 
 def process_single_shard(args):
-    """Worker function that processes a single shard path using Polars."""
-    i, path, piece_count_expr, strata_key_expr, NUM_BUCKETS, TEMP_TRAINING_DIR, TEMP_VAL_DIR = args
+    """Worker function that processes a single shard path using out-of-core Polars."""
+    i, path, strata_key_expr, num_buckets, temp_train_dir, temp_val_dir = args
     
-    # 1. Read and instantly clean local chunk on the thread
     df_shard = pl.read_parquet(path)
     if len(df_shard) == 0: 
         return
         
-    # 2. Add features and compute canonical FEN string mapping
-    # map_elements with strategy="thread_local" lets this thread compute its own subset safely
     df_filtered = df_shard.with_columns(
         pl.col("fen")
         .map_elements(to_canonical_fen, return_dtype=pl.String, strategy="thread_local")
         .alias("canonical_fen")
     )
     
-    # Hash canonical_fen so twins share identical keys and route together!
     df_filtered = df_filtered.with_columns([
         strata_key_expr,
         pl.col("canonical_fen").hash(seed=999).abs().alias("split_hash"),
         pl.col("canonical_fen").hash(seed=777).alias("mix_hash")
     ])
 
-    # Calculate routing bucket IDs based on your mixing entropy
-    df_filtered = df_filtered.with_row_index(name="row_idx")
     df_filtered = df_filtered.with_columns(
-        (pl.col("mix_hash").abs() % NUM_BUCKETS).alias("bucket_id")
+        (pl.col("mix_hash").abs() % num_buckets).alias("bucket_id")
     )
 
-    # 3. Secure Hash Split: Divert the 98% Train and 2% Validation rows cleanly
     df_train_chunk = df_filtered.filter(pl.col("split_hash") % 100 < 98)
     df_val_chunk = df_filtered.filter(pl.col("split_hash") % 100 >= 98)
 
-    # 4. Stream Training row allocations directly to raw disk bucket files
+    # Stream Training row allocations directly to raw disk bucket files
     if len(df_train_chunk) > 0:
-        # Secure concurrent access lock to update telemetry tracking metrics
-        counts = df_train_chunk.group_by("strata_key").len("count")
-        with telemetry_lock:
-            for row in counts.iter_rows(named=True):
-                k = row["strata_key"]
-                if "_dropped" in k: continue
-                global_strata_counts[k] = global_strata_counts.get(k, 0) + row["count"]
-
         for (b_id,), df_sub_bucket in df_train_chunk.group_by("bucket_id"):
             if len(df_sub_bucket) == 0: continue
-            frag_path = os.path.join(TEMP_TRAINING_DIR, f"bucket_{b_id}_raw_{i}.parquet")
-            df_sub_bucket.drop(["bucket_id", "row_idx", "split_hash"]).write_parquet(frag_path, compression="snappy")
+            frag_path = os.path.join(temp_train_dir, f"bucket_{b_id}_raw_{i}.parquet")
+            df_sub_bucket.drop(["bucket_id", "split_hash", "mix_hash"]).write_parquet(frag_path, compression="snappy")
 
-    # 5. Stream Validation row allocations directly to separate raw disk bucket files
+    # Stream Validation row allocations directly to separate raw disk bucket files
     if len(df_val_chunk) > 0:
         for (b_id,), df_sub_bucket in df_val_chunk.group_by("bucket_id"):
             if len(df_sub_bucket) == 0: continue
-            frag_path = os.path.join(TEMP_VAL_DIR, f"bucket_{b_id}_raw_{i}.parquet")
-            df_sub_bucket.drop(["bucket_id", "row_idx", "split_hash"]).write_parquet(frag_path, compression="snappy")
+            frag_path = os.path.join(temp_val_dir, f"bucket_{b_id}_raw_{i}.parquet")
+            df_sub_bucket.drop(["bucket_id", "split_hash", "mix_hash"]).write_parquet(frag_path, compression="snappy")
 
 def _worker_process_bucket_group(
     worker_id, 
@@ -135,24 +120,19 @@ def _worker_process_bucket_group(
     is_validation, 
     num_buckets, 
     retention_fractions, 
-    target_ratios
+    target_ratios,
+    strata_key_expr
 ):
-    """
-    Memory-optimized streaming worker process. Balances and writes shards 
-    one bucket at a time to prevent RAM starvation on massive datasets.
-    """
-    CHUNK_SIZE = 8192
+    """Memory-optimized streaming worker process. Balances and writes shards 1 bucket at a time."""
     shard_idx = 0
     
-    # Define your exact canonical column ordering to eliminate vstack layout drift
     CANONICAL_COLUMNS = [
         "active_indices", 
         "passive_indices", 
         "target", 
         "depth", 
         "fen", 
-        "king_bucket", 
-        "strata_key"
+        "king_bucket"
     ]
     
     for bucket_id in bucket_ids:
@@ -161,16 +141,19 @@ def _worker_process_bucket_group(
         if not fragments:
             continue
             
-        # 1. Native Fast Parallel Read for all matching bucket fragments at once
+        # 1. Native Parallel Read for all matching bucket fragments
         df_processed = pl.read_parquet(frag_pattern)
         df_processed = df_processed.select(CANONICAL_COLUMNS)
         
-        # Immediate disk cleanup of raw fragments to save hosting storage space
+        # Inject the dynamic, unified tracking evaluation column
+        df_processed = df_processed.with_columns([strata_key_expr])
+        
+        # Immediate disk cleanup of raw fragments to preserve storage space
         for frag_path in fragments:
             try: os.remove(frag_path)
             except OSError: pass
                 
-        # 2. Stratification and Extraction processing
+        # 2. Stratification and Proportional Extraction Processing
         bucket_strata = []
         for (strata_k,), sub_df in df_processed.group_by("strata_key"):
             fraction = retention_fractions.get(strata_k, 0.0)
@@ -180,10 +163,10 @@ def _worker_process_bucket_group(
             target_rows = int(len(sub_df) * fraction)
             
             if fraction <= 1.0:
-                # 1. Calculate the target rows required per physical bucket head
+                # Dynamically match your active global configuration bucket size
                 target_per_bucket = max(1, target_rows // 10)
                 
-                # 2. Arrange buckets linearly (0->9) but push the deepest calculations to the top
+                # Arrange buckets linearly and extract the deepest engine calculations first
                 sub_df_slice = (
                     sub_df
                     .sort(by=["king_bucket", "depth"], descending=[False, True])
@@ -191,27 +174,24 @@ def _worker_process_bucket_group(
                     .head(target_per_bucket)
                 )
                 
-                # 3. Secure a bulletproof, unique dynamic seed based on the slice schema shape
-                dynamic_seed = 1337 + sub_df_slice.shape[0]
+                dynamic_seed = 1337 + sub_df_slice.shape[0] + worker_id
                 sub_df_shuffled = sub_df_slice.sample(fraction=1.0, shuffle=True, seed=dynamic_seed)
-                
                 bucket_strata.append(sub_df_shuffled.select(CANONICAL_COLUMNS))
             else:
-                # 1. Pull the deepest unique engine calculations first across all buckets cleanly
+                # Pad starved strata cleanly by isolating unique high-depth items first
                 sub_df_starved = (
                     sub_df
                     .sort(by=["king_bucket", "depth"], descending=[False, True])
                     .unique(subset=["fen"], keep="first")
                 )
                 
-                dynamic_seed = 1337 + sub_df_starved.shape[0]
+                dynamic_seed = 1337 + sub_df_starved.shape[0] + worker_id
                 sub_df_shuffled = sub_df_starved.sample(fraction=1.0, shuffle=True, seed=dynamic_seed)
                 sub_df_shuffled = sub_df_shuffled.select(CANONICAL_COLUMNS)
                 
                 full_replications = int(fraction)
                 remainder_fraction = fraction - full_replications
                 
-                # 2. Pad starved strata evenly
                 for _ in range(full_replications):
                     bucket_strata.append(sub_df_shuffled)
                 
@@ -219,7 +199,6 @@ def _worker_process_bucket_group(
                 if remainder_count > 0:
                     bucket_strata.append(sub_df_shuffled.head(remainder_count))
 
-        # Skip to memory clearing if this specific bucket yielded no matching rows
         if not bucket_strata:
             del df_processed
             gc.collect()
@@ -235,7 +214,6 @@ def _worker_process_bucket_group(
         for start_row in range(0, total_bucket_rows, CHUNK_SIZE):
             df_chunk = df_final_shuffled.slice(start_row, CHUNK_SIZE)
             
-            # If the trailing slice is partial, skip it during training to protect array boundaries
             if len(df_chunk) < CHUNK_SIZE and not is_validation:
                 continue
                 
@@ -245,7 +223,6 @@ def _worker_process_bucket_group(
             df_chunk.write_parquet(out_path, compression="snappy")
             shard_idx += 1
 
-        # 5. FORCE MEMORY PURGE BEFORE THE NEXT LOOP ITERATION
         del df_processed
         del bucket_strata
         del df_bucket_pool
@@ -259,6 +236,7 @@ def produce_strict_blocks_parallel(
     num_buckets, 
     retention_fractions, 
     target_ratios, 
+    strata_key_expr,
     is_validation=False, 
     num_workers=4
 ):
@@ -281,7 +259,8 @@ def produce_strict_blocks_parallel(
             executor.submit(
                 _worker_process_bucket_group, 
                 w_id, worker_groups[w_id], source_dir, output_dir, file_prefix, 
-                is_validation, num_buckets, retention_fractions, target_ratios
+                is_validation, num_buckets, retention_fractions, target_ratios,
+                strata_key_expr
             ): w_id for w_id in range(num_workers)
         }
         
@@ -296,14 +275,12 @@ def produce_strict_blocks_parallel(
                 raise e
 
     # 3. Post-Process Scan for telemetry tracking
-    # Fast native file count avoids passing integer states across process pipes
     written_files = glob.glob(os.path.join(output_dir, f"{file_prefix}_worker_*_shard_*.parquet"))
     total_shards_written = len(written_files)
 
     print(f"[EXPORTED] Total of {total_shards_written} strict 8192 production shards written across all workers.")
         
     # 4. Clean up source directory now that workers have detached
-    # Removes raw un-balanced frag chunks to keep your storage pristine
     try:
         raw_remnants = glob.glob(os.path.join(source_dir, "*.parquet"))
         for f in raw_remnants:
@@ -313,7 +290,6 @@ def produce_strict_blocks_parallel(
         pass
         
     print(f"[SUCCESS] {mode_str} stream parallel compilation complete! Target: {output_dir}\n")
-
 
 def run_unified_mixer_balancer():
     os.makedirs(TRAIN_DIR, exist_ok=True)
@@ -356,6 +332,7 @@ def run_unified_mixer_balancer():
         list(executor.map(process_single_shard, task_arguments))
 
     print("--- Preprocessing Step Complete. Multi-threaded sharding finished. ---")
+    
     # =========================================================================
     # PHASE 2: Dynamic Capacity Scaling & Stratification Reporting
     # Bridges global bucketing matrices with the downstream block exporter
@@ -370,9 +347,11 @@ def run_unified_mixer_balancer():
         fragments = glob.glob(frag_pattern)
         if not fragments: continue
         
-        # Read only the strata column from the clean fragment to save speed
+        # Read the files natively, compute the strata_key column 
+        # on the fly in memory via expressions, and then run your group aggregations!
         df_counts = (
-            pl.concat([pl.read_parquet(f, columns=["strata_key"]) for f in fragments])
+            pl.concat([pl.read_parquet(f) for f in fragments])
+            .with_columns([strata_key_expr])
             .group_by("strata_key")
             .len("count")
         )
@@ -465,7 +444,7 @@ def run_unified_mixer_balancer():
     # PHASE 3: Streaming Bucket Balancing & Strict Block Production
     # =========================================================================
     
-    print("\n -> Phase 3: Stream Bucekt Balancing...")
+    print("\n -> Phase 3: Stream Bucket Balancing...")
     produce_strict_blocks_parallel(
         source_dir=TEMP_TRAINING_DIR,
         output_dir=TRAIN_DIR,
@@ -473,6 +452,7 @@ def run_unified_mixer_balancer():
         num_buckets=NUM_BUCKETS,
         retention_fractions=retention_fractions,
         target_ratios=TARGET_RATIOS,
+        strata_key_expr=strata_key_expr,
         is_validation=False,
         num_workers=4
     )
@@ -485,6 +465,7 @@ def run_unified_mixer_balancer():
         num_buckets=NUM_BUCKETS,
         retention_fractions=retention_fractions,
         target_ratios=TARGET_RATIOS,
+        strata_key_expr=strata_key_expr,
         is_validation=True,
         num_workers=4
     )
