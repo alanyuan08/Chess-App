@@ -73,8 +73,8 @@
   - **Data Augmentation & DeDuplication:** The filtered positions are augmented by rotating each board state 180 degrees. The positions are then deduplicationed. This yields a total of **392,386,524 unique positions**.
 
     ### **1. High-Fidelity Data Distribution Matrix**    
-    * **Total Training Positions:** **112,205,824 positions**
-    * **Total Validation Positions:** **2,292,981 positions**
+    * **Total Training Positions:** **104,202,240 positions**
+    * **Total Validation Positions:** **2,129,512 positions**
 
     * **Final Operational Phase Split:** **20.00% Early** / **45.00% Mid** / **35.00% Late**
 
@@ -96,29 +96,24 @@
 
     ### **2. Dataset Stratification (Post-Reduce)**
 
-    | Strata Key | Raw Count | Target Pct | Target Count | Factor | Status |
-    | :--- | :---: | :---: | :---: | :---: | :---: |
-    | `early_dead_equal` | 23,452,313 | 10.0% | 11,244,400 | 0.48x | Clean Pruning |
-    | `early_slight_pull` | 11,285,215 | 7.5% | 8,433,300 | 0.75x | Clean Pruning |
-    | `early_micro_advantage` | 4,953,919 | 6.5% | 7,308,860 | 1.48x | Safe Padding |
-    | `early_solid_edge` | 3,113,893 | 2.5% | 2,811,100 | 0.90x | Clean Pruning |
-    | `early_clear_dominance` | 1,492,616 | 1.0% | 1,124,440 | 0.75x | Clean Pruning |
-    | `early_decisive_zone` | 224,888 | 0.3% | 337,332 | 1.50x | Safe Padding |
-    | `mid_dead_equal` | 54,472,242 | 14.5% | 16,304,379 | 0.30x | Clean Pruning |
-    | `mid_slight_pull` | 12,278,918 | 14.0% | 15,742,160 | 1.28x | Safe Padding |
-    | `mid_micro_advantage` | 10,033,158 | 11.5% | 12,931,060 | 1.29x | Safe Padding |
-    | `mid_solid_edge` | 12,618,491 | 7.0% | 7,871,080 | 0.62x | Clean Pruning |
-    | `mid_clear_dominance` | 12,633,455 | 2.0% | 2,248,880 | 0.18x | Clean Pruning |
-    | `mid_decisive_zone` | 3,633,547 | 0.5% | 562,220 | 0.15x | Clean Pruning |
-    | `late_dead_equal` | 49,946,142 | 11.0% | 12,368,840 | 0.25x | Clean Pruning |
-    | `late_slight_pull` | 1,868,863 | 4.0% | 4,497,760 | 2.41x | Safe Padding |
-    | `late_micro_advantage` | 1,189,341 | 2.2% | 2,473,768 | 2.08x | Safe Padding |
-    | `late_solid_edge` | 2,943,639 | 4.0% | 4,497,760 | 1.53x | Safe Padding |
-    | `late_clear_dominance` | 5,822,248 | 1.0% | 1,124,440 | 0.19x | Clean Pruning |
-    | `late_decisive_zone` | 4,417,483 | 0.5% | 562,220 | 0.13x | Clean Pruning |
-    | **TOTALS** | **211,733,190** | **100.0%** | **112,444,000** | — | — |
-
-    If there is a surplus of positions, it will opt for the positions without a mirror FEN + higher stockfish depth eval.
+    | Strata Key | Raw Count | Target Pct | Target Count | Factor |
+    | :--- | :---: | :---: | :---: | :---: |
+    | `early_dead_equal` | 23,453,111 | 11.5% | 12,007,424 | 0.51x |
+    | `early_slight_pull` | 11,285,843 | 8.5% | 8,875,052 | 0.79x |
+    | `early_micro_advantage` | 4,954,782 | 5.5% | 5,742,681 | 1.16x |
+    | `early_solid_edge` | 3,116,189 | 1.5% | 1,566,185 | 0.50x |
+    | `early_clear_dominance` | 1,503,717 | 0.8% | 835,299 | 0.56x |
+    | `mid_dead_equal` | 54,513,265 | 16.5% | 17,228,044 | 0.32x |
+    | `mid_slight_pull` | 12,287,551 | 15.0% | 15,661,858 | 1.27x |
+    | `mid_micro_advantage` | 10,043,832 | 11.0% | 11,485,362 | 1.14x |
+    | `mid_solid_edge` | 12,648,833 | 5.5% | 5,742,681 | 0.45x |
+    | `mid_clear_dominance` | 12,815,088 | 1.5% | 1,566,185 | 0.12x |
+    | `late_dead_equal` | 50,098,625 | 12.5% | 13,051,548 | 0.26x |
+    | `late_slight_pull` | 1,879,423 | 4.5% | 4,497,760 | 2.50x |
+    | `late_micro_advantage` | 1,195,562 | 2.2% | 2,297,072 | 1.92x |
+    | `late_solid_edge` | 2,962,220 | 2.5% | 2,610,309 | 0.88x |
+    | `late_clear_dominance` | 5,975,632 | 1.0% | 1,044,123 | 0.17x |
+    | **TOTALS** | **208,733,673** | **100.0%** | **102,211,583** | — |
 
 - **Training Configuration:**
     - **Target Optimization & Value Mapping:** The model transforms raw evaluation scores ($y_{\text{pawn}}$) into a bounded win probability scale $[0.0, 1.0]$, where 1.0 represents a guaranteed win, 0.5 a draw, and 0.0 a loss. This bounding suppresses extreme outliers and forces the network to focus its learning capacity on highly competitive positions.
