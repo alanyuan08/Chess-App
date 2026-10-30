@@ -256,38 +256,70 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
             fen = row.get("fen")
             raw_score = row.get("cp")
             depth_val = row.get("depth")
-            mate_val = row.get("mate")
+            mate_val = None if pd.isna(row.get("mate")) else row.get("mate")
 
             if not isinstance(fen, str) or '\x00' in fen or fen.count('/') != 7:
-                print(f"[Warning] Skipped corrupted FEN at row {idx} in {base_name}")
                 continue
 
-            # 1. Skip explicit text mates or shallow searches
-            if mate_val is not None and not pd.isna(mate_val):
-                continue
-            if depth_val is not None and is_invalid_training_row(depth_val):
-                continue
-            if raw_score is None or pd.isna(raw_score):
+            if pd.isna(raw_score) and mate_val is None:
                 continue
 
             board = chess.Board(fen)
 
-            # 2. Skip for Check / Stalemate / Insufficient Material
+            # --- CHESS RULES: Terminal and Illegal Verification (Always Run) ---
             if board.is_check() or board.is_stalemate() or board.is_insufficient_material():
                 continue
 
-            # 3. Apply the 600 Guardrail to eliminate deep glitched engine values
-            score_target = float(raw_score)
-            if abs(score_target) >= 600:
-                continue
+            # Calculate total pieces remaining on the board
+            piece_count = bin(int(board.occupied)).count("1")
+            is_black_turn = (board.turn == chess.BLACK)
 
-            # 4. Filter out highly volatile tactical configurations via Q-Search
-            static_score = static_evaluate(board)
-            q_score = q_search(board, -float('inf'), float('inf'))
-            if abs(static_score - q_score) > 40:
-                continue
+            active_pawn_score = 0
+            # =================================================================
+            # STRATEGIC PATH A: ENDGAME PIPELINE (<= 8 Pieces)
+            # Assume Stockfish has an Endgame Table that solves every 8 piece
+            # positions or 99%+ of these positions.
+            # 
+            # The evaluation is heavily inflated by bonuses from alpha-beta
+            # and thus we opted for a 250 centipawn clamp.
+            # 
+            # This is more as a vector of geometry 
+            # =================================================================
+            if piece_count < 8:
+                if mate_val is not None and not pd.isna(mate_val):
+                    score_target = 250.0 if float(mate_val) > 0 else -250.0
+
+                elif not pd.isna(raw_score):
+                    val = float(raw_score)
+                    if val > 250.0:    score_target = 250.0
+                    elif val < -250.0: score_target = -250.0
+                    else:              score_target = val
+                else:
+                    continue 
                     
-            active_pawn_score = float(raw_score) / 100.0
+                active_pawn_score = score_target / 100.0
+            # =================================================================
+            # STRATEGIC PATH B: MIDDLEGAME PIPELINE (> 8 Pieces)
+            # =================================================================
+            else:
+                # Filter out explicit engine-calculated checkmates for middlegames
+                if mate_val is not None:
+                    continue
+                if depth_val is not None and is_invalid_training_row(depth_val):
+                    continue
+
+                score_target = float(raw_score)
+                # 3. Apply the 600 Guardrail to eliminate deep glitched engine values
+                if abs(score_target) >= 600:
+                    continue
+
+                # 4. Filter out highly volatile tactical configurations via Q-Search
+                static_score = static_evaluate(board)
+                q_score = q_search(board, -float('inf'), float('inf'))
+                if abs(static_score - q_score) > 40:
+                    continue
+                    
+                active_pawn_score = score_target / 100.0
 
             # --- PERSPECTIVE A: Original Board Orientation ---
             is_black_turn = (board.turn == chess.BLACK)
@@ -310,16 +342,6 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
                 batch_records = []
                 local_shard_counter += 1
 
-            # ------------------------------------------------------------------
-            # --- EXTRACT KING BUCKETS VIA FAST INTEGER DIVISION (9-BUCKET) ---
-            # ------------------------------------------------------------------
-            # The baseline White input layout maps features sequentially. 
-            # In your feature parser array, each bucket owns exactly 704 indices:
-            # (11 compressed types * 64 squares). 
-            # Dividing your index by 704 extracts the native bucket ID (0 to 8).
-            #
-            # Since active_orig is a list of features, we check the first valid entry 
-            # (any piece feature maps to the same active king bucket)
             if len(active_orig) > 0:
                 orig_bucket = int(active_orig[0] // 704)
             else:

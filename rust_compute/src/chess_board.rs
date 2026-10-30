@@ -827,9 +827,11 @@ impl ChessBoard {
 
         // --- STEP 1: Clipped ReLU ---
         for i in 0..256 {
+            let shifted = active_acc[i] >> 7;
             l2_left[i] = active_acc[i].clamp(0, 127) as i8;
         }
         for i in 0..256 {
+            let shifted = opp_acc[i] >> 7;
             l2_right[i] = opp_acc[i].clamp(0, 127) as i8;
         }
 
@@ -878,9 +880,9 @@ impl ChessBoard {
         }
 
         // --- STEP 5: FINAL OUTPUT SCALING & SHIFT ---
-        let final_score = final_sum >> 12;
+        let centipawn_score = (final_sum * 100) >> 7;
 
-        final_score as i16
+        centipawn_score as i16
     }
 
     /// Progresses the network forward incrementally during move making

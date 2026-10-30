@@ -19,24 +19,24 @@ pip install --upgrade pip
 pip install "../[training]" 
 
 # 3. Download the files -> Output /data
-./download_shards.sh
+# ./download_shards.sh
 
 # 4. Process the Positions -> Input /data -> Output /processed_shards
-python dataset_exporter.py
-sync
-rm -f ./data/*
+# python dataset_exporter.py
+# sync
+# rm -f ./data/*
 
-pkill -u $(whoami) -f "dataset_exporter.py" || true
+# pkill -u $(whoami) -f "dataset_exporter.py" || true
 
 # 5. Data Parse + Mirror -> Input /processed_shards -> Output /data_dedup
-python global_dedup.py
-sync
-rm -f ./processed_shards/*
+# python global_dedup.py
+# sync
+# rm -f ./processed_shards/*
 
 # 6. Shard Balancer -> Input /data_dedup -> Output /balanced_shards
 python shard_balancer.py
 sync
-rm -f ./data_dedup/*
+# rm -f ./data_dedup/*
 
 # 9. Run your main training script -> Input /balanced_shards
 python train_pipeline.py

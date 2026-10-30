@@ -26,7 +26,7 @@ TOTAL_EPOCHS = 30
 
 def compute_dynamic_epoch_geometry(train_dir="./balanced_shards/training", 
                                    val_dir="./balanced_shards/validation", 
-                                   batch_size=8192):
+                                   batch_size=BATCH_SIZE):
     """
     Scans the compiled parquet sharding directories to instantly compute
     flawless, exact step parameters based on physical file constraints.
@@ -180,15 +180,8 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
         w1_real = embedding_weights[:7040, :]
         w1_quant = np.ascontiguousarray(np.round(w1_real * 128.0)).astype(np.int16)
 
-        # Accumulator Bias
-        bias_layer = model.get_layer("accumulator_bias")
-        b1_real = bias_layer.get_weights()[0]
-        b1_quant = np.round(b1_real * 128.0).astype(np.int32)
-        
-        # Write exactly the same bytes structure as before
         f.write(w1_quant.tobytes())
-        f.write(b1_quant.tobytes())
-        print(f"-> Accumulator Layer serialized. Shape: {w1_real.shape} (Weights: i16 / Synthetic Bias: i32)")
+        print(f"-> Accumulator Layer serialized. Shape: {w1_real.shape} (Weights: i16 / Bias: NONE)")
 
         # 2. Hidden Layer 2 (256*2 -> 64)
         # Input: i16 (Clipped from Accumulator) | Weights: i8 | Bias/Output: i32

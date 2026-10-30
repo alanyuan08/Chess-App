@@ -4,7 +4,7 @@
 
 - **Presentation Layer:** Python PySide6 for drag and drop interface
   
-- **Compute Engine:** Rust Maturin for Adversarial Search - Negamax with Quiescence Search with advanced pruning techniques such as Killer Move Heuristics, Late Move Reduction, Principal Variation Search, and Null-Move Pruning.
+- **Compute Engine:** Rust Maturin for Adversarial Search - Negamax with Quiescence Search with advanced pruning techniques such as Killer Move Heuristics, Static Exchange Evaluation, Late Move Reduction, Principal Variation Search, and Null-Move Pruning.
 
   The engine processes 24 + million nodes per second on Apple M4 Pro (8 Performance Threads) and averages 20+ depth on 15 second search. 
 
@@ -68,56 +68,43 @@
 - **Training Data:** The model is trained on **394,669,566 chess positions** sourced from the [Lichess Chess Position Evaluations](https://huggingface.co/datasets/Lichess/chess-position-evaluations) dataset, which features evaluations calculated by Stockfish at various depths. To ensure an even and unbiased distribution, the training and validation sets utilize separate shards, and the training data is thoroughly shuffled.
 
 - **Preprocessing & Data Preparation:**
-  - **Quiet Position Filtering:** The dataset is filtered to include only "quiet" positions. Board states are excluded if the king is in check, an immediate tactical win is available via captures, or a forced checkmate sequence exists. It also filters out positions with 6+ pawn advantage and filter out all positions under Depth 26 to remove positions from 1 Second Blitz or 3 Minute Games.
+  - **Quiet Position Filtering:** The dataset is filtered to include only "quiet" positions. Board states are excluded if the king is in check, an immediate tactical win is available via captures, or a forced checkmate sequence exists. It filter out all positions under Depth 26 to remove positions from 1 Second Blitz or 3 Minute Games.
 
-  - **Data Augmentation & DeDuplication:** The filtered positions are augmented by rotating each board state 180 degrees. The positions are then deduplicationed. This yields a total of **392,386,524 unique positions**.
+  - **End Game Cleaning:** The dataset caps 8 piece positions with a 250 centipawn limit as these positions are augmented by promotion / check bonuses in Alpha-Beta Search. It also removes 600+ centipawn positions as they are often highly unstable.
 
-    ### **1. High-Fidelity Data Distribution Matrix**    
-    * **Total Training Positions:** **104,202,240 positions**
-    * **Total Validation Positions:** **2,129,512 positions**
+  - **Data Augmentation & DeDuplication:** The filtered positions are augmented by rotating each board state 180 degrees. The positions are then deduplicationed. 
 
-    * **Final Operational Phase Split:** **20.00% Early** / **45.00% Mid** / **35.00% Late**
+  - **Phase Definition :** The filtered positions are augmented by rotating each board state 180 degrees. The positions are then deduplicationed. 
+  
+  This yields a total of **249,691,999 unique positions**.
 
-    | Score Phase & Advantage Tier | Early (Opening) | Mid (Midgame) | Late (All Endgames) | Total By Advantage |
-    | :--- | :---: | :---: | :---: | :---: |
-    | **`0` to `45 cp` (Dead Equal)** | 9.50% | 18.50% | 12.50% | **40.50%** |
-    | **`45` to `95 cp` (Slight Pull)** | 7.50% | 16.50% | 4.50% | **28.00%** |
-    | **`95` to `175 cp` (Micro Advantage)** | 4.50% | 11.00% | 2.20% | **17.70%** |
-    | **`175` to `350 cp` (Solid Edge)** | 1.80% | 5.50% | 2.50% | **9.80%** |
-    | **`350` to `600 cp` (Clear Dominance)** | 1.00% | 1.50% | 1.00% | **3.50%** |
-    | **Total By Game Phase** | **24.30%** | **53.00%** | **22.70%** | **100.00%** |
+  ### 📊 Stratification Metrics Report (Bucket-Balanced)
 
-    #### Piece Count Definitions by Game Phase
-    * **Early (Opening):** >= 26 active pieces remaining on the board
-    * **Mid (Midgame):** 13 to 25 active pieces remaining on the board 
-    * **Late (All Endgames):** <= 13 active pieces remaining on the board
+  **Target Dataset Optimized to:** 47,799,010 rows
 
-    ### **2. Dataset Stratification (Post-Reduce)**
+  | Strata Key | Raw Count | Target Pct | Target Count | Factor |
+  | :--- | :---: | :---: | :---: | :---: |
+  | **early_dead_equal** | 17,814,956 | 5.0% | 2,389,950 | 0.13x |
+  | **early_micro_advantage** | 13,384,593 | 4.0% | 1,911,960 | 0.14x |
+  | **early_slight_pull** | 7,483,701 | 3.0% | 1,433,970 | 0.19x |
+  | **early_solid_edge** | 2,769,024 | 2.0% | 955,980 | 0.35x |
+  | **early_clear_dominance** | 2,832,719 | 1.0% | 477,990 | 0.17x |
+  | **mid_dead_equal** | 69,881,382 | 15.0% | 7,169,851 | 0.10x |
+  | **mid_micro_advantage** | 16,222,848 | 16.5% | 7,886,836 | 0.49x |
+  | **mid_slight_pull** | 12,477,142 | 17.0% | 8,125,831 | 0.65x |
+  | **mid_solid_edge** | 9,759,907 | 12.0% | 5,735,881 | 0.59x |
+  | **mid_clear_dominance** | 24,500,624 | 4.0% | 1,911,960 | 0.08x |
+  | **late_dead_equal** | 28,809,972 | 13.0% | 6,213,871 | 0.22x |
+  | **late_micro_advantage** | 1,365,686 | 4.0% | 1,911,960 | 1.40x |
+  | **late_slight_pull** | 536,028 | 1.0% | 477,990 | 0.89x |
+  | **late_solid_edge** | 40,400,233 | 2.3% | 1,099,377 | 0.03x |
+  | **late_clear_dominance** | 1,453,184 | 0.2% | 95,598 | 0.07x |
 
-    ### **Dataset Stratification Overview (Post-Optimization)**
+  ### **Key Validation Metrics & Phase Splits**
 
-    | Strata Key | Raw Count | Target Pct | Target Count | Factor |
-    | :--- | :---: | :---: | :---: | :---: |
-    | `early_dead_equal` | 23,453,111 | 9.5% | 7,743,981 | 0.33x |
-    | `early_slight_pull` | 11,285,843 | 7.5% | 6,113,669 | 0.54x |
-    | `early_micro_advantage` | 4,954,782 | 4.5% | 3,668,201 | 0.74x |
-    | `early_solid_edge` | 3,116,189 | 1.8% | 1,467,280 | 0.47x |
-    | `early_clear_dominance` | 1,503,717 | 1.0% | 815,155 | 0.54x |
-    | `mid_dead_equal` | 54,513,265 | 18.5% | 15,080,384 | 0.28x |
-    | `mid_slight_pull` | 12,287,551 | 16.5% | 13,449,972 | 1.09x |
-    | `mid_micro_advantage` | 10,043,832 | 11.0% | 8,966,714 | 0.89x |
-    | `mid_solid_edge` | 12,648,833 | 5.5% | 4,483,357 | 0.35x |
-    | `mid_clear_dominance` | 12,815,088 | 1.5% | 1,222,733 | 0.10x |
-    | `late_dead_equal` | 50,098,625 | 12.5% | 10,189,448 | 0.20x |
-    | `late_slight_pull` | 1,879,423 | 4.5% | 3,668,201 | 1.95x |
-    | `late_micro_advantage` | 1,195,562 | 2.2% | 1,793,343 | 1.50x |
-    | `late_solid_edge` | 2,962,220 | 2.5% | 2,037,889 | 0.68x |
-    | `late_clear_dominance` | 5,975,632 | 1.0% | 815,155 | 0.14x |
-    | **TOTALS** | **208,733,673** | **100.0%** | **81,515,590** | **—** |
+  The network architecture utilizes a lean 1.84-million parameter footprint. Governed by deep learning scaling laws optimized for alpha-beta search engines, the dataset pipeline targets an informational sweet spot of 60 to 80 million high-depth positions to ensure robust generalization and eliminate feature saturation. 
 
-    The network architecture utilizes a lean 1.84-million parameter footprint. Governed by deep learning scaling laws optimized for alpha-beta search engines, the dataset pipeline targets an informational sweet spot of 60 to 80 million high-depth positions to ensure robust generalization and eliminate feature saturation. 
-
-    Due to heavy native skews in the raw data pool, the data loader implements an out-of-core downscaling strategy. This architecture enforces a balanced, symmetrical distribution across the Early, Mid, and Late phases of the game, paired with a proportional King Bucket Mixture of Experts (MoE) extraction layer.
+  Due to heavy native skews in the raw data pool, the data loader implements an out-of-core downscaling strategy. This architecture enforces a balanced, symmetrical distribution across the Early, Mid, and Late phases of the game, paired with a proportional King Bucket Mixture of Experts (MoE) extraction layer.
 
 - **Training Configuration:**
     - **Target Optimization & Value Mapping:** The model transforms raw evaluation scores ($y_{\text{pawn}}$) into a bounded win probability scale $[0.0, 1.0]$, where 1.0 represents a guaranteed win, 0.5 a draw, and 0.0 a loss. This bounding suppresses extreme outliers and forces the network to focus its learning capacity on highly competitive positions.
