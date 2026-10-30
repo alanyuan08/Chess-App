@@ -3,12 +3,15 @@ import sys
 import glob
 import numpy as np
 import chess
+import multiprocessing
 import pandas as pd
+import pyarrow.parquet as pq
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # --- INITIALIZATION ENGINE CONSTANTS ---
 DATA_SIZE = 2_000_000
-INPUT_FEATURES = 64 * 64 * 12  # Dual-Perspective HalfKA Dimension (49,152)
+# 10 Buckets * 11 Active Pieces (excluding own King) * 64 Squares = 7040
+INPUT_FEATURES = 10 * 11 * 64  # Dual-Perspective HalfKA Dimension (7040)
 MAX_PIECES = 32  
 
 # Map FEN character to an integer type 0-11
@@ -76,15 +79,42 @@ def q_search(b, alpha, beta, depth=0, max_depth=12):
 
     return alpha
 
+# The 10-bucket coordinate mapping layout array with horizontal mirroring.
+KING_BUCKET_MAP = [
+    # Rank 1: Full file resolution (Buckets 0-3)
+    0,  1,  2,  3,    3,  2,  1,  0,
+    
+    # Rank 2: Full file resolution (Buckets 4-7)
+    4,  5,  6,  7,    7,  6,  5,  4,
+    
+    # Ranks 3, 4, 5: Consolidated Midgame Core Block (24 squares) (Bucket 8)
+    8,  8,  8,  8,    8,  8,  8,  8,
+    8,  8,  8,  8,    8,  8,  8,  8,
+    8,  8,  8,  8,    8,  8,  8,  8,
+    
+    # Ranks 6, 7, 8: High-Density Active Attacking & Endgame Pool (24 squares) (Bucket 9)
+    9,  9,  9,  9,    9,  9,  9,  9,
+    9,  9,  9,  9,    9,  9,  9,  9,
+    9,  9,  9,  9,    9,  9,  9,  9
+]
+
 def parse_fen_to_features(fen_string):
-    """Parses a standard FEN string into sparse categorical indices."""
+    """
+    Parses a standard FEN string into sparse categorical feature indices for a
+    10-bucket, horizontally mirrored HalfKA NNUE layout using the custom PIECE_MAP.
+    
+    Returns:
+        tuple: (active_side_indices, passive_side_indices)
+               Each list contains integer indices ranging from 0 to 7040.
+    """
     parts = fen_string.split()
     board_part = parts[0]
     turn_part = parts[1]
     is_black_turn = (turn_part == 'b')
         
+    # Process FEN ranks from top to bottom (Rank 8 down to Rank 1)
     rows = board_part.split('/')
-    rows.reverse()
+    rows.reverse()  # Reverse so Square 0 = A1, Square 63 = H8
     
     clean_board = ""
     for row in rows:
@@ -98,40 +128,84 @@ def parse_fen_to_features(fen_string):
     white_king_sq = 0
     black_king_sq = 0
         
+    # Scan the board to collect pieces and isolate King positions
     for sq in range(64):
         char = clean_board[sq]
         if char == '.':
             continue
         piece_type_id = PIECE_MAP[char]
-        pieces.append((piece_type_id, sq))
+        pieces.append((piece_type_id, char, sq))
         if char == 'K':
             white_king_sq = sq
         elif char == 'k':
             black_king_sq = sq
 
+    # --------------------------------------------------------------------------
+    # --- RESOLVE WHITE KING BUCKET & HORIZONTAL MIRRORING FLAG ---
+    # --------------------------------------------------------------------------
+    white_king_file = white_king_sq % 8
+    mirror_white = (white_king_file >= 4)  # True if King is on files E, F, G, or H
+    
+    # If the king is on the right wing, look up bucket using its mirrored position
+    w_king_lookup_sq = white_king_sq ^ 7 if mirror_white else white_king_sq
+    white_king_bucket = KING_BUCKET_MAP[w_king_lookup_sq]
+
+    # --------------------------------------------------------------------------
+    # --- RESOLVE BLACK KING BUCKET & HORIZONTAL MIRRORING FLAG ---
+    # --------------------------------------------------------------------------
+    # Rotate square 180 degrees vertically so Black tracks the board from its own side
+    black_king_sq_rotated = black_king_sq ^ 63
+    black_king_file = black_king_sq_rotated % 8
+    mirror_black = (black_king_file >= 4)
+    
+    b_king_lookup_sq = black_king_sq_rotated ^ 7 if mirror_black else black_king_sq_rotated
+    black_king_bucket = KING_BUCKET_MAP[b_king_lookup_sq]
+
     white_perspective_indices = []
     black_perspective_indices = []
         
-    for p_type, p_sq in pieces:
+    for p_type, char, p_sq in pieces:
+        # ----------------------------------------------------------------------
         # --- WHITE PERSPECTIVE ---
-        w_idx = (white_king_sq * 768) + (p_type * 64) + p_sq
-        white_perspective_indices.append(w_idx)
-                
-        # --- BLACK PERSPECTIVE (Flipped & Rotated) ---
-        b_type = (p_type + 6) % 12
-        b_sq = p_sq ^ 63
-        b_king_sq_rotated = black_king_sq ^ 63
-                
-        b_idx = (b_king_sq_rotated * 768) + (b_type * 64) + b_sq
-        black_perspective_indices.append(b_idx)
+        # ----------------------------------------------------------------------
+        if p_type != 5:  # Skip own King ('K' feature index 5 is omitted)
+            # Shift types above omitted King down by 1 to compress features to 0..10 range
+            w_compressed_type = p_type if p_type < 5 else p_type - 1
             
+            # If White King requires horizontal mirroring, flip this piece square horizontally
+            final_w_sq = p_sq ^ 7 if mirror_white else p_sq
+            
+            w_idx = (white_king_bucket * 704) + (w_compressed_type * 64) + final_w_sq
+            white_perspective_indices.append(w_idx)
+                
+        # ----------------------------------------------------------------------
+        # --- BLACK PERSPECTIVE (Flipped & Rotated) ---
+        # ----------------------------------------------------------------------
+        # Invert side mapping using your custom mapping indices (P<->p, B<->b, etc.)
+        b_orig_type = (p_type + 6) % 12
+        
+        if b_orig_type != 5:  # Skip own King ('k' became index 5 after side inversion)
+            # Compress feature types to 0..10 range
+            b_compressed_type = b_orig_type if b_orig_type < 5 else b_orig_type - 1
+            
+            # Flip square 180 degrees vertically for baseline black perspective
+            b_sq_rotated = p_sq ^ 63
+            
+            # If Black King requires horizontal mirroring, flip this square horizontally too
+            final_b_sq = b_sq_rotated ^ 7 if mirror_black else b_sq_rotated
+            
+            b_idx = (black_king_bucket * 704) + (b_compressed_type * 64) + final_b_sq
+            black_perspective_indices.append(b_idx)
+            
+    # Return indices organized cleanly by active player turn
     if is_black_turn:
         return black_perspective_indices, white_perspective_indices
     else:
         return white_perspective_indices, black_perspective_indices
 
+
 def is_invalid_training_row(depth_str) -> bool:
-    return int(depth_str) < 20
+    return int(depth_str) < 26
 
 def pad_indices(a_idx, p_idx):
     a_pad = np.full(MAX_PIECES, INPUT_FEATURES, dtype=np.int32)
@@ -151,7 +225,10 @@ def save_parquet_shard(batch_records, output_dir, base_name, shard_idx):
 # WORKER EXECUTION TASK
 # =====================================================================
 def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SIZE):
-    """Processes a single parquet file in an isolated worker process."""
+    """
+    Processes a single parquet file in an isolated worker process using 
+    memory-bounded row-group streaming to flatline RAM utilization.
+    """
     base_name = os.path.splitext(os.path.basename(parquet_path))[0]
     os.makedirs(output_dir, exist_ok=True)
         
@@ -159,88 +236,141 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
     file_processed_count = 0
     local_shard_counter = 0
 
-    print(f"[Start] Worker processing shard: {parquet_path}")
+    print(f"[Start] Worker streaming shard: {parquet_path}")
         
     try:
-        parquet_df = pd.read_parquet(parquet_path, columns=['fen', 'cp', 'depth', 'mate'])
+        # Open file handler without pulling any data into RAM yet
+        parquet_file = pq.ParquetFile(parquet_path)
     except Exception as e:
-        print(f"[Error] Failed to read {parquet_path}: {e}")
+        print(f"[Error] Failed to open {parquet_path}: {e}")
         return 0
 
-    for idx, row in parquet_df.iterrows():
-        fen = row.get("fen")
-        raw_score = row.get("cp")
-        depth_val = row.get("depth")
-        mate_val = row.get("mate")
+    # Stream the file in manageable memory chunks (65,536 rows at a time)
+    # Only loads the requested 4 columns into memory per batch
+    for pyarrow_batch in parquet_file.iter_batches(batch_size=65536, columns=['fen', 'cp', 'depth', 'mate']):
+        
+        # Zero-copy conversion of just this specific chunk to a lightweight DataFrame
+        chunk_df = pyarrow_batch.to_pandas()
 
-        if not isinstance(fen, str) or '\x00' in fen or fen.count('/') != 7:
-            print(f"[Warning] Skipped corrupted FEN at row {idx} in {base_name}")
-            continue
+        for idx, row in chunk_df.iterrows():
+            fen = row.get("fen")
+            raw_score = row.get("cp")
+            depth_val = row.get("depth")
+            mate_val = None if pd.isna(row.get("mate")) else row.get("mate")
 
-        # 1. Skip explicit text mates or shallow searches
-        if mate_val is not None and not pd.isna(mate_val):
-            continue
-        if depth_val is not None and is_invalid_training_row(depth_val):
-            continue
-        if raw_score is None or pd.isna(raw_score):
-            continue
+            if not isinstance(fen, str) or '\x00' in fen or fen.count('/') != 7:
+                continue
 
-        board = chess.Board(fen)
+            if pd.isna(raw_score) and mate_val is None:
+                continue
 
-        # 2. Skip for Check / Stalemate / Insufficient Material
-        if board.is_check() or board.is_stalemate() or board.is_insufficient_material():
-            continue
+            board = chess.Board(fen)
 
-        # 3. Apply the 1200 Guardrail to eliminate deep glitched engine values
-        score_target = float(raw_score)
-        if abs(score_target) >= 1200:
-            continue
+            # --- CHESS RULES: Terminal and Illegal Verification (Always Run) ---
+            if board.is_check() or board.is_stalemate() or board.is_insufficient_material():
+                continue
 
-        # 4. Filter out highly volatile tactical configurations via Q-Search
-        static_score = static_evaluate(board)
-        q_score = q_search(board, -float('inf'), float('inf'))
-        if abs(static_score - q_score) > 40:
-            continue
-                
-        active_pawn_score = float(raw_score) / 100.0
+            # Calculate total pieces remaining on the board
+            piece_count = bin(int(board.occupied)).count("1")
+            is_black_turn = (board.turn == chess.BLACK)
 
-        # --- PERSPECTIVE A: Original Board Orientation ---
-        is_black_turn = (board.turn == chess.BLACK)
-        active_player_target = -active_pawn_score if is_black_turn else active_pawn_score
+            active_pawn_score = 0
+            # =================================================================
+            # STRATEGIC PATH A: ENDGAME PIPELINE (<= 8 Pieces)
+            # Assume Stockfish has an Endgame Table that solves every 8 piece
+            # positions or 99%+ of these positions.
+            # 
+            # The evaluation is heavily inflated by bonuses from alpha-beta
+            # and thus we opted for a 250 centipawn clamp.
+            # 
+            # This is more as a vector of geometry 
+            # =================================================================
+            if piece_count < 8:
+                if mate_val is not None and not pd.isna(mate_val):
+                    score_target = 250.0 if float(mate_val) > 0 else -250.0
 
-        active_indices, passive_indices = parse_fen_to_features(fen)
-        active_orig, passive_orig = pad_indices(active_indices, passive_indices)
+                elif not pd.isna(raw_score):
+                    val = float(raw_score)
+                    if val > 250.0:    score_target = 250.0
+                    elif val < -250.0: score_target = -250.0
+                    else:              score_target = val
+                else:
+                    continue 
+                    
+                active_pawn_score = score_target / 100.0
+            # =================================================================
+            # STRATEGIC PATH B: MIDDLEGAME PIPELINE (> 8 Pieces)
+            # =================================================================
+            else:
+                # Filter out explicit engine-calculated checkmates for middlegames
+                if mate_val is not None:
+                    continue
+                if depth_val is not None and is_invalid_training_row(depth_val):
+                    continue
 
-        # --- PERSPECTIVE B: Mirrored Board ---
-        rotated_board = board.mirror().transform(chess.flip_horizontal)
-        rotated_fen = rotated_board.fen()
+                score_target = float(raw_score)
+                # 3. Apply the 600 Guardrail to eliminate deep glitched engine values
+                if abs(score_target) >= 600:
+                    continue
 
-        active_rot, passive_rot = parse_fen_to_features(rotated_fen)
-        active_rot_pad, passive_rot_pad = pad_indices(active_rot, passive_rot)
+                # 4. Filter out highly volatile tactical configurations via Q-Search
+                static_score = static_evaluate(board)
+                q_score = q_search(board, -float('inf'), float('inf'))
+                if abs(static_score - q_score) > 40:
+                    continue
+                    
+                active_pawn_score = score_target / 100.0
 
-        if len(batch_records) + 2 > samples_per_file:
-            save_parquet_shard(batch_records, output_dir, base_name, local_shard_counter)
-            file_processed_count += len(batch_records)
-            batch_records = []
-            local_shard_counter += 1
-                
-        # Append rotated perspective
-        batch_records.append({
-            'active_indices': active_rot_pad,
-            'passive_indices': passive_rot_pad,
-            'target': active_player_target,
-            'depth': depth_val,
-            'fen': rotated_fen
-        })
+            # --- PERSPECTIVE A: Original Board Orientation ---
+            is_black_turn = (board.turn == chess.BLACK)
+            active_player_target = -active_pawn_score if is_black_turn else active_pawn_score
 
-        # Append original perspective
-        batch_records.append({
-            'active_indices': active_orig,
-            'passive_indices': passive_orig,
-            'target': active_player_target,
-            'depth': depth_val,
-            'fen': fen
-        })
+            active_indices, passive_indices = parse_fen_to_features(fen)
+            active_orig, passive_orig = pad_indices(active_indices, passive_indices)
+
+            # --- PERSPECTIVE B: Mirrored Board ---
+            rotated_board = board.mirror().transform(chess.flip_horizontal)
+            rotated_fen = rotated_board.fen()
+
+            active_rot, passive_rot = parse_fen_to_features(rotated_fen)
+            active_rot_pad, passive_rot_pad = pad_indices(active_rot, passive_rot)
+
+            # Check capacity constraints before extending the list
+            if len(batch_records) + 2 > samples_per_file:
+                save_parquet_shard(batch_records, output_dir, base_name, local_shard_counter)
+                file_processed_count += len(batch_records)
+                batch_records = []
+                local_shard_counter += 1
+
+            if len(active_orig) > 0:
+                orig_bucket = int(active_orig[0] // 704)
+            else:
+                orig_bucket = 0
+
+            if len(active_rot_pad) > 0:
+                rot_bucket = int(active_rot_pad[0] // 704)
+            else:
+                rot_bucket = 0
+                    
+            # Append rotated perspective
+            batch_records.append({
+                'active_indices': active_rot_pad,
+                'passive_indices': passive_rot_pad,
+                'target': active_player_target,
+                'depth': depth_val,
+                'fen': rotated_fen,
+                'king_bucket': rot_bucket,
+            })
+
+            # Append original perspective
+            batch_records.append({
+                'active_indices': active_orig,
+                'passive_indices': passive_orig,
+                'target': active_player_target,
+                'depth': depth_val,
+                'fen': fen,
+                'king_bucket': orig_bucket,
+            })
 
     # Flush remaining records from memory
     if len(batch_records) > 0:
@@ -267,12 +397,12 @@ def main():
         sys.exit(1)
             
     print(f"Detected {len(raw_files)} raw shards ready for feature cleaning.")
-    print(f"Spawning 4 worker processes")
+    print(f"Spawning 5 worker processes")
     
     total_global_processed = 0
-    
+
     # Process Pool Executor manages CPU-bound processing scales automatically
-    with ProcessPoolExecutor(max_workers=4) as executor:
+    with ProcessPoolExecutor(max_workers=5) as executor:
         # Submit all tasks to the process pool
         futures = {
             executor.submit(run_parquet_cleaning_pass, file_path, BINARY_OUTPUT_DIR, DATA_SIZE): file_path 
@@ -295,4 +425,7 @@ def main():
     print("=====================================================================")
 
 if __name__ == "__main__":
+    if sys.platform == "darwin":
+        multiprocessing.set_start_method("spawn", force=True)
+        
     main()
