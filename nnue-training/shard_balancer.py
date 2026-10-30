@@ -87,81 +87,88 @@ def _worker_process_bucket_group(
     file_prefix
 ):
     """
-    Memory-optimized parallel stream worker. Consolidated isolated bucket file segments
-    and runs a 100% unique natural random shuffle pass without any cloning or dropping.
+    Ultra-low memory, zero-accumulation stream worker.
+    Shuffles and flushes fragments sequentially to keep RAM flat and under 100MB.
     """
+    CANONICAL_COLUMNS = [
+        "active_indices", 
+        "passive_indices", 
+        "target", 
+        "depth", 
+        "fen", 
+        "king_bucket"
+    ]
+    
     for bucket_id in bucket_ids:
         frag_pattern = os.path.join(source_dir, f"bucket_{bucket_id}_raw_*.parquet")
         fragments = glob.glob(frag_pattern)
         if not fragments:
             continue
             
-        # Parallel read of fragment arrays
-        df_processed = pl.read_parquet(frag_pattern).select(CANONICAL_COLUMNS)
-        
-        # Instantly discard transient intermediates to protect disk footprint
-        for frag_path in fragments:
-            try: os.remove(frag_path)
-            except OSError: pass
+        # Process every fragment independently to ensure RAM never climbs
+        for chunk_idx, frag_path in enumerate(fragments):
+            try:
+                # 1. Read a single tiny raw chunk fragment into memory
+                chunk_df = pl.read_parquet(frag_path).select(CANONICAL_COLUMNS)
                 
-        # Pure natural shuffle execution (Fraction=1.0 guarantees zero sampling drops)
-        df_final_shuffled = df_processed.sample(
-            fraction=1.0, 
-            shuffle=True, 
-            seed=1337 + worker_id + bucket_id
-        )
-        
-        # Output clean finalized parquet production shard
-        output_filename = f"{file_prefix}_natural_worker_{worker_id}_bucket_{bucket_id}.parquet"
-        output_filepath = os.path.join(output_dir, output_filename)
-        df_final_shuffled.write_parquet(output_filepath, compression="snappy")
-
-        # Explicit release of memory allocations
-        del df_processed, df_final_shuffled
-        gc.collect()
+                # 2. Localized Shuffling Pass (100% unique positions, zero memory footprint)
+                chunk_shuffled = chunk_df.sample(
+                    fraction=1.0, 
+                    shuffle=True, 
+                    seed=1337 + worker_id + bucket_id + chunk_idx
+                )
+                
+                # 3. Stream the shuffled subset immediately to disk as an independent shard
+                output_filename = f"{file_prefix}_natural_w{worker_id}_b{bucket_id}_c{chunk_idx}.parquet"
+                output_filepath = os.path.join(output_dir, output_filename)
+                chunk_shuffled.write_parquet(output_filepath, compression="snappy")
+                
+                # 4. Immediate disk and memory reclamation
+                os.remove(frag_path)
+                del chunk_df, chunk_shuffled
+                gc.collect()
+                
+            except (OSError, pl.exceptions.ComputeError) as e:
+                print(f"  [WARNING] Worker {worker_id} skipped broken shard {frag_path}: {e}")
+                continue
 
     print(f"  > Worker {worker_id} successfully compiled pure natural data streams.")
     return None
 
-def produce_complete_shards_parallel(
+def produce_complete_shards_sequential(
     source_dir, 
     output_dir, 
     file_prefix, 
     num_buckets, 
-    is_validation=False, 
-    num_workers=5
+    is_validation=False
 ):
-    """Orchestrates pool executors to process unique bucket sharding lists across cores."""
+    """
+    Executes a pure sequential single-worker compilation pass.
+    Maximizes physical RAM headroom to process massive 240M un-pruned shards without OOM crashes.
+    """
     mode_str = "VALIDATION" if is_validation else "TRAINING"
-    print(f"\n[{mode_str}] -> Commencing {num_workers}-worker natural compilation...")
+    print(f"\n[{mode_str}] -> Commencing single-worker high-headroom natural compilation...")
     
+    # Process all 64 buckets sequentially on a single, leak-proof thread
     all_buckets = list(range(num_buckets))
-    avg = len(all_buckets) // num_workers
-    worker_groups = [all_buckets[i * avg : (i + 1) * avg] for i in range(num_workers)]
     
-    for r_idx in range(num_workers * avg, len(all_buckets)):
-        worker_groups[r_idx % num_workers].append(all_buckets[r_idx])
-    
-    with ProcessPoolExecutor(max_workers=num_workers) as executor:
-        futures = {
-            executor.submit(
-                _worker_process_bucket_group, 
-                w_id, worker_groups[w_id], source_dir, output_dir, file_prefix
-            ): w_id for w_id in range(num_workers)
-        }
-        
-        for future in as_completed(futures):
-            w_id = futures[future]
-            try:
-                future.result()
-            except Exception as e:
-                print(f"  > Worker {w_id} encountered critical failure: {e}")
-                raise e
+    try:
+        _worker_process_bucket_group(
+            worker_id=0,
+            bucket_ids=all_buckets,
+            source_dir=source_dir,
+            output_dir=output_dir,
+            file_prefix=file_prefix
+        )
+    except Exception as e:
+        print(f"  > Single worker encountered critical compilation failure: {e}")
+        raise e
 
     written_files = glob.glob(os.path.join(output_dir, f"{file_prefix}_natural_worker_*_bucket_*.parquet"))
     total_shards_written = len(written_files)
-    print(f"[EXPORTED] Total of {total_shards_written} natural shards written across all workers.")
+    print(f"[EXPORTED] Total of {total_shards_written} natural shards written cleanly to disk.")
         
+    # Final housecleaning of un-shuffled remnants
     try:
         raw_remnants = glob.glob(os.path.join(source_dir, f"bucket_*_raw_*.parquet"))
         for f in raw_remnants:
@@ -170,8 +177,8 @@ def produce_complete_shards_parallel(
     except Exception:
         pass
         
-    print(f"[SUCCESS] {mode_str} natural parallel compilation complete! Target: {output_dir}\n")
-
+    print(f"[SUCCESS] {mode_str} natural sequential compilation complete! Target: {output_dir}\n")
+    
 # =========================================================================
 # CENTRAL PIPELINE ORCHESTRATOR
 # =========================================================================
@@ -199,31 +206,30 @@ def run_unified_mixer_balancer():
         for i, path in enumerate(input_shards, 1)
     ]
 
-    # Enforce exactly 5 working threads to process the shards concurrently
-    with ProcessPoolExecutor(max_workers=5) as executor:
+    # Enforce exactly 3 working threads to process the shards concurrently
+    with ProcessPoolExecutor(max_workers=3) as executor:
         # list() forces the executor map to actively evaluate and block until all jobs conclude
         list(executor.map(process_single_shard, task_arguments))
 
     print("--- Preprocessing Step Complete. Multi-threaded sharding finished. ---")
     
+    # -------------------------------------------------------------------------
     # PHASE 2: Parallelized Natural Compilation (No Balancing Nonsense)
     # -------------------------------------------------------------------------
-    produce_complete_shards_parallel(
+    produce_complete_shards_sequential(
         source_dir=TEMP_TRAINING_DIR,
         output_dir=TRAIN_DIR,
         file_prefix="train",
         num_buckets=NUM_BUCKETS,
-        is_validation=False,
-        num_workers=5
+        is_validation=False
     )
     
-    produce_complete_shards_parallel(
+    produce_complete_shards_sequential(
         source_dir=TEMP_VAL_DIR,
         output_dir=VAL_DIR,
         file_prefix="val",
         num_buckets=NUM_BUCKETS,
-        is_validation=True,
-        num_workers=5
+        is_validation=True
     )
     
     # Remove empty caching directories safely

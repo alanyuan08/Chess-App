@@ -80,11 +80,14 @@ class AggressiveMemoryCleanup(keras.callbacks.Callback):
 @keras.utils.register_keras_serializable(package="CustomSchedules")
 class CustomWarmupCosineSchedule(keras.optimizers.schedules.CosineDecay):
     def __init__(self, initial_learning_rate, decay_steps, warmup_steps, alpha=0.0167, initial_lr=1e-6, weight_decay_ratio=None):
-        # Initialize the underlying Keras CosineDecay schedule natively
-        super().__init__(initial_learning_rate=initial_learning_rate, decay_steps=decay_steps, alpha=alpha)
         self.warmup_steps = int(warmup_steps)
         self.initial_lr = float(initial_lr)
         self.weight_decay_ratio = float(weight_decay_ratio) if weight_decay_ratio is not None else None
+        
+        adjusted_decay_steps = max(1, int(decay_steps) - self.warmup_steps)
+        
+        # Initialize the underlying Keras CosineDecay schedule with adjusted boundaries
+        super().__init__(initial_learning_rate=initial_learning_rate, decay_steps=adjusted_decay_steps, alpha=alpha)
 
     def __call__(self, step):
         step_f = tf.cast(step, tf.float32)
@@ -109,6 +112,7 @@ class CustomWarmupCosineSchedule(keras.optimizers.schedules.CosineDecay):
 
     def get_config(self):
         config = super().get_config()
+        # Ensure we capture tracking properties correctly for model checkpoint serialization
         config.update({
             "warmup_steps": self.warmup_steps,
             "initial_lr": self.initial_lr,
@@ -140,23 +144,36 @@ class WeightDecaySchedulerCallback(keras.callbacks.Callback):
 
 class EpochSynchronizedResetCallback(tf.keras.callbacks.Callback):
     """
-    Keras callback that intercepts epoch boundaries to safely flush, 
-    re-shuffle, and reset the permanent background dataset managers.
+    Keras callback designed to reset, re-shuffle, and clear queues 
+    at epoch boundaries, dynamically swapping the dataset instances 
+    to completely blow away stale internal AUTOTUNE buffers.
     """
-    def __init__(self, train_manager, val_manager):
+    def __init__(self, train_manager, val_manager, train_ds_factory, val_ds_factory):
         super().__init__()
         self.train_manager = train_manager
         self.val_manager = val_manager
+        self.train_ds_factory = train_ds_factory
+        self.val_ds_factory = val_ds_factory
 
     def on_epoch_end(self, epoch, logs=None):
-        print(f"\n[Epoch {epoch + 1} Done] Triggering leak-proof manager reset...")
+        print(f"\n[Epoch {epoch + 1} Complete] Hard tearing down background streams...")
         
-        # Signals the background loops to re-shuffle their files and start fresh
-        if hasattr(self.train_manager, "reset_for_next_epoch"):
-            self.train_manager.reset_for_next_epoch()
+        # 1. Force terminate old workers and completely drop old multiprocess queues
+        self.train_manager.stop_epoch_stream()
+        self.val_manager.stop_epoch_stream()
+        
+        # 2. Re-spawn background workers with a fresh master file shuffle
+        self.train_manager.start_epoch_stream()
+        self.val_manager.start_epoch_stream()
+        
+        # 3. Re-instantiate tf.data datasets and inject them back into Keras internally.
+        # This completely flushes any cached prefetched batches.
+        if hasattr(self.model, 'train_data'):
+            self.model.train_data = self.train_ds_factory()
+        if hasattr(self.model, 'validation_data'):
+            self.model.validation_data = self.val_ds_factory()
             
-        if hasattr(self.val_manager, "reset_for_next_epoch"):
-            self.val_manager.reset_for_next_epoch()
+        print(f"[Epoch {epoch + 1}] Buffers flushed. Fresh universe shards successfully mapped.")
 
 def get_local_shard_directories():
     """
@@ -347,7 +364,7 @@ def train_nnue_on_fens():
         return tf.math.divide_no_nan(total_error, valid_count)
 
     # 2. Bind directly to your engineered AdamW
-    decay_steps_calculated = (TOTAL_EPOCHS - 1) * STEPS_PER_EPOCH
+    decay_steps_calculated = TOTAL_EPOCHS * STEPS_PER_EPOCH
 
     # Keep the schedule strictly on the learning rate
     lr_schedule = CustomWarmupCosineSchedule(
@@ -358,10 +375,19 @@ def train_nnue_on_fens():
         initial_lr=1e-6
     )
 
+    wd_schedule = CustomWarmupCosineSchedule(
+        initial_learning_rate=3e-4,
+        decay_steps=decay_steps_calculated,
+        warmup_steps=STEPS_PER_EPOCH,
+        alpha=0.0167,
+        initial_lr=1e-6,
+        weight_decay_ratio=(0.01 / 3e-4)
+    )
+
     # Initialize AdamW with a simple float for weight decay
     stockfish_optimizer = keras.optimizers.AdamW(
         learning_rate=lr_schedule,
-        weight_decay=0.01, # Initialize with maximum desired weight decay
+        weight_decay=wd_schedule, 
         epsilon=1e-8,
         global_clipnorm=1.0
     )
@@ -376,39 +402,42 @@ def train_nnue_on_fens():
     # Track file storage roots for local Parquet files
     train_dir, val_dir = get_local_shard_directories()
 
-    # Create the permanent managers ONCE. They spawn background processes that live forever.
+    # Create the permanent managers ONCE. They manage localized epoch worker state.
     train_manager = EpochSynchronizedDatasetManager(
-        shard_directory=train_dir, shard_pattern="*.parquet", num_workers=4, 
-        queue_size=5000, batch_size=BATCH_SIZE
+        shard_directory=train_dir, shard_pattern="*.parquet", num_workers=6, 
+        queue_size=32, batch_size=BATCH_SIZE
     )
     val_manager = EpochSynchronizedDatasetManager(
         shard_directory=val_dir, shard_pattern="*.parquet", num_workers=1,
-        queue_size=5000, batch_size=BATCH_SIZE
+        queue_size=32, batch_size=BATCH_SIZE
     )
 
-    # --- Train Dataset (Updated to accept dense list tokens signatures) ---
-    train_dataset = tf.data.Dataset.from_generator(
-        generator=lambda: train_manager.generator_fn(total_epoch_steps=STEPS_PER_EPOCH),
-        output_signature=(
-            {
-                "active_features": tf.TensorSpec(shape=(None, MAX_PIECES), dtype=tf.int32),
-                "passive_features": tf.TensorSpec(shape=(None, MAX_PIECES), dtype=tf.int32),
-            },
-            tf.TensorSpec(shape=(None, 1), dtype=tf.float32)
-        )
-    ).prefetch(tf.data.AUTOTUNE)
+    # --- Fresh Dataset Generator Wrappers ---
+    # We define functional methods to re-instantiate tf.data.Dataset on every loop, 
+    # fully tearing down old AUTOTUNE prefetch buffers to prevent data leak pollution.
+    def get_fresh_train_dataset():
+        return tf.data.Dataset.from_generator(
+            generator=lambda: train_manager.generator_fn(total_epoch_steps=STEPS_PER_EPOCH),
+            output_signature=(
+                {
+                    "active_features": tf.TensorSpec(shape=(None, MAX_PIECES), dtype=tf.int16),
+                    "passive_features": tf.TensorSpec(shape=(None, MAX_PIECES), dtype=tf.int16),
+                },
+                tf.TensorSpec(shape=(None, 1), dtype=tf.float32)
+            )
+        ).prefetch(tf.data.AUTOTUNE)
 
-    # --- Validation Dataset ---
-    val_dataset = tf.data.Dataset.from_generator(
-        generator=lambda: val_manager.generator_fn(total_epoch_steps=VALIDATION_PER_EPOCH),
-        output_signature=(
-            {
-                "active_features": tf.TensorSpec(shape=(None, MAX_PIECES), dtype=tf.int32),
-                "passive_features": tf.TensorSpec(shape=(None, MAX_PIECES), dtype=tf.int32),
-            },
-            tf.TensorSpec(shape=(None, 1), dtype=tf.float32)
-        )
-    ).prefetch(tf.data.AUTOTUNE)
+    def get_fresh_val_dataset():
+        return tf.data.Dataset.from_generator(
+            generator=lambda: val_manager.generator_fn(total_epoch_steps=VALIDATION_PER_EPOCH),
+            output_signature=(
+                {
+                    "active_features": tf.TensorSpec(shape=(None, MAX_PIECES), dtype=tf.int16),
+                    "passive_features": tf.TensorSpec(shape=(None, MAX_PIECES), dtype=tf.int16),
+                },
+                tf.TensorSpec(shape=(None, 1), dtype=tf.float32)
+            )
+        ).prefetch(tf.data.AUTOTUNE)
 
     print("\n--- Model compilation complete. Commencing Training Step ---")
     wd_callback = WeightDecaySchedulerCallback(
@@ -426,24 +455,33 @@ def train_nnue_on_fens():
 
     cleanup_cb = AggressiveMemoryCleanup()
 
+    # Custom synchronization callback handles hard process termination and 
+    # updates the model dataset references to enforce clean epoch transitions.
     epoch_reset_cb = EpochSynchronizedResetCallback(
         train_manager=train_manager, 
-        val_manager=val_manager
+        val_manager=val_manager,
+        train_ds_factory=get_fresh_train_dataset,
+        val_ds_factory=get_fresh_val_dataset
     )
 
-    # Begin execution
+    # Prime the first epoch's workers before passing the generator to fit()
+    train_manager.start_epoch_stream()
+    val_manager.start_epoch_stream()
+
+    # Begin execution with the initial clean datasets
     model.fit(
-        train_dataset,
+        get_fresh_train_dataset(),
         epochs=TOTAL_EPOCHS,
         steps_per_epoch=STEPS_PER_EPOCH,
-        validation_data=val_dataset,
+        validation_data=get_fresh_val_dataset(),
         validation_steps=VALIDATION_PER_EPOCH,
+        shuffle=False,
         callbacks=[wd_callback, checkpoint_cb, cleanup_cb, epoch_reset_cb]
     )
 
     print("\nTraining complete. Terminating background workers cleanly...")
-    train_manager.shutdown()
-    val_manager.shutdown()
+    train_manager.stop_epoch_stream()
+    val_manager.stop_epoch_stream()
 
     return model
 

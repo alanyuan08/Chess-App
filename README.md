@@ -74,7 +74,7 @@
 
   - **Data Augmentation & DeDuplication:** The filtered positions are augmented by rotating each board state 180 degrees. The positions are then deduplicationed. 
   
-  This yields a total of **249,691,999 unique positions** - There is no phrase pruning, this is assuming this is a fair representation of X million chess games.
+  This yields a total of **249,691,999 unique positions**.
 
   ### **Key Validation Metrics & Phase Splits**
 
@@ -88,9 +88,9 @@
       $$\text{Win Probability} = \sigma(y_{\text{pawn}} \times 0.639607)$$
     - **Schedule & Batching Dynamics:** 
       * **Total Duration:** 30 epochs.
-      * **Training Throughput:** 3,168 steps per epoch.
+      * **Training Size:** 242,047,680
+      * **Validation Size:** 12,740,092
       * **Batch Size:** 8,192 positions per step.
-      * **Validation Window:** 63 steps per epoch.
       * **Data Pipeline:** Datasets are systematically shuffled between epochs to prevent sequential memorization and overfitting.
     - **Learning Rate Dynamics:** Optimization utilizes the **AdamW** algorithm paired with a **CosineDecay** learning rate schedule, ensuring smooth, monotonic convergence toward the minimum floor ($\alpha = 2 \times 10^{-7}$).
 

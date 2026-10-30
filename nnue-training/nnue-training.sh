@@ -34,8 +34,8 @@ pip install "../[training]"
 # rm -f ./processed_shards/*
 
 # 6. Shard Balancer -> Input /data_dedup -> Output /balanced_shards
-python shard_balancer.py
-sync
+# python shard_balancer.py
+# sync
 # rm -f ./data_dedup/*
 
 # 9. Run your main training script -> Input /balanced_shards
