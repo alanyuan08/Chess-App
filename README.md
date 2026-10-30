@@ -73,32 +73,8 @@
   - **End Game Cleaning:** The dataset caps 8 piece positions with a 250 centipawn limit as these positions are augmented by promotion / check bonuses in Alpha-Beta Search. It also removes 600+ centipawn positions as they are often highly unstable.
 
   - **Data Augmentation & DeDuplication:** The filtered positions are augmented by rotating each board state 180 degrees. The positions are then deduplicationed. 
-
-  - **Phase Definition :** The filtered positions are augmented by rotating each board state 180 degrees. The positions are then deduplicationed. 
   
-  This yields a total of **249,691,999 unique positions**.
-
-  ### 📊 Stratification Metrics Report (Bucket-Balanced)
-
-  **Target Dataset Optimized to:** 47,799,010 rows
-
-  | Strata Key | Raw Count | Target Pct | Target Count | Factor |
-  | :--- | :---: | :---: | :---: | :---: |
-  | **early_dead_equal** | 17,814,956 | 5.0% | 2,389,950 | 0.13x |
-  | **early_micro_advantage** | 13,384,593 | 4.0% | 1,911,960 | 0.14x |
-  | **early_slight_pull** | 7,483,701 | 3.0% | 1,433,970 | 0.19x |
-  | **early_solid_edge** | 2,769,024 | 2.0% | 955,980 | 0.35x |
-  | **early_clear_dominance** | 2,832,719 | 1.0% | 477,990 | 0.17x |
-  | **mid_dead_equal** | 69,881,382 | 15.0% | 7,169,851 | 0.10x |
-  | **mid_micro_advantage** | 16,222,848 | 16.5% | 7,886,836 | 0.49x |
-  | **mid_slight_pull** | 12,477,142 | 17.0% | 8,125,831 | 0.65x |
-  | **mid_solid_edge** | 9,759,907 | 12.0% | 5,735,881 | 0.59x |
-  | **mid_clear_dominance** | 24,500,624 | 4.0% | 1,911,960 | 0.08x |
-  | **late_dead_equal** | 28,809,972 | 13.0% | 6,213,871 | 0.22x |
-  | **late_micro_advantage** | 1,365,686 | 4.0% | 1,911,960 | 1.40x |
-  | **late_slight_pull** | 536,028 | 1.0% | 477,990 | 0.89x |
-  | **late_solid_edge** | 40,400,233 | 2.3% | 1,099,377 | 0.03x |
-  | **late_clear_dominance** | 1,453,184 | 0.2% | 95,598 | 0.07x |
+  This yields a total of **249,691,999 unique positions** - There is no phrase pruning, this is assuming this is a fair representation of X million chess games.
 
   ### **Key Validation Metrics & Phase Splits**
 
