@@ -281,6 +281,7 @@ impl ChessBoard {
     pub fn generate_moves(&mut self, 
         gen_moves: &mut ArrayVec::<ForwardMove, 256>, 
         pv_move_hint: ForwardMove,
+        tt_move: ForwardMove,
         ply_idx: i16,
         killer_move_table: &[[ForwardMove; 2]; 128],
         only_tactical: bool, 
@@ -307,24 +308,32 @@ impl ChessBoard {
         }
         
         if ply_idx < 128 {
-            let has_valid_pv = (pv_move_hint.move_type != MoveFlag::NULL) as i16;
+            let has_valid_tt = (tt_move.move_type != MoveFlag::NULL) as i16;
+            // PV is valid only if it's not a NULL move and not identical to the higher-priority TT move
+            let has_valid_pv = (pv_move_hint.move_type != MoveFlag::NULL && (has_valid_tt == 0 || pv_move_hint != tt_move)) as i16;
+            
             let k0 = killer_move_table[ply_idx as usize][0];
             let k1 = killer_move_table[ply_idx as usize][1];
             
-            let has_k0 = (k0.move_type != MoveFlag::NULL && (has_valid_pv == 0 || k0 != pv_move_hint)) as i16;
-            let has_k1 = (k1.move_type != MoveFlag::NULL && (has_valid_pv == 0 || k1 != pv_move_hint)) as i16;
+            // Deduplicate killer moves against both TT and PV hints
+            let is_k0_dup = (has_valid_tt != 0 && k0 == tt_move) || (has_valid_pv != 0 && k0 == pv_move_hint);
+            let is_k1_dup = (has_valid_tt != 0 && k1 == tt_move) || (has_valid_pv != 0 && k1 == pv_move_hint);
+
+            let has_k0 = (k0.move_type != MoveFlag::NULL && !is_k0_dup) as i16;
+            let has_k1 = (k1.move_type != MoveFlag::NULL && !is_k1_dup) as i16;
 
             for m in gen_moves.iter_mut() {
                 // 1. Evaluate matching properties using strict i16 bitwise mapping
-                let is_pv = has_valid_pv & (*m == pv_move_hint) as i16;
-                let is_k0 = (1 - is_pv) * (has_k0 & (*m == k0) as i16);
-                let is_k1 = (1 - is_pv) * (1 - is_k0) * (has_k1 & (*m == k1) as i16);
+                let is_tt = has_valid_tt & (*m == tt_move) as i16;
+                let is_pv = (1 - is_tt) * (has_valid_pv & (*m == pv_move_hint) as i16);
+                let is_k0 = (1 - is_tt) * (1 - is_pv) * (has_k0 & (*m == k0) as i16);
+                let is_k1 = (1 - is_tt) * (1 - is_pv) * (1 - is_k0) * (has_k1 & (*m == k1) as i16);
 
-                // 2. Accumulate values over a strict linear i16 equation
-                let added_score = (is_pv * 32_000) + (is_k0 * 500) + (is_k1 * 400);
+                // 2. Accumulate values over a strict linear i16 equation (TT=32000 > PV=28000 > K0=500 > K1=400)
+                let added_score = (is_tt * 32_000) + (is_pv * 28_000) + (is_k0 * 500) + (is_k1 * 400);
 
                 // 3. Scale baseline scores safely without control flow jumps
-                let remains_unchanged = 1 - is_pv - is_k0 - is_k1;
+                let remains_unchanged = 1 - is_tt - is_pv - is_k0 - is_k1;
                 m.pv_score = (m.pv_score * remains_unchanged) + added_score;
             }
         }
@@ -819,61 +828,59 @@ impl ChessBoard {
             Side::NONE => panic!("Invalid Game State: active_player cannot be Side::NONE during NNUE accumulator fetching!"),
         };
 
-        // --- STEP 0: ACCUMULATOR ---
-        let l2_left: &mut [i8; 256] = 
-            unsafe { &mut *buffer.l2_inputs.as_mut_ptr().cast::<[i8; 256]>() };
-        let l2_right: &mut [i8; 256] = 
-            unsafe { &mut *buffer.l2_inputs.as_mut_ptr().add(256).cast::<[i8; 256]>() };
+        // --- STEP 0: ACCUMULATOR MAPPING ---
+        let l2_inputs: &mut [i8; 512] = unsafe { &mut *buffer.l2_inputs.as_mut_ptr().cast::<[i8; 512]>() };
+        let (l2_left, l2_right) = l2_inputs.split_at_mut(256);
 
-        // --- STEP 1: Clipped ReLU ---
-        for i in 0..256 {
-            let shifted = active_acc[i] >> 7;
-            l2_left[i] = active_acc[i].clamp(0, 127) as i8;
+        // --- STEP 1: Clipped ReLU (Branchless Vectorized Clamping) ---
+        for (i, &val) in active_acc.iter().enumerate().take(256) {
+            l2_left[i] = val.clamp(0, 127) as i8;
         }
-        for i in 0..256 {
-            let shifted = opp_acc[i] >> 7;
-            l2_right[i] = opp_acc[i].clamp(0, 127) as i8;
+        for (i, &val) in opp_acc.iter().enumerate().take(256) {
+            l2_right[i] = val.clamp(0, 127) as i8;
         }
 
         // --- STEP 2: HIDDEN LAYER 2 (512 -> 64) ---
-        let l2_biases = &self.nnue_network.l2_biases;
-        let l2_inputs: &[i8; 512] = 
-            unsafe { &*buffer.l2_inputs.as_ptr().cast::<[i8; 512]>() };
-        let l3_inputs: &mut [i8; 64] = 
-            unsafe { &mut *buffer.l3_inputs.as_mut_ptr().cast::<[i8; 64]>() };
+        let l3_inputs: &mut [i8; 64] = unsafe { &mut *buffer.l3_inputs.as_mut_ptr().cast::<[i8; 64]>() };
 
         for neuron in 0..64 {
-            let mut sum: i32 = l2_biases[neuron];
-            let row: &[i8; 512] = &self.nnue_network.l2_weights[neuron];
+            let mut sum: i32 = self.nnue_network.l2_biases[neuron];
+            let row = &self.nnue_network.l2_weights[neuron];
 
-            for i in 0..512 {
-                sum += (l2_inputs[i] as i32) * (row[i] as i32);
+            // Process in structural 32-byte chunks to explicitly force AVX2/NEON auto-vectorization loops
+            for (input_chunk, weight_chunk) in l2_inputs.chunks_exact(32).zip(row.chunks_exact(32)) {
+                let mut local_sum = 0i32;
+                for i in 0..32 {
+                    local_sum += (input_chunk[i] as i32) * (weight_chunk[i] as i32);
+                }
+                sum += local_sum;
             }
 
-            let activated = sum >> 7;
-            l3_inputs[neuron] = activated.clamp(0, 127) as i8;
+            l3_inputs[neuron] = (sum >> 7).clamp(0, 127) as i8;
         }
 
         // --- STEP 3: HIDDEN LAYER 3 (64 -> 32) ---
-        let l3_biases = &self.nnue_network.l3_biases;
-        let l4_inputs: &mut [i8; 32] = 
-            unsafe { &mut *buffer.l4_inputs.as_mut_ptr().cast::<[i8; 32]>() };
+        let l4_inputs: &mut [i8; 32] = unsafe { &mut *buffer.l4_inputs.as_mut_ptr().cast::<[i8; 32]>() };
 
         for neuron in 0..32 {
-            let mut sum: i32 = l3_biases[neuron];
-            let row: &[i8; 64] = &self.nnue_network.l3_weights[neuron];
+            let mut sum: i32 = self.nnue_network.l3_biases[neuron];
+            let row = &self.nnue_network.l3_weights[neuron];
 
-            for i in 0..64 {
-                sum += (l3_inputs[i] as i32) * (row[i] as i32);
+            // Process in structural 16-byte steps for streamlined register usage
+            for (input_chunk, weight_chunk) in l3_inputs.chunks_exact(16).zip(row.chunks_exact(16)) {
+                let mut local_sum = 0i32;
+                for i in 0..16 {
+                    local_sum += (input_chunk[i] as i32) * (weight_chunk[i] as i32);
+                }
+                sum += local_sum;
             }
 
-            let activated = sum >> 5;
-            l4_inputs[neuron] = activated.clamp(0, 127) as i8;
+            l4_inputs[neuron] = (sum >> 5).clamp(0, 127) as i8;
         }
 
         // --- STEP 4: OUTPUT LAYER (32 -> 1) ---
         let mut final_sum: i32 = self.nnue_network.output_bias[0];
-        let row: &[i8; 32] = &self.nnue_network.output_weights[0];
+        let row = &self.nnue_network.output_weights[0];
 
         for i in 0..32 {
             final_sum += (l4_inputs[i] as i32) * (row[i] as i32);
@@ -881,7 +888,6 @@ impl ChessBoard {
 
         // --- STEP 5: FINAL OUTPUT SCALING & SHIFT ---
         let centipawn_score = (final_sum * 100) >> 7;
-
         centipawn_score as i16
     }
 
