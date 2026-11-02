@@ -1,6 +1,7 @@
 import os
 import sys
 import glob
+import math
 import numpy as np
 import chess
 import multiprocessing
@@ -10,8 +11,8 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # --- INITIALIZATION ENGINE CONSTANTS ---
 DATA_SIZE = 2_000_000
-# 10 Buckets * 11 Active Pieces (excluding own King) * 64 Squares = 7040
-INPUT_FEATURES = 10 * 11 * 64  # Dual-Perspective HalfKA Dimension (7040)
+# 10 Buckets * 11 Active Pieces (excluding own King) * 64 Squares + 4 Castling Squares = 7040
+INPUT_FEATURES = 10 * 11 * 64 + 4  # Dual-Perspective HalfKA Dimension (7040)
 MAX_PIECES = 32  
 
 # Map FEN character to an integer type 0-11
@@ -103,6 +104,9 @@ def parse_fen_to_features(fen_string):
     Parses a standard FEN string into sparse categorical feature indices for a
     10-bucket, horizontally mirrored HalfKA NNUE layout using the custom PIECE_MAP.
     
+    Appends 4 traditional castling right nodes to the end of the feature transformer
+    array (Indices 7040-7043)
+
     Returns:
         tuple: (active_side_indices, passive_side_indices)
                Each list contains integer indices ranging from 0 to 7040.
@@ -110,6 +114,7 @@ def parse_fen_to_features(fen_string):
     parts = fen_string.split()
     board_part = parts[0]
     turn_part = parts[1]
+    castling_part = parts[2] if len(parts) > 2 else "-"
     is_black_turn = (turn_part == 'b')
         
     # Process FEN ranks from top to bottom (Rank 8 down to Rank 1)
@@ -196,7 +201,53 @@ def parse_fen_to_features(fen_string):
             
             b_idx = (black_king_bucket * 704) + (b_compressed_type * 64) + final_b_sq
             black_perspective_indices.append(b_idx)
-            
+
+    # --------------------------------------------------------------------------
+    # --- TRADITIONAL CASTLING INFLATION LAYER (Indices 7040 - 7043) ---
+    # --------------------------------------------------------------------------
+    # Base offset boundary right where the 10 king buckets end (10 * 704 = 7040)
+    CASTLING_BASE = 7040
+    
+    # 1. Parse raw presence from FEN string segment
+    has_w_king  = 'K' in castling_part
+    has_w_queen = 'Q' in castling_part
+    has_b_king  = 'k' in castling_part
+    has_b_queen = 'q' in castling_part
+
+    # 2. Swap King-side and Queen-side flags dynamically if the active wing is mirrored
+    if mirror_white:
+        has_w_king, has_w_queen = has_w_queen, has_w_king
+    if mirror_black:
+        has_b_king, has_b_queen = has_b_queen, has_b_king
+
+    # 3. Map to dual-perspective accumulators using strict Active/Passive layout parameters
+    # 7040 -> Active Player King-side  | 7041 -> Active Player Queen-side
+    # 7042 -> Passive Player King-side | 7043 -> Passive Player Queen-side
+    if not is_black_turn:
+        # White is Active (Own), Black is Passive (Enemy)
+        if has_w_king:  white_perspective_indices.append(CASTLING_BASE + 0)
+        if has_w_queen: white_perspective_indices.append(CASTLING_BASE + 1)
+        if has_b_king:  white_perspective_indices.append(CASTLING_BASE + 2)
+        if has_b_queen: white_perspective_indices.append(CASTLING_BASE + 3)
+        
+        # Black Perspective View (Black sees itself as Own, White as Enemy)
+        if has_b_king:  black_perspective_indices.append(CASTLING_BASE + 0)
+        if has_b_queen: black_perspective_indices.append(CASTLING_BASE + 1)
+        if has_w_king:  black_perspective_indices.append(CASTLING_BASE + 2)
+        if has_w_queen: black_perspective_indices.append(CASTLING_BASE + 3)
+    else:
+        # Black is Active (Own), White is Passive (Enemy)
+        if has_b_king:  black_perspective_indices.append(CASTLING_BASE + 0)
+        if has_b_queen: black_perspective_indices.append(CASTLING_BASE + 1)
+        if has_w_king:  white_perspective_indices.append(CASTLING_BASE + 2)
+        if has_w_queen: white_perspective_indices.append(CASTLING_BASE + 3)
+        
+        # White Perspective View (White sees itself as Own, Black as Enemy)
+        if has_w_king:  white_perspective_indices.append(CASTLING_BASE + 0)
+        if has_w_queen: white_perspective_indices.append(CASTLING_BASE + 1)
+        if has_b_king:  white_perspective_indices.append(CASTLING_BASE + 2)
+        if has_b_queen: white_perspective_indices.append(CASTLING_BASE + 3)
+        
     # Return indices organized cleanly by active player turn
     if is_black_turn:
         return black_perspective_indices, white_perspective_indices
@@ -204,8 +255,38 @@ def parse_fen_to_features(fen_string):
         return white_perspective_indices, black_perspective_indices
 
 
-def is_invalid_training_row(depth_str) -> bool:
-    return int(depth_str) < 26
+def is_invalid_training_row(depth_str: str, knodes_str: str) -> bool:
+    """
+    Elite Quality Gate for Middlegame Positions (> 8 Pieces).
+    Completely eliminates the lenient Depth 21 core pool. Enforces a strict
+    minimum baseline of Depth 26+ and massive node verification to guarantee 
+    universal positional stability.
+    """
+    try:
+        depth = int(depth_str)
+        knodes = int(knodes_str) if knodes_str and knodes_str != "None" else 0
+        
+        # 1. Immediate rejection of absolute low-resource or corrupted rows
+        if knodes <= 0:
+            return True
+
+        # 2. THE ANALYTICAL WALL: Ban anything below Depth 26 entirely
+        if depth < 26:
+            return True
+            
+        # Guardrail for Moderate High-Depth (Depths 26 to 32)
+        # 400 KNodes = 400,000 nodes searched. Keeps your elite depth 30 transpositions.
+        if 26 <= depth <= 32:
+            return knodes < 400
+            
+        # Guardrail for Master-Class Analysis (Depth 33+)
+        # 1200 KNodes = 1.2 Million nodes searched. Safely saves the 42M node / Depth 42 gem!
+        else:
+            return knodes < 1200
+        
+    except (ValueError, TypeError):
+        # Defensively mark corrupt structural strings as invalid
+        return True
 
 def pad_indices(a_idx, p_idx):
     a_pad = np.full(MAX_PIECES, INPUT_FEATURES, dtype=np.int32)
@@ -247,7 +328,7 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
 
     # Stream the file in manageable memory chunks (65,536 rows at a time)
     # Only loads the requested 4 columns into memory per batch
-    for pyarrow_batch in parquet_file.iter_batches(batch_size=65536, columns=['fen', 'cp', 'depth', 'mate']):
+    for pyarrow_batch in parquet_file.iter_batches(batch_size=65536, columns=['fen', 'cp', 'depth', 'mate', 'knodes']):
         
         # Zero-copy conversion of just this specific chunk to a lightweight DataFrame
         chunk_df = pyarrow_batch.to_pandas()
@@ -256,6 +337,7 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
             fen = row.get("fen")
             raw_score = row.get("cp")
             depth_val = row.get("depth")
+            knodes = row.get("knodes")
             mate_val = None if pd.isna(row.get("mate")) else row.get("mate")
 
             if not isinstance(fen, str) or '\x00' in fen or fen.count('/') != 7:
@@ -272,30 +354,31 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
 
             # Calculate total pieces remaining on the board
             piece_count = bin(int(board.occupied)).count("1")
-            is_black_turn = (board.turn == chess.BLACK)
 
             active_pawn_score = 0
             # =================================================================
             # STRATEGIC PATH A: ENDGAME PIPELINE (<= 8 Pieces)
-            # Assume Stockfish has an Endgame Table that solves every 8 piece
-            # positions or 99%+ of these positions.
-            # 
-            # The evaluation is heavily inflated by bonuses from alpha-beta
-            # and thus we opted for a 250 centipawn clamp.
-            # 
-            # This is more as a vector of geometry 
+            # Implements Hyperbolic Soft-Clamping & Mate Distance Decay.
+            # Bypasses alpha-beta inflation while preserving gradient flow.
             # =================================================================
-            if piece_count < 8:
+            if piece_count <= 8:
                 if mate_val is not None and not pd.isna(mate_val):
-                    score_target = 250.0 if float(mate_val) > 0 else -250.0
+                    mate_count = float(mate_val)
+                    if mate_count > 0:
+                        score_target = min(300.0, 250.0 + (50.0 / max(1.0, mate_count)))
+                    else:
+                        score_target = max(-300.0, -250.0 + (50.0 / min(-1.0, mate_count)))
 
                 elif not pd.isna(raw_score):
                     val = float(raw_score)
-                    if val > 250.0:    score_target = 250.0
-                    elif val < -250.0: score_target = -250.0
-                    else:              score_target = val
+                    if abs(val) <= 200.0:
+                        score_target = val
+                    else:
+                        sign = 1.0 if val > 0 else -1.0
+                        excess = abs(val) - 200.0
+                        score_target = sign * (200.0 + 100.0 * math.tanh(excess / 400.0))
                 else:
-                    continue 
+                    continue
                     
                 active_pawn_score = score_target / 100.0
             # =================================================================
@@ -305,7 +388,7 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
                 # Filter out explicit engine-calculated checkmates for middlegames
                 if mate_val is not None:
                     continue
-                if depth_val is not None and is_invalid_training_row(depth_val):
+                if depth_val is not None and is_invalid_training_row(depth_val, knodes):
                     continue
 
                 score_target = float(raw_score)
@@ -341,16 +424,6 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
                 file_processed_count += len(batch_records)
                 batch_records = []
                 local_shard_counter += 1
-
-            if len(active_orig) > 0:
-                orig_bucket = int(active_orig[0] // 704)
-            else:
-                orig_bucket = 0
-
-            if len(active_rot_pad) > 0:
-                rot_bucket = int(active_rot_pad[0] // 704)
-            else:
-                rot_bucket = 0
                     
             # Append rotated perspective
             batch_records.append({
@@ -359,7 +432,6 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
                 'target': active_player_target,
                 'depth': depth_val,
                 'fen': rotated_fen,
-                'king_bucket': rot_bucket,
             })
 
             # Append original perspective
@@ -369,7 +441,6 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
                 'target': active_player_target,
                 'depth': depth_val,
                 'fen': fen,
-                'king_bucket': orig_bucket,
             })
 
     # Flush remaining records from memory

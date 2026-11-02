@@ -14,8 +14,8 @@ from keras import layers
 from permanent_dataset_manager import EpochSynchronizedDatasetManager
 
 # --- Global Configurations ---
-# 10 Buckets * 11 Active Pieces (excluding own King) * 64 Squares = 7040
-INPUT_FEATURES = 10 * 11 * 64  # Dual-Perspective HalfKA Dimension (7040)
+# 10 Buckets * 11 Active Pieces (excluding own King) * 64 Squares + 4 (Castling Squares)= 7040
+INPUT_FEATURES = 10 * 11 * 64 + 4  # Dual-Perspective HalfKA Dimension (7040)
 MAX_PIECES = 32                # Uniform layout array padding bound
 SCALE_MAX = 1.0                # Bounded Clipped ReLU limit 
 
@@ -178,7 +178,6 @@ class EpochSynchronizedResetCallback(tf.keras.callbacks.Callback):
         print("\n[Training Loop Commenced] Automatically priming background multiprocessing streams...")
         self.train_manager.start_epoch_stream()
         self.val_manager.start_epoch_stream()
-        print("[Training Loop Commenced] Streams successfully primed for Epoch 1.")
 
     def on_epoch_end(self, epoch, logs=None):
         print(f"\n[Epoch {epoch + 1} Complete] Recycling background multiprocessing streams...")
@@ -281,16 +280,16 @@ def close_position_error_all(y_true, y_pred):
     raw_error = tf.abs(y_true - y_pred)
     return tf.reduce_mean(raw_error)
 
-def close_position_error_3(y_true, y_pred):
+def close_position_error(y_true, y_pred):
     """
-    Calculates MAE only for positions with a true evaluation between 0 and 3 pawns.
-    Assumes y_true is scaled in pawns (e.g., 1.0 = 1 pawn, 3.0 = 3 pawns).
+    Calculates MAE only for positions with a true evaluation between 0 and 2.5 pawns.
+    Assumes y_true is scaled in pawns (e.g., 1.0 = 1 pawn, 2.5 = 2.5 pawns).
     """
     # 1. Compute raw absolute error per position
     raw_error = tf.abs(y_true - y_pred)
     
     # 2. Create a mask for positions within the 0 to 3 pawn range (absolute value)
-    is_close_position = tf.abs(y_true) <= 3.0
+    is_close_position = tf.abs(y_true) <= 2.5
     mask = tf.cast(is_close_position, tf.float32)
     
     # 3. Filter the error using the mask
@@ -384,6 +383,12 @@ def train_nnue_on_fens():
     )
 
     # 2. Bind directly to your engineered AdamW
+    STEPS_PER_EPOCH, VALIDATION_PER_EPOCH = compute_dynamic_epoch_geometry(
+        train_dir="./balanced_shards/training",
+        val_dir="./balanced_shards/validation",
+        batch_size=BATCH_SIZE
+    )
+
     decay_steps_calculated = TOTAL_EPOCHS * STEPS_PER_EPOCH
 
     # 1. Maintain your optimized learning rate schedule
@@ -416,7 +421,7 @@ def train_nnue_on_fens():
     model.compile(
         optimizer=stockfish_optimizer,
         loss=pawn_probability_mse_loss,
-        metrics=[close_position_error_all, close_position_error_3]
+        metrics=[close_position_error_all, close_position_error]
     )
 
     train_dir, val_dir = get_local_shard_directories()
@@ -424,17 +429,11 @@ def train_nnue_on_fens():
     
     train_manager = EpochSynchronizedDatasetManager(
         shard_directory=train_dir, shard_pattern="*.parquet", num_workers=optimal_train_workers, 
-        queue_size=32, batch_size=BATCH_SIZE
+        queue_size=32, batch_size=BATCH_SIZE, name="Training"
     )
     val_manager = EpochSynchronizedDatasetManager(
         shard_directory=val_dir, shard_pattern="*.parquet", num_workers=1,
-        queue_size=16, batch_size=BATCH_SIZE
-    )
-
-    STEPS_PER_EPOCH, VALIDATION_PER_EPOCH = compute_dynamic_epoch_geometry(
-        train_dir="./balanced_shards/training",
-        val_dir="./balanced_shards/validation",
-        batch_size=BATCH_SIZE
+        queue_size=16, batch_size=BATCH_SIZE, name="Validation"
     )
 
     # 1. Clean, named generator bindings (No loops, no inline lambdas)
@@ -445,17 +444,15 @@ def train_nnue_on_fens():
         return val_manager.generator_fn(total_epoch_steps=VALIDATION_PER_EPOCH)
 
     # 2. Build structural dataset graph definitions EXACTLY ONCE.
-    # The .repeat() loop ensures Keras never runs out of data at epoch limits,
-    # while the static name prevents graph retracing memory leaks.
     def get_fresh_train_dataset():
         return tf.data.Dataset.from_generator(
             generator=train_generator_wrapper,
             output_signature=(
                 {
-                    "active_features": tf.TensorSpec(shape=(None, MAX_PIECES), dtype=tf.int16),
-                    "passive_features": tf.TensorSpec(shape=(None, MAX_PIECES), dtype=tf.int16),
+                    "active_features": tf.TensorSpec(shape=(BATCH_SIZE, MAX_PIECES), dtype=tf.int16),
+                    "passive_features": tf.TensorSpec(shape=(BATCH_SIZE, MAX_PIECES), dtype=tf.int16),
                 },
-                tf.TensorSpec(shape=(None, 1), dtype=tf.float32)
+                tf.TensorSpec(shape=(BATCH_SIZE, 1), dtype=tf.float32)
             )
         ).repeat().prefetch(tf.data.AUTOTUNE)
 
@@ -464,10 +461,10 @@ def train_nnue_on_fens():
             generator=val_generator_wrapper,
             output_signature=(
                 {
-                    "active_features": tf.TensorSpec(shape=(None, MAX_PIECES), dtype=tf.int16),
-                    "passive_features": tf.TensorSpec(shape=(None, MAX_PIECES), dtype=tf.int16),
+                    "active_features": tf.TensorSpec(shape=(BATCH_SIZE, MAX_PIECES), dtype=tf.int16),
+                    "passive_features": tf.TensorSpec(shape=(BATCH_SIZE, MAX_PIECES), dtype=tf.int16),
                 },
-                tf.TensorSpec(shape=(None, 1), dtype=tf.float32)
+                tf.TensorSpec(shape=(BATCH_SIZE, 1), dtype=tf.float32)
             )
         ).repeat().prefetch(tf.data.AUTOTUNE) 
 

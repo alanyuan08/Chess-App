@@ -2,6 +2,7 @@ import os
 import sys
 import glob
 import shutil
+import gc
 import polars as pl
 import pyarrow.parquet as pq 
 
@@ -12,6 +13,8 @@ FINAL_DATA_SIZE = 2_000_000
 NUM_BUCKETS = 64  
 TEMP_DIR = "./dedup_temp_buckets"
 BUFFER_DIR = "./buffer_temp"  # NEW: Disk-backed buffer to prevent RAM buildup
+
+CANONICAL_COLUMNS = ["active_indices", "passive_indices", "target", "depth", "fen",]
 
 def run_partitioned_deduplication():
     os.makedirs(PRODUCTION_DIR, exist_ok=True)
@@ -68,18 +71,49 @@ def run_partitioned_deduplication():
             continue
                     
         print(f"    Processing isolated Bucket {bucket_idx}/{NUM_BUCKETS - 1}...")
-                
-        # Deduplicate exactly one bucket partition.
-        df_bucket_clean = (
+        # =================================================================
+        # 1. Lazy Scan Layer: 3-Field Structural Core Key
+        # Groups by: Pieces + Active Turn + Castling Rights
+        # Completely ignores En-Passant variations to align with Strategy 2.
+        # =================================================================
+        lazy_bucket = (
             pl.scan_parquet(bucket_files)
-            .sort("depth", descending=True)
-            .unique(subset=["fen"], keep="first")
+            .select(CANONICAL_COLUMNS)
+            .with_columns([
+                # Split FEN by spaces to isolate structural layout sub-fields
+                pl.col("fen").str.split(" ").alias("fen_parts")
+            ])
+            .with_columns([
+                # Weld fields 0, 1, and 2 into a single unique state key
+                pl.concat_str([
+                    pl.col("fen_parts").list.get(0),
+                    pl.col("fen_parts").list.get(1),
+                    pl.col("fen_parts").list.get(2)
+                ], separator=" ").alias("piece_turn_castle_key")
+            ])
+            .drop("fen_parts")
+        )
+        
+        # =================================================================
+        # 2. Compactor Pass: Depth-First Deduplication
+        # Collapses en-passant anomalies and retains elite evaluations.
+        # =================================================================
+        df_bucket_clean = (
+            lazy_bucket.group_by("piece_turn_castle_key")
+            .agg([
+                # Sort strictly by analytical depth descending. Highest depth wins.
+                pl.all().sort_by("depth", descending=True).first()
+            ])
+            .explode(pl.all().exclude("piece_turn_castle_key"))
+            .drop("piece_turn_castle_key")
             .collect(engine="streaming")
         )
                 
         shutil.rmtree(bucket_dir, ignore_errors=True)
                 
         if len(df_bucket_clean) == 0:
+            del df_bucket_clean
+            gc.collect()
             continue
                     
         buf_file = os.path.join(BUFFER_DIR, f"buf_{buffer_file_counter}.parquet")
@@ -88,6 +122,7 @@ def run_partitioned_deduplication():
         
         # Free memory reference immediately
         del df_bucket_clean
+        gc.collect()
 
         # Check if the cumulative buffered files on disk are ready to yield a full shard
         buffer_pattern = os.path.join(BUFFER_DIR, "*.parquet")
