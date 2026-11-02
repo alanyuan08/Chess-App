@@ -6,8 +6,8 @@ use std::io::{Read, BufReader};
 #[derive(Clone, Copy, Debug)]
 // The NNUE L1 / L2 and L3 weights should align to avoid expensive cache splits
 pub struct NnueNetwork {
-    // i16 -> 2 bytes. Updated dimension for the 16-bucket pattern (10 * 64 * 11)
-    pub l1_weights: [[i16; 256]; 7040],
+    // i16 -> 2 bytes. Updated dimension for the 16-bucket pattern (10 * 64 * 11) + 4 castling flags
+    pub l1_weights: [[i16; 256]; 7044],
     
     // i8 -> 1 byte. 512 / 128 -> 4 Cache Lines * 32
     pub l2_weights: [[i8; 512]; 64],
@@ -58,8 +58,8 @@ impl NnueNetwork {
                 reader.read_exact(byte_slice)
             };
 
-            // 1. Accumulator Layer (Updated size bounds for 7040 feature weights)
-            read_field(&mut network_box.l1_weights as *mut _ as *mut u8, 7040 * 256, 2)?;
+            // 1. Accumulator Layer (Updated size bounds for 7044 feature weights)
+            read_field(&mut network_box.l1_weights as *mut _ as *mut u8, 7044 * 256, 2)?;
 
             // 2. Hidden Layer 2
             read_field(&mut network_box.l2_weights as *mut _ as *mut u8, 64 * 512, 1)?;

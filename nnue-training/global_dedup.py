@@ -72,9 +72,7 @@ def run_partitioned_deduplication():
                     
         print(f"    Processing isolated Bucket {bucket_idx}/{NUM_BUCKETS - 1}...")
         # =================================================================
-        # 1. Lazy Scan Layer: 3-Field Structural Core Key
-        # Groups by: Pieces + Active Turn + Castling Rights
-        # Completely ignores En-Passant variations to align with Strategy 2.
+        # 1. Pipeline Definition: Isolate Keys and Protect Original FEN
         # =================================================================
         lazy_bucket = (
             pl.scan_parquet(bucket_files)
@@ -85,6 +83,7 @@ def run_partitioned_deduplication():
             ])
             .with_columns([
                 # Weld fields 0, 1, and 2 into a single unique state key
+                # This isolates the position identity, completely ignoring en-passant flags
                 pl.concat_str([
                     pl.col("fen_parts").list.get(0),
                     pl.col("fen_parts").list.get(1),
@@ -93,18 +92,18 @@ def run_partitioned_deduplication():
             ])
             .drop("fen_parts")
         )
-        
+
         # =================================================================
-        # 2. Compactor Pass: Depth-First Deduplication
-        # Collapses en-passant anomalies and retains elite evaluations.
+        # 2. Compactor Pass: Streaming-Safe Depth Deduplication
         # =================================================================
         df_bucket_clean = (
             lazy_bucket.group_by("piece_turn_castle_key")
             .agg([
                 # Sort strictly by analytical depth descending. Highest depth wins.
-                pl.all().sort_by("depth", descending=True).first()
+                # This preserves the original, unaltered "fen" value for the elite row.
+                pl.all().exclude("piece_turn_castle_key").sort_by("depth", descending=True).first()
             ])
-            .explode(pl.all().exclude("piece_turn_castle_key"))
+            # Drop the temporary grouping key to return the original schema layout
             .drop("piece_turn_castle_key")
             .collect(engine="streaming")
         )

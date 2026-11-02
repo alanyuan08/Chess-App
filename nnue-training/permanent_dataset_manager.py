@@ -6,34 +6,57 @@ import numpy as np
 import pandas as pd
 import multiprocessing as mp
 
-def _worker_loop(file_list, data_queue, shutdown_event, padding_index_value, chunk_size, files_per_mixing_buffer=20):
+def _worker_loop(command_queue, data_queue, shutdown_event, padding_index_value, chunk_size, max_safe_buffer_size=32):
     """
-    Parallel CPU worker routine that extracts Parquet shards, applies deep localized
-    shuffling via expanded buffer pools, and pushes static chunks to the main queue.
+    Persistent CPU worker routine that handles streaming chess data across multiple epochs.
+    Blocks and waits for the master thread to drop fresh file pools into command_queue,
+    with built-in mid-stream hot-swap checks to ensure seamless epoch boundaries.
     """
-    # Dynamic salt re-seeding to guarantee unique permutations across process forks
+    # Unique high-entropy process-level randomization seeding
     np.random.seed(int(time.time() * 1000) % 2**32 ^ mp.current_process().pid)
     
     while not shutdown_event.is_set():
-        shuffled_files = list(file_list)
+        try:
+            # Block and wait for the master thread to drop this worker's file pool for the new epoch
+            worker_files = command_queue.get(timeout=1.0)
+            if worker_files is None:  # Sentinel shutdown signal
+                return
+        except queue.Empty:
+            continue
+
+        # Execute high-entropy shuffling logic over the assigned workload
+        shuffled_files = list(worker_files)
         np.random.shuffle(shuffled_files)
-        
+        total_worker_files = len(shuffled_files)
+        if total_worker_files == 0:
+            continue
+            
+        # Dynamically compute buffer ceiling using your M4 Mac memory-tuning algorithm
+        dynamic_mixing_buffer_ceiling = max_safe_buffer_size
+        while dynamic_mixing_buffer_ceiling > 1:
+            if total_worker_files % dynamic_mixing_buffer_ceiling == 0:
+                break
+            dynamic_mixing_buffer_ceiling -= 1
+        if dynamic_mixing_buffer_ceiling == 1:
+            dynamic_mixing_buffer_ceiling = min(max_safe_buffer_size, total_worker_files)
+            
         mixed_active, mixed_passive, mixed_targets = [], [], []
         accumulated_files = 0
+        hot_swap_triggered = False
         
         for file_path in shuffled_files:
             if shutdown_event.is_set():
                 return
                 
+            # Intercept: Check if the master thread sent a hot-swap pool mid-epoch
+            if not command_queue.empty():
+                hot_swap_triggered = True
+                break
+                
             try:
-                # Read specific columns via Arrow engine to protect unified memory bandwidth
-                df = pd.read_parquet(
-                    file_path, 
-                    columns=['active_indices', 'passive_indices', 'target'], 
-                    engine='pyarrow', 
-                    use_threads=True
-                )
-                if len(df) == 0:
+                # Load columns explicitly to maximize decompression speed
+                df = pd.read_parquet(file_path, columns=['active_indices', 'passive_indices', 'target'], engine='pyarrow')
+                if len(df) == 0: 
                     continue
                 
                 a_matrix = np.stack(df['active_indices'].to_numpy()).astype(np.int16)
@@ -41,7 +64,7 @@ def _worker_loop(file_list, data_queue, shutdown_event, padding_index_value, chu
                 targets = np.stack(df['target'].to_numpy()).astype(np.float32).reshape(-1, 1)
                 del df
                 
-                # Replace unallocated features with out-of-bounds padding token
+                # Apply structural pad values
                 a_matrix[a_matrix == -1] = np.int16(padding_index_value)
                 p_matrix[p_matrix == -1] = np.int16(padding_index_value)
                 
@@ -50,13 +73,11 @@ def _worker_loop(file_list, data_queue, shutdown_event, padding_index_value, chu
                 mixed_targets.append(targets)
                 accumulated_files += 1
                 
-                # Trigger the master block permutation when the 80-file limit is met
-                if accumulated_files >= files_per_mixing_buffer:
+                if accumulated_files >= dynamic_mixing_buffer_ceiling:
                     flat_active = np.concatenate(mixed_active, axis=0)
                     flat_passive = np.concatenate(mixed_passive, axis=0)
                     flat_targets = np.concatenate(mixed_targets, axis=0)
                     
-                    # Instantly release references to clear RAM overhead
                     mixed_active, mixed_passive, mixed_targets = [], [], []
                     accumulated_files = 0
                     
@@ -65,64 +86,103 @@ def _worker_loop(file_list, data_queue, shutdown_event, padding_index_value, chu
                     flat_passive = flat_passive[perm]
                     flat_targets = flat_targets[perm]
                     
-                    for i in range(0, len(flat_targets), chunk_size):
-                        if shutdown_event.is_set():
+                    num_full_chunks = len(flat_targets) // chunk_size
+                    total_usable_rows = num_full_chunks * chunk_size
+                    
+                    for i in range(0, total_usable_rows, chunk_size):
+                        if shutdown_event.is_set(): 
                             return
-                        
+                            
+                        # Double-check command queue inside the chunk distribution loop
+                        if not command_queue.empty():
+                            hot_swap_triggered = True
+                            break
+                            
                         chunk_item = (
-                            {
-                                'active_features': flat_active[i:i+chunk_size],
-                                'passive_features': flat_passive[i:i+chunk_size],
-                            },
+                            {'active_features': flat_active[i:i+chunk_size], 'passive_features': flat_passive[i:i+chunk_size]},
                             flat_targets[i:i+chunk_size]
                         )
                         
                         while not shutdown_event.is_set():
+                            # Break processing immediately if a hot-swap command drops
+                            if not command_queue.empty():
+                                hot_swap_triggered = True
+                                break
                             try:
                                 data_queue.put(chunk_item, timeout=0.1)
                                 break
-                            except queue.Full:
+                            except queue.Full: 
                                 continue
-                            except (ValueError, OSError):
-                                # Immediately drop out if the queue architecture was dismantled by the main thread
+                            except (ValueError, OSError): 
                                 return
-                    
+                                
+                        if hot_swap_triggered:
+                            break
+                            
+                    if hot_swap_triggered:
+                        del flat_active, flat_passive, flat_targets
+                        break
+                        
+                    if total_usable_rows < len(flat_targets):
+                        mixed_active = [flat_active[total_usable_rows:]]
+                        mixed_passive = [flat_passive[total_usable_rows:]]
+                        mixed_targets = [flat_targets[total_usable_rows:]]
+                        accumulated_files = 1
                     del flat_active, flat_passive, flat_targets
                     
-            except Exception as e:
-                print(f"\n[Dataset Worker Error] Skipping corrupted shard {file_path}: {e}")
+            except Exception:
                 continue
                 
-        # Handle remainder elements cleanly when total file slice finishes
+        # Skip remainder flush logic entirely if we are abandoning data for a hot-swap
+        if hot_swap_triggered:
+            del mixed_active, mixed_passive, mixed_targets
+            continue
+            
+        # Remainder padding loop
         if accumulated_files > 0 and not shutdown_event.is_set():
+            if not command_queue.empty():
+                del mixed_active, mixed_passive, mixed_targets
+                continue
+                
             flat_active = np.concatenate(mixed_active, axis=0)
             flat_passive = np.concatenate(mixed_passive, axis=0)
             flat_targets = np.concatenate(mixed_targets, axis=0)
-            
-            # Flush working lists immediately to prevent inter-epoch lingering memory bloat
             mixed_active, mixed_passive, mixed_targets = [], [], []
-            accumulated_files = 0
             
             perm = np.random.permutation(len(flat_targets))
-            for i in range(0, len(flat_targets), chunk_size):
+            flat_active = flat_active[perm]
+            flat_passive = flat_passive[perm]
+            flat_targets = flat_targets[perm]
+            
+            if len(flat_targets) < chunk_size:
+                pad_len = chunk_size - len(flat_targets)
+                flat_active = np.pad(flat_active, ((0, pad_len), (0, 0)), constant_values=padding_index_value)
+                flat_passive = np.pad(flat_passive, ((0, pad_len), (0, 0)), constant_values=padding_index_value)
+                flat_targets = np.pad(flat_targets, ((0, pad_len), (0, 0)), constant_values=0.0)
+                
+            for i in range(0, len(flat_targets) - chunk_size + 1, chunk_size):
                 if shutdown_event.is_set(): 
                     return
+                if not command_queue.empty():
+                    break
+                    
                 chunk_item = (
-                    {
-                        'active_features': flat_active[perm[i:i+chunk_size]], 
-                        'passive_features': flat_passive[perm[i:i+chunk_size]]
-                    }, 
-                    flat_targets[perm[i:i+chunk_size]]
+                    {'active_features': flat_active[i:i+chunk_size], 'passive_features': flat_passive[i:i+chunk_size]},
+                    flat_targets[i:i+chunk_size]
                 )
+                
                 while not shutdown_event.is_set():
+                    if not command_queue.empty():
+                        break
                     try:
                         data_queue.put(chunk_item, timeout=0.1)
                         break
                     except queue.Full: 
                         continue
-                    except (ValueError, OSError):
+                    except (ValueError, OSError): 
                         return
             del flat_active, flat_passive, flat_targets
+
     return
 
 class EpochSynchronizedDatasetManager:
@@ -140,127 +200,113 @@ class EpochSynchronizedDatasetManager:
             
         print(f"[DatasetManager] Discovered {len(self.all_files)} total shards.")
         
-        self.shutdown_event = None
-        self.workers = []
-        self.queue = None
-
-    def start_epoch_stream(self):
-        """
-        Hard reset: Dismantles previous frameworks and deploys strided workers using a
-        hardware-regulated buffer cap designed to maximize entropy safely on a 24GB Apple M4 Mac.
-        """
+        # Instantiate execution primitives EXACTLY ONCE at script initialization
         self.shutdown_event = mp.Event()
         self.queue = mp.Queue(maxsize=self.queue_size)
         self.queue.cancel_join_thread()
         
-        # Pull your newly isolated, strided file chunks
-        worker_file_map = self.get_shuffled_worker_slices()
-        
+        # Create persistent command queues to feed the background processes
+        self.worker_command_queues = [mp.Queue() for _ in range(num_workers)]
         self.workers = []
+        
+        # Spawn daemon worker forks immediately
         for i in range(self.num_workers):
-            worker_files = worker_file_map[i]
-            total_worker_files = len(worker_files)
-            if total_worker_files == 0: 
-                continue
-            
-            max_safe_buffer_size = 32            
-            dynamic_mixing_buffer_ceiling = max_safe_buffer_size
-            while dynamic_mixing_buffer_ceiling > 1:
-                if total_worker_files % dynamic_mixing_buffer_ceiling == 0:
-                    break
-                dynamic_mixing_buffer_ceiling -= 1
-                
-            # Safe structural fallback
-            if dynamic_mixing_buffer_ceiling == 1:
-                dynamic_mixing_buffer_ceiling = min(max_safe_buffer_size, total_worker_files)
-                
             p = mp.Process(
                 target=_worker_loop,
                 args=(
-                    list(worker_files), 
+                    self.worker_command_queues[i], 
                     self.queue, 
                     self.shutdown_event, 
                     self.PADDING_INDEX_VALUE, 
-                    self.batch_size,
-                    dynamic_mixing_buffer_ceiling  # Cleanly segmented memory sweeps
+                    self.batch_size
                 ),
                 daemon=True
             )
             p.start()
             self.workers.append(p)
-            
-        print(f"[DatasetManager] {self.name} worker streams deployed. Hardware-regulated buffer locked at {dynamic_mixing_buffer_ceiling} files per sweep.")
-
-    def get_shuffled_worker_slices(self):
-        # 1. Clone and deeply randomize the absolute master list
-        shuffled_master = list(self.all_files)
-        np.random.shuffle(shuffled_master)
-        
-        # 2. Interleave the file paths across your worker threads using striding [i::num_workers]
-        worker_assignments = {}
-        for worker_idx in range(self.num_workers):
-            assigned_files = shuffled_master[worker_idx::self.num_workers]
-            worker_assignments[worker_idx] = assigned_files
-            
-        return worker_assignments
 
     def generator_fn(self, total_epoch_steps):
-        """Yields tensors safely, handling asynchronous queue drops gracefully."""
-        try:
-            steps_yielded = 0
-            while steps_yielded < total_epoch_steps:
-                if self.queue is None or (self.shutdown_event and self.shutdown_event.is_set()):
-                    return
+        """
+        Named generator bound to the underlying multiprocessing queue.
+        Guarantees exact step limits per epoch loop to avoid out-of-sync queuing.
+        """
+        steps_yielded = 0
+        while steps_yielded < total_epoch_steps:
+            if self.shutdown_event.is_set():
+                return
                 
-                try:
-                    item = self.queue.get(timeout=1.0)
-                except queue.Empty:
-                    if self.shutdown_event and self.shutdown_event.is_set():
-                        return
-                    continue
+            try:
+                # Short timeout prevents hanging indefinitely on shutdown or hot-swap
+                chunk_item = self.queue.get(timeout=0.5)
+                yield chunk_item
+                steps_yielded += 1
+            except queue.Empty:
+                # If the queue is empty, give workers a moment to fill it or check shutdown
+                continue
+            except (ValueError, OSError):
+                # Queue was closed by master on exit
+                return
 
-                if item is None:
-                    continue
+    def start_epoch_stream(self, explicit_file_pool=None):
+        """
+        Safely clears stale queues and hot-swaps file decks across active 
+        processes without destroying the underlying pipe infrastructure.
+        """
+        # 1. Drain data queue completely to prevent epoch cross-contamination
+        while not self.queue.empty():
+            try:
+                self.queue.get_nowait()
+            except Exception:
+                break
                 
-                yield item
-                steps_yielded += 1 
-                
-        except (AttributeError, TypeError):
-            return
-        finally:
-            pass
+        # 2. Gather file pool maps
+        file_pool = explicit_file_pool if explicit_file_pool is not None else self.all_files
+        worker_file_map = self.split_files_to_worker_chunks(file_pool) 
+        
+        # 3. Purge historic command lists before transmitting new state tokens
+        for i in range(self.num_workers):
+            while not self.worker_command_queues[i].empty():
+                try:
+                    self.worker_command_queues[i].get_nowait()
+                except Exception:
+                    break
+                    
+            # 4. Atomically inject the new shuffled file deck
+            worker_files = worker_file_map[i]
+            self.worker_command_queues[i].put(list(worker_files))
+            
+        print(f"[DatasetManager] {self.name} worker streams successfully hot-swapped for the new epoch loop.")
 
     def stop_epoch_stream(self):
-        """Force kills workers and clears the multiprocessing queue framework cleanly."""
-        print(f"[DatasetManager] {self.name} worker stopped")
-
-        # 1. Trigger shutdown event immediately so workers drop out of their file-reading routines
-        if self.shutdown_event:
-            self.shutdown_event.set()
-            
-        # 2. Break down the queue buffers cleanly to drop memory references instantly
-        if self.queue is not None:
+        """ Clean termination of background daemons on script finalization. """
+        self.shutdown_event.set()
+        for i in range(self.num_workers):
             try:
-                # Direct the underlying OS thread pool not to attempt flushing remaining bytes
-                self.queue.cancel_join_thread()
-                
-                # Drain queue immediately on the main thread to unblock any workers stuck on .put()
-                while not self.queue.empty():
-                    try:
-                        self.queue.get_nowait()
-                    except queue.Empty:
-                        break
-                self.queue.close()
-            except Exception as e:
-                print(f"[DatasetManager Warning] Non-fatal queue disposal friction: {e}")
-            self.queue = None
+                self.worker_command_queues[i].put(None)
+            except Exception: pass
+        for p in self.workers:
+            p.terminate()
 
-        # 3. Cleanly harvest background threads with fixed deadlines to avoid zombie states
-        if self.workers:
-            for p in self.workers:
-                if p.is_alive():
-                    p.terminate()
-                    p.join(timeout=0.2)
-            self.workers = []
+    def split_files_to_worker_chunks(self, file_pool=None):
+        """
+        Splits the provided globally shuffled file pool evenly across the active 
+        worker count to ensure unique, non-overlapping workloads per process fork.
+        """
+        # 1. Fallback cleanly to master list if no dynamic pool is supplied
+        files_to_slice = list(file_pool) if file_pool is not None else list(self.all_files)
+        
+        # Initialize a clean dictionary mapping worker index to its file list slice
+        worker_file_map = {i: [] for i in range(self.num_workers)}
+        
+        # 2. Distribute files uniformly using a strided round-robin sequence
+        # This acts as an extra layer of structural distribution across your 6 CPU processes
+        for idx, file_path in enumerate(files_to_slice):
+            worker_id = idx % self.num_workers
+            worker_file_map[worker_id].append(file_path)
             
-        self.shutdown_event = None
+        # Optional validation telemetry log
+        for i in range(self.num_workers):
+            if len(worker_file_map[i]) == 0:
+                print(f"[DatasetManager][WARNING] Worker {i} received 0 files to process!")
+                
+        return worker_file_map
