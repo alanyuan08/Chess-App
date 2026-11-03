@@ -34,8 +34,24 @@ def run_partitioned_deduplication():
         try:
             print(f"    [{i}/{len(all_shards)}] Splitting {os.path.basename(path)} into temporary disk buckets...")
 
-            lazy_shard = pl.scan_parquet(path).with_columns(
-                bucket=(pl.col("fen").hash(seed=42) % NUM_BUCKETS).abs()
+            # Strip en-passant *before* calculating the hash seed
+            lazy_shard = (
+                pl.scan_parquet(path)
+                .with_columns(
+                    fen_parts=pl.col("fen").str.split(" ")
+                )
+                .with_columns(
+                    # Construct a structural hash key containing only: Pieces + Turn + Castling
+                    hash_key=pl.concat_str([
+                        pl.col("fen_parts").list.get(0),
+                        pl.col("fen_parts").list.get(1),
+                        pl.col("fen_parts").list.get(2)
+                    ], separator=" ")
+                )
+                .with_columns(
+                    bucket=(pl.col("hash_key").hash(seed=42) % NUM_BUCKETS).abs()
+                )
+                .drop(["fen_parts", "hash_key"]) # Keep the file size small on disk
             )
             
             df_partitioned = lazy_shard.collect(engine="streaming")
@@ -71,40 +87,29 @@ def run_partitioned_deduplication():
             continue
                     
         print(f"    Processing isolated Bucket {bucket_idx}/{NUM_BUCKETS - 1}...")
-        # =================================================================
-        # 1. Pipeline Definition: Isolate Keys and Protect Original FEN
-        # =================================================================
         lazy_bucket = (
             pl.scan_parquet(bucket_files)
             .select(CANONICAL_COLUMNS)
-            .with_columns([
-                # Split FEN by spaces to isolate structural layout sub-fields
-                pl.col("fen").str.split(" ").alias("fen_parts")
-            ])
-            .with_columns([
-                # Weld fields 0, 1, and 2 into a single unique state key
-                # This isolates the position identity, completely ignoring en-passant flags
-                pl.concat_str([
+            .with_columns(
+                fen_parts=pl.col("fen").str.split(" ")
+            )
+            .with_columns(
+                dedup_key=pl.concat_str([
                     pl.col("fen_parts").list.get(0),
                     pl.col("fen_parts").list.get(1),
                     pl.col("fen_parts").list.get(2)
-                ], separator=" ").alias("piece_turn_castle_key")
-            ])
+                ], separator=" ")
+            )
             .drop("fen_parts")
         )
 
-        # =================================================================
-        # 2. Compactor Pass: Streaming-Safe Depth Deduplication
-        # =================================================================
         df_bucket_clean = (
-            lazy_bucket.group_by("piece_turn_castle_key")
+            lazy_bucket.group_by("dedup_key")
             .agg([
-                # Sort strictly by analytical depth descending. Highest depth wins.
-                # This preserves the original, unaltered "fen" value for the elite row.
-                pl.all().exclude("piece_turn_castle_key").sort_by("depth", descending=True).first()
+                # Highest depth evaluation retains its pristine original FEN structure
+                pl.all().exclude("dedup_key").sort_by("depth", descending=True).first()
             ])
-            # Drop the temporary grouping key to return the original schema layout
-            .drop("piece_turn_castle_key")
+            .drop("dedup_key")
             .collect(engine="streaming")
         )
                 

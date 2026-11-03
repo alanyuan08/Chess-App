@@ -208,46 +208,47 @@ def parse_fen_to_features(fen_string):
     # Base offset boundary right where the 10 king buckets end (10 * 704 = 7040)
     CASTLING_BASE = 7040
     
-    # 1. Parse raw presence from FEN string segment
     has_w_king  = 'K' in castling_part
     has_w_queen = 'Q' in castling_part
     has_b_king  = 'k' in castling_part
     has_b_queen = 'q' in castling_part
+   
+    # Castling Flags are only relevant of the White king is on E1 and the Black king is on E8
+    # If they are not, these flags are auto set to False
 
-    # 2. Swap King-side and Queen-side flags dynamically if the active wing is mirrored
-    if mirror_white:
-        has_w_king, has_w_queen = has_w_queen, has_w_king
-    if mirror_black:
-        has_b_king, has_b_queen = has_b_queen, has_b_king
+    # White needed to Mirrored due to King on E1
+    w_k, w_q = has_w_queen, has_w_king 
+    
+    # Black does not need to be mirrored
+    b_k, b_q = has_b_king, has_b_queen
 
-    # 3. Map to dual-perspective accumulators using strict Active/Passive layout parameters
-    # 7040 -> Active Player King-side  | 7041 -> Active Player Queen-side
-    # 7042 -> Passive Player King-side | 7043 -> Passive Player Queen-side
+    # ==========================================================================
+    # 2. ASSIGN INDICES DIRECTLY BY SIDE TO MOVE
+    # ==========================================================================
+    # Both players see their OWN rights at +0/+1, and ENEMY rights at +2/+3
     if not is_black_turn:
-        # White is Active (Own), Black is Passive (Enemy)
-        if has_w_king:  white_perspective_indices.append(CASTLING_BASE + 0)
-        if has_w_queen: white_perspective_indices.append(CASTLING_BASE + 1)
-        if has_b_king:  white_perspective_indices.append(CASTLING_BASE + 2)
-        if has_b_queen: white_perspective_indices.append(CASTLING_BASE + 3)
+        # --- WHITE TO MOVE ---
+        if w_k: white_perspective_indices.append(CASTLING_BASE + 0)
+        if w_q: white_perspective_indices.append(CASTLING_BASE + 1)
+        if b_k: white_perspective_indices.append(CASTLING_BASE + 2)
+        if b_q: white_perspective_indices.append(CASTLING_BASE + 3)
         
-        # Black Perspective View (Black sees itself as Own, White as Enemy)
-        if has_b_king:  black_perspective_indices.append(CASTLING_BASE + 0)
-        if has_b_queen: black_perspective_indices.append(CASTLING_BASE + 1)
-        if has_w_king:  black_perspective_indices.append(CASTLING_BASE + 2)
-        if has_w_queen: black_perspective_indices.append(CASTLING_BASE + 3)
+        if b_k: black_perspective_indices.append(CASTLING_BASE + 0)
+        if b_q: black_perspective_indices.append(CASTLING_BASE + 1)
+        if w_k: black_perspective_indices.append(CASTLING_BASE + 2)
+        if w_q: black_perspective_indices.append(CASTLING_BASE + 3)
     else:
-        # Black is Active (Own), White is Passive (Enemy)
-        if has_b_king:  black_perspective_indices.append(CASTLING_BASE + 0)
-        if has_b_queen: black_perspective_indices.append(CASTLING_BASE + 1)
-        if has_w_king:  white_perspective_indices.append(CASTLING_BASE + 2)
-        if has_w_queen: white_perspective_indices.append(CASTLING_BASE + 3)
+        # --- BLACK TO MOVE ---
+        if b_k: black_perspective_indices.append(CASTLING_BASE + 0)
+        if b_q: black_perspective_indices.append(CASTLING_BASE + 1)
+        if w_k: black_perspective_indices.append(CASTLING_BASE + 2)
+        if w_q: black_perspective_indices.append(CASTLING_BASE + 3)
         
-        # White Perspective View (White sees itself as Own, Black as Enemy)
-        if has_w_king:  white_perspective_indices.append(CASTLING_BASE + 0)
-        if has_w_queen: white_perspective_indices.append(CASTLING_BASE + 1)
-        if has_b_king:  white_perspective_indices.append(CASTLING_BASE + 2)
-        if has_b_queen: white_perspective_indices.append(CASTLING_BASE + 3)
-        
+        if w_k: white_perspective_indices.append(CASTLING_BASE + 0)
+        if w_q: white_perspective_indices.append(CASTLING_BASE + 1)
+        if b_k: white_perspective_indices.append(CASTLING_BASE + 2)
+        if b_q: white_perspective_indices.append(CASTLING_BASE + 3)
+
     # Return indices organized cleanly by active player turn
     if is_black_turn:
         return black_perspective_indices, white_perspective_indices

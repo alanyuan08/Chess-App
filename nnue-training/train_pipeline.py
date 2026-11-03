@@ -13,7 +13,7 @@ from keras import Model
 from keras import layers
 
 # Import your newly written modular classes
-from permanent_dataset_manager import EpochSynchronizedDatasetManager
+from permanent_dataset_manager import InfiniteConveyorDatasetManager
 
 # --- Global Configurations ---
 # 10 Buckets * 11 Active Pieces (excluding own King) * 64 Squares + 4 (Castling Squares)= 7040
@@ -69,50 +69,6 @@ class AggressiveMemoryCleanup(keras.callbacks.Callback):
     """Safely frees dead CPU worker references to prevent RAM accumulation."""
     def on_epoch_end(self, epoch, logs=None):
         gc.collect() 
-
-class EpochSynchronizedResetCallback(tf.keras.callbacks.Callback):
-    """
-    Keras callback designed to dynamically redistribute globally shuffled 
-    parquet file pools across active workers without tearing down the underlying
-    multiprocessing queue architecture. Keeps AdamW momentum continuous.
-    """
-    def __init__(self, train_manager, val_manager, train_dir, val_dir):
-        super().__init__()
-        self.train_manager = train_manager
-        self.val_manager = val_manager
-        self.train_dir = train_dir
-        self.val_dir = val_dir
-
-    def on_train_begin(self, logs=None):
-        """ Primes the persistent background loops at the start of training. """
-        print("\n[Training Loop Commenced] Priming background streams...")
-        # Note: start_epoch_stream automatically opens the event gates (.set())
-        self.train_manager.start_epoch_stream()
-        self.val_manager.start_epoch_stream()
-
-    def on_epoch_end(self, epoch, logs=None):
-        print(f"\n[Epoch {epoch + 1} Complete] Shuffling and hot-swapping global file pools across processes...")
-        
-        # 1. Gather and globally shuffle files for training
-        all_train_files = sorted(glob.glob(os.path.join(self.train_dir, "*.parquet")))
-        random.seed(epoch + 42)
-        random.shuffle(all_train_files)
-        
-        # 2. Gather and globally shuffle files for validation
-        all_val_files = sorted(glob.glob(os.path.join(self.val_dir, "*.parquet")))
-        random.seed(epoch + 999)
-        random.shuffle(all_val_files)
-        
-        # 3. Hot-swap and unlock training streams
-        # This flushes remnants, pushes new files, and flips the training generator gate back to GREEN
-        self.train_manager.start_epoch_stream(explicit_file_pool=all_train_files)
-        
-        # 4. Hot-swap and unlock validation streams
-        # This guarantees that the validation prefetch engine gets a clean, synchronized deck for Epoch N+1
-        self.val_manager.start_epoch_stream(explicit_file_pool=all_val_files)
-            
-        print(f"[Epoch {epoch + 1}] Streams successfully refreshed at epoch end.")
-
 def get_local_shard_directories():
     """
     Defines the storage locations for your exported clean Parquet files.
@@ -228,7 +184,7 @@ def train_nnue_on_fens():
 
     # 2. Shared Accumulator Layer (Embedding-based indexing for fast memory execution)
     # Dimensioned to INPUT_FEATURES + 1 to house the positive padding index row safely
-    nnue_accumulator_init = keras.initializers.HeNormal(seed=42)
+    nnue_accumulator_init = keras.initializers.RandomNormal(mean=0.0, stddev=0.01, seed=42)
     embedding_layer = layers.Embedding(
         input_dim=INPUT_FEATURES + 1,
         output_dim=256,
@@ -324,14 +280,14 @@ def train_nnue_on_fens():
     )
     
     total_train_steps = int(TOTAL_EPOCHS * STEPS_PER_EPOCH)
-    warmup_steps = int(STEPS_PER_EPOCH * 0.05)
+    warmup_steps = int(STEPS_PER_EPOCH * 0.2) 
 
     # 1. Use the standard, bulletproof Keras 3 native Cosine Decay with built-in warmup
     native_lr_schedule = keras.optimizers.schedules.CosineDecay(
-        initial_learning_rate=3e-4,
-        decay_steps=total_train_steps - warmup_steps,
-        alpha=0.0167,
-        warmup_target=3e-4,
+        initial_learning_rate=0.0,
+        decay_steps=total_train_steps,
+        alpha=0.02,
+        warmup_target=1.5e-4,   
         warmup_steps=warmup_steps
     )
 
@@ -339,7 +295,7 @@ def train_nnue_on_fens():
     stockfish_optimizer = keras.optimizers.AdamW(
         learning_rate=native_lr_schedule,
         weight_decay=0.01,
-        epsilon=1e-8,
+        epsilon=1e-5,
         global_clipnorm=1.0
     )
 
@@ -352,23 +308,32 @@ def train_nnue_on_fens():
     train_dir, val_dir = get_local_shard_directories()
     optimal_train_workers = 6
     
-    train_manager = EpochSynchronizedDatasetManager(
-        shard_directory=train_dir, shard_pattern="*.parquet", num_workers=optimal_train_workers, 
-        queue_size=32, batch_size=BATCH_SIZE, name="Training"
+    # 1. Instantiate both managers with identical lowercase tracking keys
+    train_manager = InfiniteConveyorDatasetManager(
+        shard_directory=train_dir, 
+        shard_pattern="*.parquet", 
+        num_workers=optimal_train_workers, 
+        queue_size=32, 
+        batch_size=BATCH_SIZE, 
+        name="training"
     )
-    val_manager = EpochSynchronizedDatasetManager(
-        shard_directory=val_dir, shard_pattern="*.parquet", num_workers=2,
-        queue_size=32, batch_size=BATCH_SIZE, name="Validation"
+    val_manager = InfiniteConveyorDatasetManager(
+        shard_directory=val_dir, 
+        shard_pattern="*.parquet", 
+        num_workers=2,
+        queue_size=32, 
+        batch_size=BATCH_SIZE, 
+        name="validation"  
     )
 
-    # 1. Clean, named generator bindings (No loops, no inline lambdas)
+    # 2. Named generator bindings (No loops, no inline lambdas)
     def train_generator_wrapper():
-        return train_manager.generator_fn(total_epoch_steps=STEPS_PER_EPOCH)
+        return train_manager.generator_fn()
 
     def val_generator_wrapper():
-        return val_manager.generator_fn(total_epoch_steps=VALIDATION_PER_EPOCH)
+        return val_manager.generator_fn()
 
-    # 2. Build structural dataset graph definitions EXACTLY ONCE.
+    # 3. Build structural dataset graph definitions EXACTLY ONCE with uniform infinite loops
     def get_fresh_train_dataset():
         return tf.data.Dataset.from_generator(
             generator=train_generator_wrapper,
@@ -391,14 +356,15 @@ def train_nnue_on_fens():
                 },
                 tf.TensorSpec(shape=(None, 1), dtype=tf.float32)
             )
-        ).repeat().prefetch(tf.data.AUTOTUNE)
+        ).repeat().prefetch(tf.data.AUTOTUNE) 
 
-    # Instantiate the static dataset references
+    # 4. Instantiate static, backend-agnostic dataset graphs
     train_dataset = get_fresh_train_dataset()
     val_dataset = get_fresh_val_dataset()
 
     print(f"\n--- Model compilation complete. Commencing Training with {optimal_train_workers} Workers ---")
 
+    # 5. Core callback lifecycle infrastructure
     checkpoint_path = "best_chess_nnue.keras"
     checkpoint_cb = keras.callbacks.ModelCheckpoint(
         filepath=checkpoint_path,
@@ -409,14 +375,7 @@ def train_nnue_on_fens():
 
     cleanup_cb = AggressiveMemoryCleanup()
 
-    # 3. Your callback that cleans up and resets the managers at epoch end
-    epoch_reset_cb = EpochSynchronizedResetCallback(
-        train_manager=train_manager, 
-        val_manager=val_manager,
-        train_dir=train_dir,
-        val_dir=val_dir 
-    )
-
+    # 6. Fit Execution: Runs perfectly synchronized across all 30 epochs
     model.fit(
         train_dataset,
         epochs=TOTAL_EPOCHS,
@@ -424,7 +383,7 @@ def train_nnue_on_fens():
         validation_data=val_dataset,
         validation_steps=VALIDATION_PER_EPOCH,
         shuffle=False, 
-        callbacks=[epoch_reset_cb, checkpoint_cb, cleanup_cb]
+        callbacks=[checkpoint_cb, cleanup_cb]
     )
 
     print("\nTraining complete. Terminating background workers cleanly...")
