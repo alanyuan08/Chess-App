@@ -202,6 +202,12 @@ class EpochSynchronizedDatasetManager:
         
         # Instantiate execution primitives EXACTLY ONCE at script initialization
         self.shutdown_event = mp.Event()
+        
+        # NEW: Thread-safe fence that halts the generator on epoch step ceilings 
+        # to freeze the TensorFlow prefetch engine during background hot-swaps.
+        self.epoch_ready_event = mp.Event()
+        self.epoch_ready_event.set()  # Prime it so Epoch 1 starts streaming immediately
+        
         self.queue = mp.Queue(maxsize=self.queue_size)
         self.queue.cancel_join_thread()
         
@@ -227,65 +233,78 @@ class EpochSynchronizedDatasetManager:
 
     def generator_fn(self, total_epoch_steps):
         """
-        Named generator bound to the underlying multiprocessing queue.
-        Guarantees exact step limits per epoch loop to avoid out-of-sync queuing.
+        Continuous stream that satisfies Keras 3 across all epochs, using an
+        Event lock to completely halt prefetching during file hot-swaps.
         """
         steps_yielded = 0
-        while steps_yielded < total_epoch_steps:
-            if self.shutdown_event.is_set():
-                return
+        
+        while not self.shutdown_event.is_set():
+            # CRITICAL SAFETY VALVE:
+            # If we hit the exact epoch step boundary, lock the gate and wait for the callback.
+            if steps_yielded % total_epoch_steps == 0 and steps_yielded > 0:
+                self.epoch_ready_event.clear()  # Drop the gate to False (Red Light)
+                print(f"\n[Generator] Step {steps_yielded:,} hit. Halting prefetcher for hot-swap...")
                 
+                # Block here. TensorFlow's prefetcher freezes right here and cannot bleed.
+                # .wait() blocks at the OS level efficiently without spinning the CPU core.
+                while not self.epoch_ready_event.is_set():
+                    if self.shutdown_event.is_set():
+                        return
+                    self.epoch_ready_event.wait(timeout=0.1)
+            
             try:
-                # Short timeout prevents hanging indefinitely on shutdown or hot-swap
+                # Pull raw data chunk (batch_size=8192) dropped by background worker processes
                 chunk_item = self.queue.get(timeout=0.5)
                 yield chunk_item
                 steps_yielded += 1
             except queue.Empty:
-                # If the queue is empty, give workers a moment to fill it or check shutdown
                 continue
             except (ValueError, OSError):
-                # Queue was closed by master on exit
+                # Data queue pipeline dropped or torn down by master process on exit
                 return
 
     def start_epoch_stream(self, explicit_file_pool=None):
-        """
-        Safely clears stale queues and hot-swaps file decks across active 
-        processes without destroying the underlying pipe infrastructure.
-        """
         # 1. Drain data queue completely to prevent epoch cross-contamination
         while not self.queue.empty():
-            try:
-                self.queue.get_nowait()
-            except Exception:
-                break
+            try: self.queue.get_nowait()
+            except Exception: break
                 
-        # 2. Gather file pool maps
+        # 2. Gather and slice the new shuffled file deck
         file_pool = explicit_file_pool if explicit_file_pool is not None else self.all_files
         worker_file_map = self.split_files_to_worker_chunks(file_pool) 
         
-        # 3. Purge historic command lists before transmitting new state tokens
+        # 3. Purge command queues and inject fresh files
         for i in range(self.num_workers):
             while not self.worker_command_queues[i].empty():
-                try:
-                    self.worker_command_queues[i].get_nowait()
-                except Exception:
-                    break
-                    
-            # 4. Atomically inject the new shuffled file deck
-            worker_files = worker_file_map[i]
-            self.worker_command_queues[i].put(list(worker_files))
+                try: self.worker_command_queues[i].get_nowait()
+                except Exception: break
+            self.worker_command_queues[i].put(list(worker_file_map[i]))
             
+        # 4. RELEASE THE LOCK: Allow the generator to start building the next epoch
+        print(f"[DatasetManager] {self.name} hot-swap complete. Releasing prefetch lock.")
+        self.epoch_ready_event.set()
         print(f"[DatasetManager] {self.name} worker streams successfully hot-swapped for the new epoch loop.")
 
     def stop_epoch_stream(self):
         """ Clean termination of background daemons on script finalization. """
         self.shutdown_event.set()
+        
+        # NEW: Always unblock a waiting generator loop if it is currently locked 
+        # at an epoch wall, allowing the master thread loop to unwind cleanly.
+        try:
+            self.epoch_ready_event.set()
+        except Exception:
+            pass
+
         for i in range(self.num_workers):
             try:
                 self.worker_command_queues[i].put(None)
             except Exception: pass
+            
         for p in self.workers:
-            p.terminate()
+            try:
+                p.terminate()
+            except Exception: pass
 
     def split_files_to_worker_chunks(self, file_pool=None):
         """

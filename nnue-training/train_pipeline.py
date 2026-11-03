@@ -1,6 +1,7 @@
 import os
 import glob
 import gc
+import random
 import polars as pl
 
 import numpy as np
@@ -69,98 +70,6 @@ class AggressiveMemoryCleanup(keras.callbacks.Callback):
     def on_epoch_end(self, epoch, logs=None):
         gc.collect() 
 
-# --- THE TELEMETRY TRACKER CALLBACK ---
-@keras.utils.register_keras_serializable(package="CustomSchedules")
-class CustomWarmupCosineSchedule(keras.optimizers.schedules.LearningRateSchedule):
-    def __init__(self, initial_learning_rate, decay_steps, warmup_steps, alpha=0.0167, initial_lr=1e-6, weight_decay_ratio=None):
-        super().__init__()
-        self.initial_learning_rate = float(initial_learning_rate)
-        self.decay_steps = int(decay_steps)
-        self.warmup_steps = int(warmup_steps)
-        self.alpha = float(alpha)
-        self.initial_lr = float(initial_lr)
-        self.weight_decay_ratio = float(weight_decay_ratio) if weight_decay_ratio is not None else None
-
-    def __call__(self, step):
-        step_f = tf.cast(step, tf.float32)
-        warmup_steps_f = tf.cast(self.warmup_steps, tf.float32)
-        decay_steps_f = tf.cast(self.decay_steps, tf.float32)
-        peak_lr_f = tf.cast(self.initial_learning_rate, tf.float32)
-        alpha_f = tf.cast(self.alpha, tf.float32)
-
-        # 1. Linear Warmup Ramp
-        # Avoid division-by-zero if warmup_steps is configured to 0
-        warmup_denom = tf.where(warmup_steps_f > 0.0, warmup_steps_f, 1.0)
-        warmup_lr = self.initial_lr + (peak_lr_f - self.initial_lr) * (step_f / warmup_denom)
-
-        # 2. Native Cosine Decay Calculation (Manually written for graph safety and config isolation)
-        adjusted_decay_steps = tf.maximum(1.0, decay_steps_f - warmup_steps_f)
-        decay_step = tf.maximum(0.0, step_f - warmup_steps_f)
-        
-        # Bound the cosine step to max adjusted decay steps to prevent reverse loop upswing
-        decay_step = tf.minimum(decay_step, adjusted_decay_steps)
-        
-        cosine_decay = 0.5 * (1.0 + tf.cos(3.141592653589793 * decay_step / adjusted_decay_steps))
-        decayed_lr = (1.0 - alpha_f) * cosine_decay + alpha_f
-        cosine_lr = peak_lr_f * decayed_lr
-
-        # 3. Dynamic Selection Matrix
-        current_lr = tf.where(step_f < warmup_steps_f, warmup_lr, cosine_lr)
-
-        # 4. Decoupled Weight Decay Scaling
-        if self.weight_decay_ratio is not None:
-            return current_lr * self.weight_decay_ratio
-            
-        return current_lr
-
-    def get_config(self):
-        # Explicitly return names matching __init__ signatures exactly for fault-free deserialization
-        return {
-            "initial_learning_rate": self.initial_learning_rate,
-            "decay_steps": self.decay_steps,
-            "warmup_steps": self.warmup_steps,
-            "alpha": self.alpha,
-            "initial_lr": self.initial_lr,
-            "weight_decay_ratio": self.weight_decay_ratio,
-        }
-
-@keras.utils.register_keras_serializable(package="CustomOptimizers")
-class GraphScheduledAdamW(keras.optimizers.AdamW):
-    """
-    Graph-safe AdamW extension for Keras 3 that computes step-level 
-    weight decay using a symbolic schedule, bypassing internal casting limitations.
-    """
-    def __init__(self, learning_rate, wd_schedule, epsilon=1e-8, global_clipnorm=1.0, **kwargs):
-        super().__init__(
-            learning_rate=learning_rate, 
-            weight_decay=0.01, 
-            epsilon=epsilon, 
-            global_clipnorm=global_clipnorm, 
-            **kwargs
-        )
-        self.wd_schedule = wd_schedule
-
-    def update_step(self, gradient, variable, learning_rate):
-        current_step = self.iterations
-        scheduled_wd = self.wd_schedule(current_step)
-        
-        # Override the private C++ optimization reference variable safely
-        self._weight_decay = tf.cast(scheduled_wd, variable.dtype)
-        super().update_step(gradient, variable, learning_rate)
-
-    def get_config(self):
-        config = super().get_config()
-        config.update({
-            "wd_schedule": keras.optimizers.schedules.serialize(self.wd_schedule)
-        })
-        return config
-
-    @classmethod
-    def from_config(cls, config):
-        config["wd_schedule"] = keras.optimizers.schedules.deserialize(config["wd_schedule"])
-        return super().from_config(config)
-    
-
 class EpochSynchronizedResetCallback(tf.keras.callbacks.Callback):
     """
     Keras callback designed to dynamically redistribute globally shuffled 
@@ -177,27 +86,29 @@ class EpochSynchronizedResetCallback(tf.keras.callbacks.Callback):
     def on_train_begin(self, logs=None):
         """ Primes the persistent background loops at the start of training. """
         print("\n[Training Loop Commenced] Priming background streams...")
+        # Note: start_epoch_stream automatically opens the event gates (.set())
         self.train_manager.start_epoch_stream()
         self.val_manager.start_epoch_stream()
 
     def on_epoch_end(self, epoch, logs=None):
         print(f"\n[Epoch {epoch + 1} Complete] Shuffling and hot-swapping global file pools across processes...")
         
-        import glob
-        import random
-        
-        # Gather and globally shuffle files for training
+        # 1. Gather and globally shuffle files for training
         all_train_files = sorted(glob.glob(os.path.join(self.train_dir, "*.parquet")))
         random.seed(epoch + 42)
         random.shuffle(all_train_files)
         
-        # Gather and globally shuffle files for validation
+        # 2. Gather and globally shuffle files for validation
         all_val_files = sorted(glob.glob(os.path.join(self.val_dir, "*.parquet")))
         random.seed(epoch + 999)
         random.shuffle(all_val_files)
         
-        # Hot-swap the running processes directly with the new file distribution arrays
+        # 3. Hot-swap and unlock training streams
+        # This flushes remnants, pushes new files, and flips the training generator gate back to GREEN
         self.train_manager.start_epoch_stream(explicit_file_pool=all_train_files)
+        
+        # 4. Hot-swap and unlock validation streams
+        # This guarantees that the validation prefetch engine gets a clean, synchronized deck for Epoch N+1
         self.val_manager.start_epoch_stream(explicit_file_pool=all_val_files)
             
         print(f"[Epoch {epoch + 1}] Streams successfully refreshed at epoch end.")
@@ -396,35 +307,25 @@ def train_nnue_on_fens():
         val_dir="./balanced_shards/validation",
         batch_size=BATCH_SIZE
     )
+    
+    total_train_steps = int(TOTAL_EPOCHS * STEPS_PER_EPOCH)
+    warmup_steps = int(STEPS_PER_EPOCH * 0.05)
 
-    decay_steps_calculated = TOTAL_EPOCHS * STEPS_PER_EPOCH
-
-    # 1. Maintain your optimized learning rate schedule
-    lr_schedule = CustomWarmupCosineSchedule(
+    # 1. Use the standard, bulletproof Keras 3 native Cosine Decay with built-in warmup
+    native_lr_schedule = keras.optimizers.schedules.CosineDecay(
         initial_learning_rate=3e-4,
-        decay_steps=decay_steps_calculated,
-        warmup_steps=int(STEPS_PER_EPOCH * 0.05),
+        decay_steps=total_train_steps - warmup_steps,
         alpha=0.0167,
-        initial_lr=1e-6
+        warmup_target=3e-4,
+        warmup_steps=warmup_steps
     )
 
-    # 2. Maintain your custom weight decay schedule instance
-    # This evaluates cleanly to an absolute target scale on every step
-    wd_schedule = CustomWarmupCosineSchedule(
-        initial_learning_rate=0.01,  
-        decay_steps=decay_steps_calculated,
-        warmup_steps=STEPS_PER_EPOCH,
-        alpha=0.0167,
-        initial_lr=1e-6,
-        weight_decay_ratio=None 
-    )
-
-    # 3. Instantiate the specialized GraphScheduledAdamW engine
-    stockfish_optimizer = GraphScheduledAdamW(
-        learning_rate=lr_schedule,
-        wd_schedule=wd_schedule,
+    # 2. Instatiate stock AdamW with native coupling
+    stockfish_optimizer = keras.optimizers.AdamW(
+        learning_rate=native_lr_schedule,
+        weight_decay=0.01,       # Dynamically coupled to LR internally by Keras 3
         epsilon=1e-8,
-        global_clipnorm=1.0
+        global_clipnorm=1.0      # Keeps your gradients from exploding
     )
 
     model.compile(
@@ -463,7 +364,7 @@ def train_nnue_on_fens():
                 },
                 tf.TensorSpec(shape=(None, 1), dtype=tf.float32)
             )
-        ).prefetch(tf.data.AUTOTUNE)
+        ).repeat().prefetch(tf.data.AUTOTUNE)
 
     def get_fresh_val_dataset():
         return tf.data.Dataset.from_generator(
@@ -475,7 +376,7 @@ def train_nnue_on_fens():
                 },
                 tf.TensorSpec(shape=(None, 1), dtype=tf.float32)
             )
-        ).prefetch(tf.data.AUTOTUNE) 
+        ).repeat().prefetch(tf.data.AUTOTUNE)
 
     # Instantiate the static dataset references
     train_dataset = get_fresh_train_dataset()
@@ -501,7 +402,6 @@ def train_nnue_on_fens():
         val_dir=val_dir 
     )
 
-    # Pass the stable dataset references directly into fit execution
     model.fit(
         train_dataset,
         epochs=TOTAL_EPOCHS,
@@ -509,7 +409,7 @@ def train_nnue_on_fens():
         validation_data=val_dataset,
         validation_steps=VALIDATION_PER_EPOCH,
         shuffle=False, 
-        callbacks=[checkpoint_cb, cleanup_cb, epoch_reset_cb]
+        callbacks=[epoch_reset_cb, checkpoint_cb, cleanup_cb]
     )
 
     print("\nTraining complete. Terminating background workers cleanly...")
