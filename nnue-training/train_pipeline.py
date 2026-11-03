@@ -222,79 +222,94 @@ def close_position_error(y_true, y_pred):
     return tf.math.divide_no_nan(total_error, valid_count)
 
 def train_nnue_on_fens():
-    # 1. Inputs: Sequences of active feature index tokens matching your Parquet shapes
-    active_input = keras.Input(shape=(MAX_PIECES,), dtype="int32", name="active_features")
-    passive_input = keras.Input(shape=(MAX_PIECES,), dtype="int32", name="passive_features")
+    # 1. Inputs: Set to MAX_PIECES (32) and cast to int16 to optimize L1/L2 cache efficiency
+    active_input = keras.Input(shape=(MAX_PIECES,), dtype="int16", name="active_features")
+    passive_input = keras.Input(shape=(MAX_PIECES,), dtype="int16", name="passive_features")
 
-    # 2. Shared Accumulator Layer (Using Embedding Reduction to replace the old sparse matrix bottleneck)
-    nnue_accumulator_init = keras.initializers.TruncatedNormal(mean=0.0, stddev=0.01, seed=42)
-    
-    # We dimension the lookup array to INPUT_FEATURES + 1 to house the positive padding index row
+    # 2. Shared Accumulator Layer (Embedding-based indexing for fast memory execution)
+    # Dimensioned to INPUT_FEATURES + 1 to house the positive padding index row safely
+    nnue_accumulator_init = keras.initializers.HeNormal(seed=42)
     embedding_layer = layers.Embedding(
         input_dim=INPUT_FEATURES + 1,
         output_dim=256,
         embeddings_initializer=nnue_accumulator_init,
-        mask_zero=True,
         name="accumulator_layer"
     )
-    # 3. Pull dense weights representations for all slots
-    a_embed = embedding_layer(active_input) # Target shape: (Batch, 16, 256)
-    p_embed = embedding_layer(passive_input) # Target shape: (Batch, 16, 256)
 
-    # 4. Synthesize masking vectors to isolate and zero-out padding weight contributions
+    # 3. Pull dense weights vector representations for active and passive piece decks
+    a_embed = embedding_layer(active_input)  # Shape: (Batch, 32, 256)
+    p_embed = embedding_layer(passive_input)  # Shape: (Batch, 32, 256)
+
+    # 4. Synthesize branchless masking vectors to zero-out padding index contributions
     a_mask = keras.ops.cast(keras.ops.not_equal(active_input, INPUT_FEATURES), dtype="float32")
     p_mask = keras.ops.cast(keras.ops.not_equal(passive_input, INPUT_FEATURES), dtype="float32")
     
-    # Expand to allow broadcasting dimensions across the 256 embedding properties
+    # Expand axes to allow effortless broadcasting across the 256 embedding dimensions
     a_mask = keras.ops.expand_dims(a_mask, axis=-1) 
     p_mask = keras.ops.expand_dims(p_mask, axis=-1)
 
-    # Execute masked pool aggregation to compile the 256 accumulator vectors
-    a_acc_raw = keras.ops.sum(a_embed * a_mask, axis=1)  # Target shape: (Batch, 256)
-    p_acc_raw = keras.ops.sum(p_embed * p_mask, axis=1)  # Target shape: (Batch, 256)
+    # Execute masked sum pooling to reduce the tensor to the 256-element accumulator rails
+    a_acc_raw = keras.ops.sum(a_embed * a_mask, axis=1)  # Shape: (Batch, 256)
+    p_acc_raw = keras.ops.sum(p_embed * p_mask, axis=1)  # Shape: (Batch, 256)
 
-    # 5. Clipped ReLU Activation (ReLU1 / Bounded ReLU)
-    a_act = keras.ops.clip(a_acc_raw, 0.0, SCALE_MAX)
-    p_act = keras.ops.clip(p_acc_raw, 0.0, SCALE_MAX)
-    
-    # 6. Perspective Multiplexing Layer (Shape: Batch, 256*2)
+    # =========================================================================
+    # 5. SMOOTH BOUNDED RELU ACTIVATION (SIMD VECTOR REGISTER FRIENDLY)
+    # Uses branchless algebraic absolute value math to prevent gradient deadlocks
+    # =========================================================================
+    alpha_leak = 0.01  # Tiny 1% gradient retention to protect AdamW momentum tracking
+
+    # Smooth floor handling: smooth max between 0 and x
+    a_floor = 0.5 * (a_acc_raw + keras.ops.abs(a_acc_raw)) + alpha_leak * (a_acc_raw - keras.ops.abs(a_acc_raw))
+    p_floor = 0.5 * (p_acc_raw + keras.ops.abs(p_acc_raw)) + alpha_leak * (p_acc_raw - keras.ops.abs(p_acc_raw))
+
+    # Smooth ceiling handling: smooth min between x and SCALE_MAX
+    diff_a = a_floor - SCALE_MAX
+    diff_p = p_floor - SCALE_MAX
+    a_act = 0.5 * (a_floor + SCALE_MAX - keras.ops.abs(diff_a)) + alpha_leak * (diff_a + keras.ops.abs(diff_a))
+    p_act = 0.5 * (p_floor + SCALE_MAX - keras.ops.abs(diff_p)) + alpha_leak * (diff_p + keras.ops.abs(diff_p))
+
+    # =========================================================================
+    # 6. Perspective Multiplexing Layer (Shape: Batch, 512)
+    # =========================================================================
     merged = layers.Concatenate(name="perspective_multiplex")([a_act, p_act]) 
     
-    # --- DEEP LAYER INITIALIZATION BLUEPRINT ---
-    sub_layer_init = keras.initializers.RandomUniform(minval=-0.04, maxval=0.04, seed=42)
-    hidden_bias_init = keras.initializers.Constant(value=0.005)
+    # Deep layer weight configurations
+    hidden_init = keras.initializers.HeNormal(seed=42)
 
-    # 7. Hidden Layer 2 with ReLU1 activation
-    x = layers.Dense(
+    # 7. Hidden Layer 2 with Smooth Bounded Activation (Shape: Batch, 64)
+    x2_raw = layers.Dense(
         64, 
         activation=None, 
         use_bias=True, 
-        kernel_initializer=sub_layer_init,
-        bias_initializer=hidden_bias_init,
+        kernel_initializer=hidden_init,
         name="hidden_layer_2"
     )(merged)
-    x = keras.ops.clip(x, 0.0, SCALE_MAX)
+    
+    x2_floor = 0.5 * (x2_raw + keras.ops.abs(x2_raw)) + alpha_leak * (x2_raw - keras.ops.abs(x2_raw))
+    diff_x2 = x2_floor - SCALE_MAX
+    x2_act = 0.5 * (x2_floor + SCALE_MAX - keras.ops.abs(diff_x2)) + alpha_leak * (diff_x2 + keras.ops.abs(diff_x2))
 
-    # 8. Hidden Layer 3 with ReLU1 activation
-    x = layers.Dense(
+    # 8. Hidden Layer 3 with Smooth Bounded Activation (Shape: Batch, 32)
+    x3_raw = layers.Dense(
         32, 
         activation=None, 
         use_bias=True, 
-        kernel_initializer=sub_layer_init,
-        bias_initializer=hidden_bias_init,
+        kernel_initializer=hidden_init,
         name="hidden_layer_3"
-    )(x)
-    x = keras.ops.clip(x, 0.0, SCALE_MAX)
+    )(x2_act)
     
-    # 9. Output Layer (Linear, Pawn-Scale Evaluation Output)
+    x3_floor = 0.5 * (x3_raw + keras.ops.abs(x3_raw)) + alpha_leak * (x3_raw - keras.ops.abs(x3_raw))
+    diff_x3 = x3_floor - SCALE_MAX
+    x3_act = 0.5 * (x3_floor + SCALE_MAX - keras.ops.abs(diff_x3)) + alpha_leak * (diff_x3 + keras.ops.abs(diff_x3))
+    
+    # 9. Output Layer (Linear, Pawn-Scale Evaluation Output) (Shape: Batch, 1)
     output = layers.Dense(
         1, 
         activation=None, 
         use_bias=True, 
-        kernel_initializer=sub_layer_init,
-        bias_initializer=keras.initializers.Zeros(),
+        kernel_initializer=hidden_init,
         name="chess_eval"
-    )(x)
+    )(x3_act)
 
     model = Model(
         inputs=[active_input, passive_input],
@@ -323,9 +338,9 @@ def train_nnue_on_fens():
     # 2. Instatiate stock AdamW with native coupling
     stockfish_optimizer = keras.optimizers.AdamW(
         learning_rate=native_lr_schedule,
-        weight_decay=0.01,       # Dynamically coupled to LR internally by Keras 3
+        weight_decay=0.01,
         epsilon=1e-8,
-        global_clipnorm=1.0      # Keeps your gradients from exploding
+        global_clipnorm=1.0
     )
 
     model.compile(
