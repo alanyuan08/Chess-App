@@ -890,23 +890,21 @@ impl SearchWorker {
                 };
             }
 
-            let terminal_score = if king_in_check {
-                -MATE_VALUE + ply
-            } else {
-                0
-            };
+            if king_in_check {
+                let terminal_score = -MATE_VALUE + ply;
+                
+                self.transposition_table.store(
+                    hash, terminal_score,
+                    Q_DEPTH_MARKER, ply, self.age,
+                    ForwardMove::NULL_MOVE, HashFlag::EXACT,
+                );
 
-            self.transposition_table.store(
-                hash, terminal_score,
-                Q_DEPTH_MARKER, ply, self.age,
-                ForwardMove::NULL_MOVE, HashFlag::EXACT,
-            );
-
-            return SearchResult { 
-                score: terminal_score,
-                best_move: ForwardMove::NULL_MOVE, 
-                was_aborted: false, 
-            };
+                return SearchResult { 
+                    score: terminal_score,
+                    best_move: ForwardMove::NULL_MOVE, 
+                    was_aborted: false, 
+                };
+            }
         }
 
         // Global halt catch before finalizing the Q-search node evaluation

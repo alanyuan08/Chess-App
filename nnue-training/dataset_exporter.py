@@ -89,8 +89,6 @@ def q_search(b, alpha, beta, depth=0, max_depth=24):
     if moves_played == 0:
         if in_check:
             return -20000
-        else:
-            return 0
 
     return alpha
 
