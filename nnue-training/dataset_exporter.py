@@ -23,11 +23,11 @@ PIECE_MAP = {
 
 PIECE_VALUES = {
     chess.PAWN: 100, 
-    chess.KNIGHT: 320, 
-    chess.BISHOP: 330, 
+    chess.KNIGHT: 300,
+    chess.BISHOP: 300,
     chess.ROOK: 500, 
     chess.QUEEN: 900, 
-    chess.KING: 20000
+    chess.KING: 0
 }
 
 # --- DIRECTORY PATH AUTO-RESOLUTION ---
@@ -50,33 +50,47 @@ def static_evaluate(b):
             score -= val
     return score
 
-def q_search(b, alpha, beta, depth=0, max_depth=12):
-    """Highly stable, fast pseudo-legal Negamax Quiescence Search."""
+def q_search(b, alpha, beta, depth=0, max_depth=24):
+    """
+    Absolute-Safe, Non-Pruned Negamax Quiescence Search.
+    Completely eliminates the stand-pat cutoff to prevent horizon traps.
+    Forces the engine to calculate every single capture chain to absolute resolution.
+    """
+    if depth > 0 and b.is_repetition(2):
+        return 0
+
     if depth >= max_depth:
         return static_evaluate(b)
 
     in_check = b.is_check()
-    static_eval = static_evaluate(b)
-        
     if not in_check:
-        if static_eval >= beta:
-            return static_eval
+        static_eval = static_evaluate(b)
         if static_eval > alpha:
             alpha = static_eval
 
+    moves_played = 0
+
+    # Force the engine to evaluate every single capture and promotion line
     for move in b.generate_pseudo_legal_moves(b.turn):
         if in_check or b.is_capture(move) or move.promotion:
             if not b.is_legal(move):
                 continue
 
+            moves_played += 1
             b.push(move)
             score = -q_search(b, -beta, -alpha, depth + 1, max_depth)
             b.pop()
 
-            if score >= beta:
-                return score
             if score > alpha:
                 alpha = score
+
+    # --- TERMINAL RULES LAYER ---
+    # If no captures, promotions, or king evasions are legally possible:
+    if moves_played == 0:
+        if in_check:
+            return -20000
+        else:
+            return 0
 
     return alpha
 
@@ -253,7 +267,6 @@ def is_invalid_training_row(depth_str: str, knodes_str: str) -> bool:
     try:
         depth = int(depth_str)
         knodes = int(knodes_str) if knodes_str and knodes_str != "None" else 0
-        
         # 1. Immediate rejection of absolute low-resource or corrupted rows
         if knodes <= 0:
             return True
@@ -325,6 +338,7 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
             fen = row.get("fen")
             raw_score = row.get("cp")
             depth_val = row.get("depth")
+
             knodes = row.get("knodes")
             mate_val = None if pd.isna(row.get("mate")) else row.get("mate")
 
@@ -342,13 +356,23 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
 
             # Calculate total pieces remaining on the board
             piece_count = bin(int(board.occupied)).count("1")
-
             active_pawn_score = 0
+            
             # =================================================================
             # STRATEGIC PATH A: ENDGAME PIPELINE (<= 8 Pieces) + Mate Sequences
             # Assume 90%+ of 8 Piece positions are computed via endgame
             # =================================================================
             if piece_count <= 8 and mate_val is not None and not pd.isna(mate_val):
+                # DEFENSIVE SHIELD: Drop shallow mobile app or low-resource bursts.
+                knodes_val = int(knodes) if knodes and knodes != "None" else 0
+                if knodes_val < 200:
+                    continue
+
+                static_score = static_evaluate(board)
+                q_score = q_search(board, -float('inf'), float('inf'))
+                if abs(static_score - q_score) > 40:
+                    continue
+                
                 mate_count = float(mate_val)
                 
                 # Maximum terminal ceiling right below overflow boundaries
@@ -372,7 +396,7 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
                 # Filter out explicit engine-calculated checkmates for middlegames
                 if mate_val is not None:
                     continue
-                if depth_val is not None and is_invalid_training_row(depth_val, knodes):
+                if is_invalid_training_row(depth_val, knodes):
                     continue
 
                 score_target = float(raw_score)

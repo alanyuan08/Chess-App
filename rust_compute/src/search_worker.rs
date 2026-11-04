@@ -271,7 +271,6 @@ impl SearchWorker {
         // 2. Branchless Thread Diversity Calculation
         let is_helper_thread = (self.thread_id != 0) as i16;
         
-        // FIX: Replaced .is_multiple_of(2) with standard, blistering-fast bitwise masking
         let is_odd_thread = ((self.thread_id & 1) != 0) as i16;
         let is_even_thread = 1 - is_odd_thread;
         
