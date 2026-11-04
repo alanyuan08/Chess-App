@@ -109,7 +109,7 @@ def parse_fen_to_features(fen_string):
 
     Returns:
         tuple: (active_side_indices, passive_side_indices)
-               Each list contains integer indices ranging from 0 to 7040.
+               Each list contains integer indices ranging from 0 to 7043.
     """
     parts = fen_string.split()
     board_part = parts[0]
@@ -207,47 +207,34 @@ def parse_fen_to_features(fen_string):
     # --------------------------------------------------------------------------
     # Base offset boundary right where the 10 king buckets end (10 * 704 = 7040)
     CASTLING_BASE = 7040
-    
+
     has_w_king  = 'K' in castling_part
     has_w_queen = 'Q' in castling_part
     has_b_king  = 'k' in castling_part
     has_b_queen = 'q' in castling_part
-   
+
     # Castling Flags are only relevant of the White king is on E1 and the Black king is on E8
     # If they are not, these flags are auto set to False
 
     # White needed to Mirrored due to King on E1
     w_k, w_q = has_w_queen, has_w_king 
-    
+
     # Black does not need to be mirrored
     b_k, b_q = has_b_king, has_b_queen
 
     # ==========================================================================
     # 2. ASSIGN INDICES DIRECTLY BY SIDE TO MOVE
     # ==========================================================================
-    # Both players see their OWN rights at +0/+1, and ENEMY rights at +2/+3
-    if not is_black_turn:
-        # --- WHITE TO MOVE ---
-        if w_k: white_perspective_indices.append(CASTLING_BASE + 0)
-        if w_q: white_perspective_indices.append(CASTLING_BASE + 1)
-        if b_k: white_perspective_indices.append(CASTLING_BASE + 2)
-        if b_q: white_perspective_indices.append(CASTLING_BASE + 3)
-        
-        if b_k: black_perspective_indices.append(CASTLING_BASE + 0)
-        if b_q: black_perspective_indices.append(CASTLING_BASE + 1)
-        if w_k: black_perspective_indices.append(CASTLING_BASE + 2)
-        if w_q: black_perspective_indices.append(CASTLING_BASE + 3)
-    else:
-        # --- BLACK TO MOVE ---
-        if b_k: black_perspective_indices.append(CASTLING_BASE + 0)
-        if b_q: black_perspective_indices.append(CASTLING_BASE + 1)
-        if w_k: black_perspective_indices.append(CASTLING_BASE + 2)
-        if w_q: black_perspective_indices.append(CASTLING_BASE + 3)
-        
-        if w_k: white_perspective_indices.append(CASTLING_BASE + 0)
-        if w_q: white_perspective_indices.append(CASTLING_BASE + 1)
-        if b_k: white_perspective_indices.append(CASTLING_BASE + 2)
-        if b_q: white_perspective_indices.append(CASTLING_BASE + 3)
+    # White King_Castle / Queen Castle | Black King_Castle / Queen Castle 
+    if w_k: white_perspective_indices.append(CASTLING_BASE + 0)
+    if w_q: white_perspective_indices.append(CASTLING_BASE + 1)
+    if b_k: white_perspective_indices.append(CASTLING_BASE + 2)
+    if b_q: white_perspective_indices.append(CASTLING_BASE + 3)
+    
+    if b_k: black_perspective_indices.append(CASTLING_BASE + 0)
+    if b_q: black_perspective_indices.append(CASTLING_BASE + 1)
+    if w_k: black_perspective_indices.append(CASTLING_BASE + 2)
+    if w_q: black_perspective_indices.append(CASTLING_BASE + 3)
 
     # Return indices organized cleanly by active player turn
     if is_black_turn:
@@ -358,32 +345,28 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
 
             active_pawn_score = 0
             # =================================================================
-            # STRATEGIC PATH A: ENDGAME PIPELINE (<= 8 Pieces)
-            # Implements Hyperbolic Soft-Clamping & Mate Distance Decay.
-            # Bypasses alpha-beta inflation while preserving gradient flow.
+            # STRATEGIC PATH A: ENDGAME PIPELINE (<= 8 Pieces) + Mate Sequences
+            # Assume 90%+ of 8 Piece positions are computed via endgame
             # =================================================================
-            if piece_count <= 8:
-                if mate_val is not None and not pd.isna(mate_val):
-                    mate_count = float(mate_val)
-                    if mate_count > 0:
-                        score_target = min(300.0, 250.0 + (50.0 / max(1.0, mate_count)))
-                    else:
-                        score_target = max(-300.0, -250.0 + (50.0 / min(-1.0, mate_count)))
-
-                elif not pd.isna(raw_score):
-                    val = float(raw_score)
-                    if abs(val) <= 200.0:
-                        score_target = val
-                    else:
-                        sign = 1.0 if val > 0 else -1.0
-                        excess = abs(val) - 200.0
-                        score_target = sign * (200.0 + 100.0 * math.tanh(excess / 400.0))
+            if piece_count <= 8 and mate_val is not None and not pd.isna(mate_val):
+                mate_count = float(mate_val)
+                
+                # Maximum terminal ceiling right below overflow boundaries
+                MATE_MAX = 300.0
+                MATE_BASE = 250.0
+                
+                if mate_count > 0:
+                    # Mate-in-1  -> 250.0 + (50.0 / 1.0)  = 300.0 (Perfect Win Target)
+                    # Mate-in-10 -> 250.0 + (50.0 / 10.0) = 255.0 (Lower priority win)
+                    score_target = min(MATE_MAX, MATE_BASE + (50.0 / max(1.0, mate_count)))
                 else:
-                    continue
-                    
+                    # Mate-in--1  -> -250.0 + (50.0 / -1.0)  = -300.0 (Maximum Loss Penalty)
+                    # Mate-in--10 -> -250.0 + (50.0 / -10.0) = -255.0 (Rewarded for resistance)
+                    score_target = max(-MATE_MAX, -MATE_BASE + (50.0 / min(-1.0, mate_count)))
+
                 active_pawn_score = score_target / 100.0
             # =================================================================
-            # STRATEGIC PATH B: MIDDLEGAME PIPELINE (> 8 Pieces)
+            # STRATEGIC PATH B: MIDDLEGAME PIPELINE
             # =================================================================
             else:
                 # Filter out explicit engine-calculated checkmates for middlegames
@@ -427,21 +410,25 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
                 local_shard_counter += 1
                     
             # Append rotated perspective
+            fen_parts_rot = rotated_fen.split()
+            clean_rotated_fen = " ".join(fen_parts_rot[0:3])
             batch_records.append({
                 'active_indices': active_rot_pad,
                 'passive_indices': passive_rot_pad,
                 'target': active_player_target,
                 'depth': depth_val,
-                'fen': rotated_fen,
+                'fen': clean_rotated_fen,
             })
 
             # Append original perspective
+            fen_parts_orig = fen.split()
+            clean_orig_fen = " ".join(fen_parts_orig[0:3])
             batch_records.append({
                 'active_indices': active_orig,
                 'passive_indices': passive_orig,
                 'target': active_player_target,
                 'depth': depth_val,
-                'fen': fen,
+                'fen': clean_orig_fen,
             })
 
     # Flush remaining records from memory

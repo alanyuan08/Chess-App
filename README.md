@@ -80,8 +80,8 @@ This yields a total of **249,691,999 unique positions**.
 
 - **Schedule & Batching Dynamics:** 
   * **Total Duration:** 30 epochs.
-  * **Training Size:** 250,105,928
-  * **Validation Size:** 13,161,879
+  * **Training Size:** 248,034,282
+  * **Validation Size:** 13,053,401
   * **Batch Size:** 8,192 positions per step.
 - **Training Error:**
   * **Average Centipawn Error for positons +/- 2.5 Pawn Units**: 25 Centipawns

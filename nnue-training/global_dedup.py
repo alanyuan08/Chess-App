@@ -38,20 +38,8 @@ def run_partitioned_deduplication():
             lazy_shard = (
                 pl.scan_parquet(path)
                 .with_columns(
-                    fen_parts=pl.col("fen").str.split(" ")
+                    bucket=(pl.col("fen").hash(seed=42).mod(NUM_BUCKETS)).abs()
                 )
-                .with_columns(
-                    # Construct a structural hash key containing only: Pieces + Turn + Castling
-                    hash_key=pl.concat_str([
-                        pl.col("fen_parts").list.get(0),
-                        pl.col("fen_parts").list.get(1),
-                        pl.col("fen_parts").list.get(2)
-                    ], separator=" ")
-                )
-                .with_columns(
-                    bucket=(pl.col("hash_key").hash(seed=42) % NUM_BUCKETS).abs()
-                )
-                .drop(["fen_parts", "hash_key"]) # Keep the file size small on disk
             )
             
             df_partitioned = lazy_shard.collect(engine="streaming")
@@ -90,26 +78,14 @@ def run_partitioned_deduplication():
         lazy_bucket = (
             pl.scan_parquet(bucket_files)
             .select(CANONICAL_COLUMNS)
-            .with_columns(
-                fen_parts=pl.col("fen").str.split(" ")
-            )
-            .with_columns(
-                dedup_key=pl.concat_str([
-                    pl.col("fen_parts").list.get(0),
-                    pl.col("fen_parts").list.get(1),
-                    pl.col("fen_parts").list.get(2)
-                ], separator=" ")
-            )
-            .drop("fen_parts")
         )
 
         df_bucket_clean = (
-            lazy_bucket.group_by("dedup_key")
+            lazy_bucket.group_by("fen")
             .agg([
-                # Highest depth evaluation retains its pristine original FEN structure
-                pl.all().exclude("dedup_key").sort_by("depth", descending=True).first()
+                # Highest depth evaluation retains its pristine original row metrics
+                pl.all().exclude("fen").sort_by("depth", descending=True).first()
             ])
-            .drop("dedup_key")
             .collect(engine="streaming")
         )
                 

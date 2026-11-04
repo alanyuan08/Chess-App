@@ -3,6 +3,7 @@ import sys
 import glob
 import gc
 import time
+import shutil
 import polars as pl
 
 # =========================================================================
@@ -17,14 +18,11 @@ TEMP_STAGE_DIR = "./temp_split_stage"
 
 NUM_BUCKETS = 64
 BATCH_SIZE = 8192
-RUN_WORKERS = 6  # The golden divisor for perfect runtime core distribution
+RUN_WORKERS = 6  
 IDEAL_ROWS_PER_SHARD = BATCH_SIZE * 20 
 
 CANONICAL_COLUMNS = ["active_indices", "passive_indices", "target", "depth", "fen"]
 
-# =========================================================================
-# STREAMING HIGH-ENTROPY INTERLEAVER (COMPLETELY OOM-PROOF)
-# =========================================================================
 def stream_and_balance_pool(stage_paths, pool_height, target_dir, prefix, seed_offset):
     """
     Streams row data from disk fragments sequentially using small row caches,
@@ -33,7 +31,6 @@ def stream_and_balance_pool(stage_paths, pool_height, target_dir, prefix, seed_o
     if not stage_paths:
         return
 
-    # Calculate exact shard structural geometry
     shards = pool_height // IDEAL_ROWS_PER_SHARD
     target_count = ((shards + RUN_WORKERS - 1) // RUN_WORKERS) * RUN_WORKERS
     if target_count == 0: 
@@ -46,22 +43,20 @@ def stream_and_balance_pool(stage_paths, pool_height, target_dir, prefix, seed_o
     print(f"   [{prefix} GEOMETRY] Exact Rows per Shard : {rows_per_shard:,} (Multiple of {BATCH_SIZE})")
     print(f"   -> Packing shards using streaming partition iterators...")
 
-    # Open all partitions as lazy scans
     scans = [pl.scan_parquet(p) for p in stage_paths]
-    
-    # We will track our current read position across our collection of files on disk
     current_file_idx = 0
-    buffer_df = pl.DataFrame([], schema=scans[0].schema)
     
-    # Generate random seed deterministically
+    # FIXING THE SCHEMA WARNING: Fetch the layout schema cleanly up front
+    # instead of calling .schema dynamically inside the loop
+    resolved_schema = scans[0].collect_schema()
+    buffer_df = pl.DataFrame([], schema=resolved_schema)
+    
     seed = (int(time.time()) + seed_offset) % 2**32
 
     for shard_idx in range(target_count):
         needed_rows = rows_per_shard
         
-        # For the final shard, drain absolutely everything left over
         if shard_idx == target_count - 1:
-            # First, pull any remaining data out of all our scanned frames
             remaining_chunks = []
             if buffer_df.height > 0:
                 remaining_chunks.append(buffer_df)
@@ -77,43 +72,33 @@ def stream_and_balance_pool(stage_paths, pool_height, target_dir, prefix, seed_o
                 
             if remaining_chunks:
                 shard_out = pl.concat(remaining_chunks)
-                # Final entropy shuffle on just this small output shard
                 shard_out = shard_out.sample(fraction=1.0, shuffle=True, seed=seed + shard_idx)
                 shard_out.write_parquet(os.path.join(target_dir, f"{prefix}_balanced_s{shard_idx}.parquet"), compression="snappy")
             break
 
-        # Accumulate exactly enough rows for the current target shard
         shard_chunks = []
         while needed_rows > 0 and current_file_idx < len(scans):
             if buffer_df.height == 0:
-                # Load the next file from disk entirely into memory
-                # Since these are split from original buckets, individual chunks are small and memory-safe
                 buffer_df = scans[current_file_idx].collect()
                 current_file_idx += 1
                 if buffer_df.height == 0:
                     continue
-                # Local shuffle of the chunk to mix bucket distributions before slicing
                 buffer_df = buffer_df.sample(fraction=1.0, shuffle=True, seed=seed + current_file_idx)
 
             if buffer_df.height <= needed_rows:
-                # Consume the whole buffer
                 shard_chunks.append(buffer_df)
                 needed_rows -= buffer_df.height
-                buffer_df = pl.DataFrame([], schema=scans[0].schema)
+                buffer_df = pl.DataFrame([], schema=resolved_schema)
             else:
-                # Take only a slice of the buffer, keep the rest for the next loop execution
                 shard_chunks.append(buffer_df.slice(0, needed_rows))
                 buffer_df = buffer_df.slice(needed_rows)
                 needed_rows = 0
 
-        # Concat the accumulated chunks for this isolated shard
         if shard_chunks:
             shard_out = pl.concat(shard_chunks)
-            # Final localized high-entropy mix
             shard_out = shard_out.sample(fraction=1.0, shuffle=True, seed=seed + shard_idx)
             shard_out.write_parquet(os.path.join(target_dir, f"{prefix}_balanced_s{shard_idx}.parquet"), compression="snappy")
         
-        # Force instantaneous memory cleanup
         del shard_chunks
         gc.collect()
 
@@ -121,9 +106,14 @@ def stream_and_balance_pool(stage_paths, pool_height, target_dir, prefix, seed_o
 
 
 def run_perfect_balanced_mixer():
-    os.makedirs(TRAIN_DIR, exist_ok=True)
-    os.makedirs(VAL_DIR, exist_ok=True)
-    os.makedirs(TEMP_STAGE_DIR, exist_ok=True)
+    # Nuke any leftover production folders entirely to clear ghost files
+    if os.path.exists(TRAIN_DIR): shutil.rmtree(TRAIN_DIR)
+    if os.path.exists(VAL_DIR): shutil.rmtree(VAL_DIR)
+    if os.path.exists(TEMP_STAGE_DIR): shutil.rmtree(TEMP_STAGE_DIR)
+
+    os.makedirs(TRAIN_DIR, exist_ok=False)
+    os.makedirs(VAL_DIR, exist_ok=False)
+    os.makedirs(TEMP_STAGE_DIR, exist_ok=False)
 
     all_fragments = glob.glob(os.path.join(DEDUP_DATA_DIR, "*.parquet"))
     if not all_fragments:
@@ -187,25 +177,26 @@ def run_perfect_balanced_mixer():
         print(f"\n -> Compiling TRAINING Universe ({train_pool_height:,} rows)...")
         stream_and_balance_pool(train_stage_paths, train_pool_height, TRAIN_DIR, "train", seed_offset=0)
         
-        # Clean up training temporary files immediately to free up NVMe space
+        # Clean up training temporary files immediately
         for p in train_stage_paths:
             try: os.remove(p)
             except OSError: pass
 
+    # Completing the missing validation compilation pass cleanly
     if val_stage_paths:
         val_pool_height = sum([pl.scan_parquet(p).select(pl.len()).collect().item() for p in val_stage_paths])
         print(f"\n -> Compiling VALIDATION Universe ({val_pool_height:,} rows)...")
-        stream_and_balance_pool(val_stage_paths, val_pool_height, VAL_DIR, "val", seed_offset=5000)
+        stream_and_balance_pool(val_stage_paths, val_pool_height, VAL_DIR, "val", seed_offset=1000)
         
+        # Clean up validation temporary files immediately
         for p in val_stage_paths:
             try: os.remove(p)
             except OSError: pass
 
-    try:
-        os.rmdir(TEMP_STAGE_DIR)
-    except OSError:
-        pass
-        
+    # Securely remove temporary stage tracking folder container entirely
+    try: shutil.rmtree(TEMP_STAGE_DIR, ignore_errors=True)
+    except Exception: pass
+
     print("\n=== Perfect 6-Worker Dataset Split & Compaction Sequence Finalized ===")
 
 if __name__ == "__main__":
