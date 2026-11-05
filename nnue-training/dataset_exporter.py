@@ -1,9 +1,11 @@
 import os
 import sys
 import glob
-import math
 import numpy as np
+import shutil
+
 import chess
+import chess.engine
 import multiprocessing
 import pandas as pd
 import pyarrow.parquet as pq
@@ -21,50 +23,54 @@ PIECE_MAP = {
     'p': 6, 'b': 7, 'n': 8, 'r': 9, 'q': 10, 'k': 11
 }
 
-PIECE_VALUES = {
-    chess.PAWN: 100, 
-    chess.KNIGHT: 300,
-    chess.BISHOP: 300,
-    chess.ROOK: 500, 
-    chess.QUEEN: 900, 
-    chess.KING: 0
-}
-
 # --- DIRECTORY PATH AUTO-RESOLUTION ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__)) if '__file__' in locals() else os.getcwd()
 BINARY_OUTPUT_DIR = os.path.join(SCRIPT_DIR, "processed_shards")
 INPUT_DIR = "data"
 
-# =====================================================================
-# CHESS LOGIC AND FILTERING SYSTEM
-# =====================================================================
-def static_evaluate(b):
-    """Side-to-move material evaluation."""
+# Highly standardized baseline values matching your pipeline configuration
+PIECE_VALUES = {
+    chess.PAWN: 100,
+    chess.KNIGHT: 300,
+    chess.BISHOP: 300,
+    chess.ROOK: 500,
+    chess.QUEEN: 900,
+    chess.KING: 0  # Kings cannot be captured, so material baseline is 0
+}
+
+def static_evaluate(b: chess.Board) -> int:
+    """Prised, zero-heuristic side-to-move pure material evaluation."""
     score = 0
     current_player = b.turn
+    
+    # Fast piece map iteration with zero positional or bitboard overhead
     for square, piece in b.piece_map().items():
         val = PIECE_VALUES[piece.piece_type]
         if piece.color == current_player:
             score += val
         else:
             score -= val
+            
     return score
 
 def q_search(b, alpha, beta, depth=0, max_depth=24):
     """
-    Absolute-Safe, Non-Pruned Negamax Quiescence Search.
-    Completely eliminates the stand-pat cutoff to prevent horizon traps.
-    Forces the engine to calculate every single capture chain to absolute resolution.
+    Elite, Traditional Negamax Quiescence Search with Safe Stand-Pat Pruning.
+    Relies on a flattened, zero-heuristic material baseline to stabilize bounds.
     """
+
+    # This depth is added to prevent end-games of a piece chasing around a king
     if depth > 0 and b.is_repetition(2):
         return 0
 
     if depth >= max_depth:
         return static_evaluate(b)
-
+    
     in_check = b.is_check()
     if not in_check:
         static_eval = static_evaluate(b)
+        if static_eval >= beta:
+            return static_eval 
         if static_eval > alpha:
             alpha = static_eval
 
@@ -81,15 +87,16 @@ def q_search(b, alpha, beta, depth=0, max_depth=24):
             score = -q_search(b, -beta, -alpha, depth + 1, max_depth)
             b.pop()
 
+            # Traditional Alpha-Beta Bounding inside the loop
+            if score >= beta:
+                return score
             if score > alpha:
                 alpha = score
 
     # --- TERMINAL RULES LAYER ---
-    # If no captures, promotions, or king evasions are legally possible:
-    if moves_played == 0:
-        if in_check:
-            return -20000
-
+    if moves_played == 0 and in_check:
+        return -20000 + depth
+    
     return alpha
 
 # The 10-bucket coordinate mapping layout array with horizontal mirroring.
@@ -361,7 +368,6 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
             # Assume 90%+ of 8 Piece positions are computed via endgame
             # =================================================================
             if piece_count <= 8 and mate_val is not None and not pd.isna(mate_val):
-                # DEFENSIVE SHIELD: Drop shallow mobile app or low-resource bursts.
                 knodes_val = int(knodes) if knodes and knodes != "None" else 0
                 if knodes_val < 200:
                     continue
