@@ -34,7 +34,7 @@ PIECE_VALUES = {
     chess.BISHOP: 300,
     chess.ROOK: 500,
     chess.QUEEN: 900,
-    chess.KING: 0  # Kings cannot be captured, so material baseline is 0
+    chess.KING: 20000
 }
 
 def static_evaluate(b: chess.Board) -> int:
@@ -59,6 +59,8 @@ def static_evaluate(b: chess.Board) -> int:
     score += len(b.pieces(chess.QUEEN, stm)) * 900
     score -= len(b.pieces(chess.QUEEN, opp)) * 900
 
+    score += len(b.pieces(chess.KING, stm)) * 20000
+    score -= len(b.pieces(chess.KING, opp)) * 20000
             
     return score
 
@@ -66,10 +68,14 @@ def is_unsafe_for_training(board: chess.Board, tolerance: int = 40) -> bool:
     """
     Validates training safety by verifying tactical deadness for both sides.
     Returns True if either player can forcefully break the material balance.
+    Ensures the board is returned in its exact original state for downstream calculations.
     """
     # Guardrail 0: Active checks are inherently chaotic and volatile
     if board.is_check():
         return True
+    
+    # Capture the exact state signature before any mutations or searches occur
+    root_state_hash = board.fen()
 
     # -------------------------------------------------------------------------
     # 1. Standing Pat (Your Turn): Verify no capture chain improves your side
@@ -78,20 +84,34 @@ def is_unsafe_for_training(board: chess.Board, tolerance: int = 40) -> bool:
     q_score_A = q_search(board, -float('inf'), float('inf'))
     
     # If q-search discovers a sequence that actively wins material for you
-    if q_score_A > static_A + tolerance:
+    if (q_score_A - static_A) > tolerance:
         return True
 
     # -------------------------------------------------------------------------
     # 2. Null Move (Opponent's Turn): Verify no chain can destroy you
     # -------------------------------------------------------------------------
     board.push(chess.Move.null())
-    static_B = static_evaluate(board)
-    q_score_B = q_search(board, -float('inf'), float('inf'))
-    board.pop()  # Clean up the null move
-    
+    try:
+        static_B = static_evaluate(board)
+        q_score_B = q_search(board, -float('inf'), float('inf'))
+    except BaseException as e:
+        # Prints the exact error type and trace if q_search crashes
+        print(f"\n[!] Problem detected during null move branch evaluation: {type(e).__name__} -> {e}")
+        raise
+    finally:
+        board.pop()
+
     # If the opponent finds a forcing sequence to destroy your position after a pass
-    if q_score_B > static_B + tolerance:
+    if (q_score_B - static_B) > tolerance:
         return True
+    
+    # Quick Aduit
+    if board.fen() != root_state_hash:
+        raise RuntimeError(
+            f"CRITICAL MOVE-STACK DRIFT DETECTED AT FUNCTION END!\n"
+            f"The board state failed to unwind cleanly to its original root signature.\n"
+            f"Corrupted FEN Context: {board.fen()}"
+        )
 
     # The position is perfectly stable for both sides
     return False
@@ -109,15 +129,11 @@ def q_search(b: chess.Board, alpha: float, beta: float, depth: int = 0, max_dept
     in_check = b.is_check()
 
     if not in_check:
-        stand_pat = static_evaluate(b)
-        best_score = stand_pat
-        
-        # FAIL-SOFT UPPER BOUND CUTOFF:
-        if best_score >= beta:
-            return best_score
-        
+        best_score = static_evaluate(b)
         if best_score > alpha:
             alpha = best_score
+            if alpha >= beta:
+                return best_score
     else:
         best_score = -float('inf')
 
@@ -131,8 +147,14 @@ def q_search(b: chess.Board, alpha: float, beta: float, depth: int = 0, max_dept
 
             moves_played += 1
             b.push(move)
-            score = -q_search(b, -beta, -alpha, depth + 1, max_depth)
-            b.pop()
+            try:
+                score = -q_search(b, -beta, -alpha, depth + 1, max_depth)
+            except BaseException as e:
+                # Triggers only when a crash occurs somewhere down this sub-tree branch
+                print(f"\n[!] Problem inside q_search at depth {depth} following move {move}: {type(e).__name__} -> {e}")
+                raise
+            finally:
+                b.pop()
 
             if score > best_score:
                 best_score = score
@@ -147,7 +169,8 @@ def q_search(b: chess.Board, alpha: float, beta: float, depth: int = 0, max_dept
     if moves_played == 0:
         if in_check:
             return -20000 + depth
-        elif b.is_stalemate():
+        
+        if b.is_stalemate():
             return 0 
     
     return best_score
@@ -278,36 +301,37 @@ def parse_fen_to_features(fen_string):
     # --------------------------------------------------------------------------
     # --- TRADITIONAL CASTLING INFLATION LAYER (Indices 7040 - 7043) ---
     # --------------------------------------------------------------------------
-    # Base offset boundary right where the 10 king buckets end (10 * 704 = 7040)
     CASTLING_BASE = 7040
-
     has_w_king  = 'K' in castling_part
     has_w_queen = 'Q' in castling_part
     has_b_king  = 'k' in castling_part
     has_b_queen = 'q' in castling_part
 
-    # Castling Flags are only relevant of the White king is on E1 and the Black king is on E8
-    # If they are not, these flags are auto set to False
+    if mirror_white:
+        w_k_final = has_w_queen
+        w_q_final = has_w_king
+    else:
+        w_k_final = has_w_king
+        w_q_final = has_w_queen
 
-    # White needed to Mirrored due to King on E1
-    w_k, w_q = has_w_queen, has_w_king 
+    if mirror_black:
+        b_k_final = has_b_queen
+        b_q_final = has_b_king
+    else:
+        b_k_final = has_b_king
+        b_q_final = has_b_queen
 
-    # Black does not need to be mirrored
-    b_k, b_q = has_b_king, has_b_queen
+    # White Indexes (Us = White, Them = Black)
+    if w_k_final: white_perspective_indices.append(CASTLING_BASE + 0)
+    if w_q_final: white_perspective_indices.append(CASTLING_BASE + 1)
+    if b_k_final: white_perspective_indices.append(CASTLING_BASE + 2)
+    if b_q_final: white_perspective_indices.append(CASTLING_BASE + 3)
 
-    # ==========================================================================
-    # 2. ASSIGN INDICES DIRECTLY BY SIDE TO MOVE
-    # ==========================================================================
-    # White King_Castle / Queen Castle | Black King_Castle / Queen Castle 
-    if w_k: white_perspective_indices.append(CASTLING_BASE + 0)
-    if w_q: white_perspective_indices.append(CASTLING_BASE + 1)
-    if b_k: white_perspective_indices.append(CASTLING_BASE + 2)
-    if b_q: white_perspective_indices.append(CASTLING_BASE + 3)
-    
-    if b_k: black_perspective_indices.append(CASTLING_BASE + 0)
-    if b_q: black_perspective_indices.append(CASTLING_BASE + 1)
-    if w_k: black_perspective_indices.append(CASTLING_BASE + 2)
-    if w_q: black_perspective_indices.append(CASTLING_BASE + 3)
+    # Black Indexes (Us = Black, Them = White)
+    if b_k_final: black_perspective_indices.append(CASTLING_BASE + 0)
+    if b_q_final: black_perspective_indices.append(CASTLING_BASE + 1)
+    if w_k_final: black_perspective_indices.append(CASTLING_BASE + 2)
+    if w_q_final: black_perspective_indices.append(CASTLING_BASE + 3)
 
     # Return indices organized cleanly by active player turn
     if is_black_turn:
@@ -316,7 +340,7 @@ def parse_fen_to_features(fen_string):
         return white_perspective_indices, black_perspective_indices
 
 
-def is_invalid_training_row(depth_str: str, knodes_str: str) -> bool:
+def is_invalid_training_row(depth_val: int, knodes: int) -> bool:
     """
     Elite Quality Gate for Middlegame Positions (> 8 Pieces).
     Completely eliminates the lenient Depth 21 core pool. Enforces a strict
@@ -324,19 +348,17 @@ def is_invalid_training_row(depth_str: str, knodes_str: str) -> bool:
     universal positional stability.
     """
     try:
-        depth = int(depth_str)
-        knodes = int(knodes_str) if knodes_str and knodes_str != "None" else 0
         # 1. Immediate rejection of absolute low-resource or corrupted rows
         if knodes <= 0:
             return True
 
         # 2. THE ANALYTICAL WALL: Ban anything below Depth 26 entirely
-        if depth < 26:
+        if depth_val < 26:
             return True
             
         # Guardrail for Moderate High-Depth (Depths 26 to 32)
         # 400 KNodes = 400,000 nodes searched. Keeps your elite depth 30 transpositions.
-        if 26 <= depth <= 32:
+        if 26 <= depth_val <= 32:
             return knodes < 400
             
         # Guardrail for Master-Class Analysis (Depth 33+)
@@ -394,17 +416,36 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
         chunk_df = pyarrow_batch.to_pandas()
 
         for idx, row in chunk_df.iterrows():
+            # --- Robust Data Extraction & Type Safety ---
             fen = row.get("fen")
-            raw_score = row.get("cp")
-            depth_val = row.get("depth")
+            
+            # Use safe type conversion fallback to avoid pandas float/NaN vs string type issues
+            fen_str = str(fen).strip() if fen is not None and not pd.isna(fen) else ""
 
-            knodes = row.get("knodes")
-            mate_val = None if pd.isna(row.get("mate")) else row.get("mate")
+            # Standard Python/Pandas NaN conversions to safe float/int/None primitives
+            raw_score = None if pd.isna(row.get("cp")) else float(row.get("cp"))
+            depth_val = 0 if pd.isna(row.get("depth")) else int(row.get("depth"))
+            knodes = 0 if pd.isna(row.get("knodes")) else int(row.get("knodes"))
+            mate_val = None if pd.isna(row.get("mate")) else int(row.get("mate"))
 
-            if not isinstance(fen, str) or '\x00' in fen or fen.count('/') != 7:
+            # --- Structural FEN Validation (Fast Failure Guards) ---
+            # 1. Base Type check & string cleaning
+            if not isinstance(fen, str) or '\x00' in fen_str:
                 continue
 
-            if pd.isna(raw_score) and mate_val is None:
+            # 2. Basic layout sanity (8 rank slots separated by 7 slashes)
+            if fen_str.count('/') != 7:
+                continue
+
+            # 3. Component check: A legal FEN string must have at least 4 components 
+            #    (Placement, Active Color, Castling Rights, En Passant Target)
+            fen_parts = fen_str.split()
+            if len(fen_parts) < 4:
+                continue
+
+            # --- Scoring Validity Guardrails ---
+            # If both evaluations are missing or corrupt, the row is unuseable
+            if raw_score is None and mate_val is None:
                 continue
 
             board = chess.Board(fen)
@@ -422,8 +463,7 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
             # Assume 90%+ of 8 Piece positions are computed via endgame
             # =================================================================
             if piece_count <= 8 and mate_val is not None and not pd.isna(mate_val):
-                knodes_val = int(knodes) if knodes and knodes != "None" else 0
-                if knodes_val < 200:
+                if knodes < 200:
                     continue
 
                 if is_unsafe_for_training(board):
