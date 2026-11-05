@@ -5,7 +5,6 @@ import numpy as np
 import shutil
 
 import chess
-import chess.engine
 import multiprocessing
 import pandas as pd
 import pyarrow.parquet as pq
@@ -39,25 +38,67 @@ PIECE_VALUES = {
 }
 
 def static_evaluate(b: chess.Board) -> int:
-    """Prised, zero-heuristic side-to-move pure material evaluation."""
+    """Side-to-move pure material evaluation optimized using raw bitboards."""
     score = 0
-    current_player = b.turn
+    stm = b.turn
+    opp = not stm
     
-    # Fast piece map iteration with zero positional or bitboard overhead
-    for square, piece in b.piece_map().items():
-        val = PIECE_VALUES[piece.piece_type]
-        if piece.color == current_player:
-            score += val
-        else:
-            score -= val
+    # Fast bitboard counts with zero dictionary allocations
+    score += len(b.pieces(chess.PAWN, stm)) * 100
+    score -= len(b.pieces(chess.PAWN, opp)) * 100
+    
+    score += len(b.pieces(chess.KNIGHT, stm)) * 300
+    score -= len(b.pieces(chess.KNIGHT, opp)) * 300
+    
+    score += len(b.pieces(chess.BISHOP, stm)) * 300
+    score -= len(b.pieces(chess.BISHOP, opp)) * 300
+    
+    score += len(b.pieces(chess.ROOK, stm)) * 500
+    score -= len(b.pieces(chess.ROOK, opp)) * 500
+    
+    score += len(b.pieces(chess.QUEEN, stm)) * 900
+    score -= len(b.pieces(chess.QUEEN, opp)) * 900
+
             
     return score
 
-def q_search(b, alpha, beta, depth=0, max_depth=24):
+def is_unsafe_for_training(board: chess.Board, tolerance: int = 40) -> bool:
     """
-    Absolute-Safe, Traditional Negamax Alpha-Beta Quiescence Search.
-    Forbids stand-pat shortcuts at the top to isolate horizon traps.
-    Maintains rigorous, mathematically safe in-loop alpha-beta cutoffs.
+    Validates training safety by verifying tactical deadness for both sides.
+    Returns True if either player can forcefully break the material balance.
+    """
+    # Guardrail 0: Active checks are inherently chaotic and volatile
+    if board.is_check():
+        return True
+
+    # -------------------------------------------------------------------------
+    # 1. Standing Pat (Your Turn): Verify no capture chain improves your side
+    # -------------------------------------------------------------------------
+    static_A = static_evaluate(board)
+    q_score_A = q_search(board, -float('inf'), float('inf'))
+    
+    # If q-search discovers a sequence that actively wins material for you
+    if q_score_A > static_A + tolerance:
+        return True
+
+    # -------------------------------------------------------------------------
+    # 2. Null Move (Opponent's Turn): Verify no chain can destroy you
+    # -------------------------------------------------------------------------
+    board.push(chess.Move.null())
+    static_B = static_evaluate(board)
+    q_score_B = q_search(board, -float('inf'), float('inf'))
+    board.pop()  # Clean up the null move
+    
+    # If the opponent finds a forcing sequence to destroy your position after a pass
+    if q_score_B > static_B + tolerance:
+        return True
+
+    # The position is perfectly stable for both sides
+    return False
+
+def q_search(b: chess.Board, alpha: float, beta: float, depth: int = 0, max_depth: int = 24) -> int:
+    """
+    Fail-Soft Alpha-Beta Quiescence Search with explicit terminal state resolution.
     """
     if depth > 0 and b.is_repetition(2):
         return 0
@@ -67,14 +108,22 @@ def q_search(b, alpha, beta, depth=0, max_depth=24):
     
     in_check = b.is_check()
 
-    best_score = -float('inf')
+    if not in_check:
+        stand_pat = static_evaluate(b)
+        best_score = stand_pat
+        
+        # FAIL-SOFT UPPER BOUND CUTOFF:
+        if best_score >= beta:
+            return best_score
+        
+        if best_score > alpha:
+            alpha = best_score
+    else:
+        best_score = -float('inf')
+
     moves_played = 0
 
-    # The Q-Search Static-Eval assumes the current player cannot make good captures
-    # and is based on heuristics of how dangerous the opponent's threat vectors
-    # This assumes the Stockfish labeled positions accounted for opponent threats
-
-    # Force the engine to evaluate every single capture and promotion line
+    # Generate and filter forcing moves
     for move in b.generate_pseudo_legal_moves(b.turn):
         if in_check or b.is_capture(move) or move.promotion:
             if not b.is_legal(move):
@@ -90,17 +139,19 @@ def q_search(b, alpha, beta, depth=0, max_depth=24):
             
             if score > alpha:
                 alpha = score
+                # FAIL-SOFT LOWER BOUND CUTOFF:
                 if alpha >= beta:
                     return best_score
 
     # --- TERMINAL RULES LAYER ---
     if moves_played == 0:
         if in_check:
-            return -20000 + depth 
-        else:
-            return static_evaluate(b) 
+            return -20000 + depth
+        elif b.is_stalemate():
+            return 0 
     
     return best_score
+
 
 # The 10-bucket coordinate mapping layout array with horizontal mirroring.
 KING_BUCKET_MAP = [
@@ -375,9 +426,7 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
                 if knodes_val < 200:
                     continue
 
-                static_score = static_evaluate(board)
-                q_score = q_search(board, -float('inf'), float('inf'))
-                if abs(static_score - q_score) > 40:
+                if is_unsafe_for_training(board):
                     continue
                 
                 mate_count = float(mate_val)
@@ -412,9 +461,7 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
                     continue
 
                 # 4. Filter out highly volatile tactical configurations via Q-Search
-                static_score = static_evaluate(board)
-                q_score = q_search(board, -float('inf'), float('inf'))
-                if abs(static_score - q_score) > 40:
+                if is_unsafe_for_training(board):
                     continue
                     
                 active_pawn_score = score_target / 100.0
