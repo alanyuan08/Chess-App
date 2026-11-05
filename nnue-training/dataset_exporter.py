@@ -55,11 +55,10 @@ def static_evaluate(b: chess.Board) -> int:
 
 def q_search(b, alpha, beta, depth=0, max_depth=24):
     """
-    Elite, Traditional Negamax Quiescence Search with Safe Stand-Pat Pruning.
-    Relies on a flattened, zero-heuristic material baseline to stabilize bounds.
+    Absolute-Safe, Traditional Negamax Alpha-Beta Quiescence Search.
+    Forbids stand-pat shortcuts at the top to isolate horizon traps.
+    Maintains rigorous, mathematically safe in-loop alpha-beta cutoffs.
     """
-
-    # This depth is added to prevent end-games of a piece chasing around a king
     if depth > 0 and b.is_repetition(2):
         return 0
 
@@ -67,14 +66,13 @@ def q_search(b, alpha, beta, depth=0, max_depth=24):
         return static_evaluate(b)
     
     in_check = b.is_check()
-    if not in_check:
-        static_eval = static_evaluate(b)
-        if static_eval >= beta:
-            return static_eval 
-        if static_eval > alpha:
-            alpha = static_eval
 
+    best_score = -float('inf')
     moves_played = 0
+
+    # The Q-Search Static-Eval assumes the current player cannot make good captures
+    # and is based on heuristics of how dangerous the opponent's threat vectors
+    # This assumes the Stockfish labeled positions accounted for opponent threats
 
     # Force the engine to evaluate every single capture and promotion line
     for move in b.generate_pseudo_legal_moves(b.turn):
@@ -87,17 +85,22 @@ def q_search(b, alpha, beta, depth=0, max_depth=24):
             score = -q_search(b, -beta, -alpha, depth + 1, max_depth)
             b.pop()
 
-            # Traditional Alpha-Beta Bounding inside the loop
-            if score >= beta:
-                return score
+            if score > best_score:
+                best_score = score
+            
             if score > alpha:
                 alpha = score
+                if alpha >= beta:
+                    return best_score
 
     # --- TERMINAL RULES LAYER ---
-    if moves_played == 0 and in_check:
-        return -20000 + depth
+    if moves_played == 0:
+        if in_check:
+            return -20000 + depth 
+        else:
+            return static_evaluate(b) 
     
-    return alpha
+    return best_score
 
 # The 10-bucket coordinate mapping layout array with horizontal mirroring.
 KING_BUCKET_MAP = [
