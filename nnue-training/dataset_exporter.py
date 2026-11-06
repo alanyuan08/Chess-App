@@ -352,8 +352,14 @@ def is_invalid_training_row(depth_val: int, knodes: int) -> bool:
         if knodes <= 0:
             return True
 
-        # 2. THE ANALYTICAL WALL: Ban anything below Depth 26 entirely
-        if depth_val < 26:
+        # 2. THE CLASSICAL WALL: 
+        # Over 1 Billion nodes (1,000,000 KNodes) is too specific/inaccurate for general training
+        if knodes > 1_000_000:
+            return True
+
+        # 3. THE ANALYTICAL WALL: 
+        # Ban anything below Depth 26 entirely for shallow depth
+        if knodes <= 0:
             return True
             
         # Guardrail for Moderate High-Depth (Depths 26 to 32)
@@ -470,6 +476,14 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
                     continue
                 
                 mate_count = float(mate_val)
+                abs_mate = abs(mate_count)
+                
+                # -------------------------------------------------------------
+                # There are Mate in 1 with horrendous positional disadvantage
+                # for the attacking side - this is fine to train to learn king safety.
+                # -------------------------------------------------------------
+                if abs_mate > 20:
+                    continue  
                 
                 # Maximum terminal ceiling right below overflow boundaries
                 MATE_MAX = 300.0
@@ -496,9 +510,10 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
                     continue
 
                 score_target = float(raw_score)
+
                 # 3. Apply the 600 Guardrail to eliminate deep glitched engine values
-                if abs(score_target) >= 600:
-                    continue
+                # This step is applied at the end are there is a possiblity where the 
+                # true value is 600+ at depth 40, however, depth 30 evaluates depth 400.
 
                 # 4. Filter out highly volatile tactical configurations via Q-Search
                 if is_unsafe_for_training(board):
@@ -527,6 +542,10 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
                 batch_records = []
                 local_shard_counter += 1
                     
+            # If the opponent has a mate in 10 and a mate in 1
+            mate_val = None if pd.isna(row.get("mate")) else int(row.get("mate"))
+            abs_mate_val = abs(mate_val) if mate_val is not None else 999
+
             # Append rotated perspective
             fen_parts_rot = rotated_fen.split()
             clean_rotated_fen = " ".join(fen_parts_rot[0:3])
@@ -535,6 +554,7 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
                 'passive_indices': passive_rot_pad,
                 'target': active_player_target,
                 'depth': depth_val,
+                'abs_mate': abs_mate_val,
                 'fen': clean_rotated_fen,
             })
 
@@ -546,6 +566,7 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
                 'passive_indices': passive_orig,
                 'target': active_player_target,
                 'depth': depth_val,
+                'abs_mate': abs_mate_val,
                 'fen': clean_orig_fen,
             })
 

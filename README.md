@@ -66,11 +66,17 @@ $$\text{Inputs (7044)} \rightarrow \text{Accumulator (256)} \rightarrow \text{Mu
 
 - **Training Data:** The model is trained on **231,809,086 chess positions** sourced from the [Lichess Chess Position Evaluations](https://huggingface.co/datasets/Lichess/chess-position-evaluations) dataset, which features evaluations calculated by Stockfish at various depths. To ensure an even and unbiased distribution, the training and validation sets utilize separate shards, and the training data is thoroughly shuffled.
 
-- **Quiet Position Filtering:** The dataset is filtered to include only "quiet" positions. Board states are excluded if the king is in check, an immediate tactical win is available via captures, or a forced checkmate sequence exists. It filter out all positions under Depth 26 to remove positions from 1 Second Blitz or 3 Minute Games.
+- **Quiet Position Filtering:** The dataset is filtered to include only "quiet" positions. Board states are excluded if the king is in check, an immediate tactical win is available via captures, or a forced checkmate sequence exists. 
 
-- **End Game Cleaning:** The dataset caps 8 piece positions with a 250 centipawn limit as these positions are augmented by promotion / check bonuses in Alpha-Beta Search. It also removes 600+ centipawn positions as they are often highly unstable.
+If the current player or the opponent can gain a tactical advantage via a capture chain on the immediate board, we assume this isn't a quiet position.
 
-- **Data Augmentation & DeDuplication:** The filtered positions are augmented by rotating each board state 180 degrees. The positions are then deduplicationed. 
+- **Depth Cleaning:** The dataset includes positions evaluated for 5+ minute deep analysis on depth 60+ and shallow games on mobile - These edge cases are unsuitable for training. However, if there are multiple positions, we priorize the deeper position.
+
+- **Multi PV-Mode:** There are positions that force the engine to calcuate multiple PV alternative PV lines for a position on the same depth - If there multiple evaluations for the same position on the same depth, we assume the engine choose the best evaluation.
+
+- **End Game Cleaning:** The positions with <= 8 pieces should be solved using a Syzygy or the scores are grossly inflated - There is a special condition such that if it is under 8 pieces and there is a mate in <20, the evaluation is scaled as a valu between 250-300 centipawns, depending on the Mate Distance .
+
+- **Data Augmentation & DeDuplication:** The filtered positions are augmented by rotating each board state 180 degrees. 
 
 This yields a total of **249,691,999 unique positions**.
 

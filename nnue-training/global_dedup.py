@@ -14,7 +14,7 @@ NUM_BUCKETS = 64
 TEMP_DIR = "./dedup_temp_buckets"
 BUFFER_DIR = "./buffer_temp"  # NEW: Disk-backed buffer to prevent RAM buildup
 
-CANONICAL_COLUMNS = ["active_indices", "passive_indices", "target", "depth", "fen",]
+CANONICAL_COLUMNS = ["active_indices", "passive_indices", "target", "depth", "abs_mate", "fen"]
 
 def run_partitioned_deduplication():
     os.makedirs(PRODUCTION_DIR, exist_ok=True)
@@ -83,9 +83,26 @@ def run_partitioned_deduplication():
         df_bucket_clean = (
             lazy_bucket.group_by("fen")
             .agg([
-                # Highest depth evaluation retains its pristine original row metrics
-                pl.all().exclude("fen").sort_by("depth", descending=True).first()
+                # MULTI-PV FIREWALL: 
+                # 1. Primary: Deepest engine lookups win.
+                # 2. Secondary: Shortest absolute mate paths win (e.g., 1 beats 6, 6 beats 999).
+                # 3. Tertiary: Strongest positional evaluation score breaks any remaining ties.
+                pl.all()
+                .exclude("fen")
+                .sort_by(
+                    by=[
+                        pl.col("depth"), 
+                        pl.col("abs_mate"), 
+                        pl.col("target")
+                    ], 
+                    descending=[True, False, True]  # Depth (Max), Mate (Min/Closest), Target (Max)
+                )
+                .first()
             ])
+            # 2. Apply the 600cp guardrail globally AFTER isolating the deepest row survivor.
+            # It is possible the deepest position crosses 600 CP, however the shallow evaluation do not
+            # Unfortunately, we need to process all the data and filter it at this step
+            .filter(pl.col("target").abs() < 6.00)
             .collect(engine="streaming")
         )
                 
