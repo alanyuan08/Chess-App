@@ -359,7 +359,7 @@ def is_invalid_training_row(depth_val: int, knodes: int) -> bool:
 
         # 3. THE ANALYTICAL WALL: 
         # Ban anything below Depth 26 entirely for shallow depth
-        if knodes <= 0:
+        if depth_val < 26:
             return True
             
         # Guardrail for Moderate High-Depth (Depths 26 to 32)
@@ -430,9 +430,10 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
 
             # Standard Python/Pandas NaN conversions to safe float/int/None primitives
             raw_score = None if pd.isna(row.get("cp")) else float(row.get("cp"))
+            mate_val = None if pd.isna(row.get("mate")) else int(row.get("mate"))
+
             depth_val = 0 if pd.isna(row.get("depth")) else int(row.get("depth"))
             knodes = 0 if pd.isna(row.get("knodes")) else int(row.get("knodes"))
-            mate_val = None if pd.isna(row.get("mate")) else int(row.get("mate"))
 
             # --- Structural FEN Validation (Fast Failure Guards) ---
             # 1. Base Type check & string cleaning
@@ -469,7 +470,7 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
             # Assume 90%+ of 8 Piece positions are computed via endgame
             # =================================================================
             if piece_count <= 8 and mate_val is not None and not pd.isna(mate_val):
-                if knodes < 200:
+                if knodes < 200 or knodes > 1_000_000:
                     continue
 
                 if is_unsafe_for_training(board):
@@ -543,7 +544,6 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
                 local_shard_counter += 1
                     
             # If the opponent has a mate in 10 and a mate in 1
-            mate_val = None if pd.isna(row.get("mate")) else int(row.get("mate"))
             abs_mate_val = abs(mate_val) if mate_val is not None else 999
 
             # Append rotated perspective
