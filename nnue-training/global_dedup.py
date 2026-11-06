@@ -14,7 +14,7 @@ NUM_BUCKETS = 64
 TEMP_DIR = "./dedup_temp_buckets"
 BUFFER_DIR = "./buffer_temp"  # NEW: Disk-backed buffer to prevent RAM buildup
 
-CANONICAL_COLUMNS = ["active_indices", "passive_indices", "target", "depth", "abs_mate", "fen"]
+CANONICAL_COLUMNS = ["active_indices", "passive_indices", "target", "depth", "fen", "mate_priority"]
 
 def run_partitioned_deduplication():
     os.makedirs(PRODUCTION_DIR, exist_ok=True)
@@ -83,29 +83,30 @@ def run_partitioned_deduplication():
         df_bucket_clean = (
             lazy_bucket.group_by("fen")
             .agg([
-                # MULTI-PV FIREWALL: 
-                # 1. Primary: Deepest engine lookups win.
-                # 2. Secondary: Shortest absolute mate paths win (e.g., 1 beats 6, 6 beats 999).
-                # 3. Tertiary: Strongest positional evaluation score breaks any remaining ties.
+                # MULTI-PV FIREWALL WITH ENHANCED PERSPECTIVE RANKING
+                # 1. Secondary: Depth Descending (True). If multiple lines share the same 
+                #               mate horizon, the deepest, most stable engine lookup wins.
+                # 2. Primary: Extract the highest-quality, deepest search truth (Descending).
+                # 3. Tertiary: If no mates (0.0 tie), pick the strongest positional score (Descending).
                 pl.all()
                 .exclude("fen")
                 .sort_by(
                     by=[
-                        pl.col("depth"), 
-                        pl.col("abs_mate"), 
-                        pl.col("target")
+                        pl.col("depth"),     # Deepest calculation breaks ties (Descending)
+                        pl.col("mate_priority"),  # Closest distance wins (Ascending)
+                        pl.col("target")     # Strongest candidate score (Descending)
                     ], 
-                    descending=[True, False, True]  # Depth (Max), Mate (Min/Closest), Target (Max)
+                    descending=[True, False, True]
                 )
                 .first()
             ])
-            # 2. Apply the 600cp guardrail globally AFTER isolating the deepest row survivor.
-            # It is possible the deepest position crosses 600 CP, however the shallow evaluation do not
-            # Unfortunately, we need to process all the data and filter it at this step
-            .filter(pl.col("target").abs() < 6.00)
+            .filter(
+                # Drop the FEN if the isolated true positional score is uncompetitive
+                (pl.col("target").abs() < 6.00)
+            )
             .collect(engine="streaming")
         )
-                
+                        
         shutil.rmtree(bucket_dir, ignore_errors=True)
                 
         if len(df_bucket_clean) == 0:

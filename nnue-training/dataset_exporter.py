@@ -450,88 +450,63 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
             if len(fen_parts) < 4:
                 continue
 
-            # --- Scoring Validity Guardrails ---
-            # If both evaluations are missing or corrupt, the row is unuseable
-            if raw_score is None and mate_val is None:
+            # 4. Invalid Line if Mate and Score
+            if mate_val and raw_score:
                 continue
 
-            board = chess.Board(fen)
+            # =========================================================================
+            # 1. THE MATE ENGINE: TARGETED ENDGAME FILTERING
+            # =========================================================================
+            if mate_val is not None:
+                mate_count = float(mate_val)
+                mate_priority = abs(mate_count)
 
-            # --- CHESS RULES: Terminal and Illegal Verification (Always Run) ---
+                if mate_count == 0:
+                    continue
+
+                # --- ORIGINAL TARGET SCALING (2.00 - 3.00 Pawns / 200.0 - 300.0 CP) ---
+                mate_sign = 1.0 if mate_count > 0 else -1.0
+                score_target = mate_sign * (250.0 + (50.0 / max(1.0, abs(mate_count))))
+                active_pawn_score = score_target / 100.0
+
+            # =========================================================================
+            # 2. THE POSITION ENGINE (Reached if it's a normal row OR a valid trained mate)
+            # =========================================================================
+            else:
+                if raw_score is None:
+                    continue
+
+                mate_priority = 1000
+
+                score_target = float(raw_score)
+                active_pawn_score = score_target / 100.0
+
+            # =========================================================================
+            # 3.  GLOBAL QUALITY GATE & VALIDATION FIREWALL
+            # Centralized scope forces ALL entries to satisfy high-integrity parameters
+            # =========================================================================
+            # Validate chess constraints
+            board = chess.Board(fen)
             if board.is_check() or board.is_stalemate() or board.is_insufficient_material():
                 continue
 
-            # Calculate total pieces remaining on the board
-            piece_count = bin(int(board.occupied)).count("1")
-            active_pawn_score = 0
-            
-            # =================================================================
-            # STRATEGIC PATH A: ENDGAME PIPELINE (<= 8 Pieces) + Mate Sequences
-            # Assume 90%+ of 8 Piece positions are computed via endgame
-            # =================================================================
-            if piece_count <= 8 and mate_val is not None and not pd.isna(mate_val):
-                if knodes < 200 or knodes > 1_000_000:
-                    continue
+            # Check workload limits and analytical constraints
+            if is_invalid_training_row(depth_val, knodes):
+                continue
 
-                if is_unsafe_for_training(board):
-                    continue
-                
-                mate_count = float(mate_val)
-                abs_mate = abs(mate_count)
-                
-                # -------------------------------------------------------------
-                # There are Mate in 1 with horrendous positional disadvantage
-                # for the attacking side - this is fine to train to learn king safety.
-                # -------------------------------------------------------------
-                if abs_mate > 20:
-                    continue  
-                
-                # Maximum terminal ceiling right below overflow boundaries
-                MATE_MAX = 300.0
-                MATE_BASE = 250.0
-                
-                if mate_count == 0:
-                    continue
-                elif mate_count > 0:
-                    # Mate-in-1  -> 250.0 + (50.0 / 1.0)  = 300.0 (Perfect Win Target)
-                    # Mate-in-10 -> 250.0 + (50.0 / 10.0) = 255.0 (Lower priority win)
-                    score_target = min(MATE_MAX, MATE_BASE + (50.0 / max(1.0, mate_count)))
-                else:
-                    # Mate-in--1  -> -250.0 + (50.0 / -1.0)  = -300.0 (Maximum Loss Penalty)
-                    # Mate-in--10 -> -250.0 + (50.0 / -10.0) = -255.0 (Rewarded for resistance)
-                    score_target = max(-MATE_MAX, -MATE_BASE + (50.0 / min(-1.0, mate_count)))
+            # Filter out highly volatile tactical configurations via Q-Search
+            if is_unsafe_for_training(board):
+                continue
 
-                active_pawn_score = score_target / 100.0
-            # =================================================================
-            # STRATEGIC PATH B: MIDDLEGAME PIPELINE
-            # =================================================================
-            else:
-                # Filter out explicit engine-calculated checkmates for middlegames
-                if mate_val is not None:
-                    continue
-                if is_invalid_training_row(depth_val, knodes):
-                    continue
-
-                score_target = float(raw_score)
-
-                # 3. Apply the 600 Guardrail to eliminate deep glitched engine values
-                # This step is applied at the end are there is a possiblity where the 
-                # true value is 600+ at depth 40, however, depth 30 evaluates depth 400.
-
-                # 4. Filter out highly volatile tactical configurations via Q-Search
-                if is_unsafe_for_training(board):
-                    continue
-                    
-                active_pawn_score = score_target / 100.0
-
-            # --- PERSPECTIVE A: Original Board Orientation ---
+            # =========================================================================
+            # 4. PERSPECTIVE FEATURE GENERATION & SHARD BATCHING Matrix
+            # =========================================================================
             is_black_turn = (board.turn == chess.BLACK)
             active_player_target = -active_pawn_score if is_black_turn else active_pawn_score
 
             active_indices, passive_indices = parse_fen_to_features(fen)
             active_orig, passive_orig = pad_indices(active_indices, passive_indices)
 
-            # --- PERSPECTIVE B: Mirrored Board ---
             rotated_board = board.mirror().transform(chess.flip_horizontal)
             rotated_fen = rotated_board.fen()
 
@@ -545,10 +520,6 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
                 batch_records = []
                 local_shard_counter += 1
                     
-            # If the opponent has a mate in 10 and a mate in 1
-            # This only applies for the <= 8 pieces case
-            abs_mate_val = abs(mate_val) if mate_val is not None else 999
-
             # Append rotated perspective
             fen_parts_rot = rotated_fen.split()
             clean_rotated_fen = " ".join(fen_parts_rot[0:3])
@@ -556,8 +527,8 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
                 'active_indices': active_rot_pad,
                 'passive_indices': passive_rot_pad,
                 'target': active_player_target,
+                'mate_priority': mate_priority,
                 'depth': depth_val,
-                'abs_mate': abs_mate_val,
                 'fen': clean_rotated_fen,
             })
 
@@ -568,8 +539,8 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
                 'active_indices': active_orig,
                 'passive_indices': passive_orig,
                 'target': active_player_target,
+                'mate_priority': mate_priority, 
                 'depth': depth_val,
-                'abs_mate': abs_mate_val,
                 'fen': clean_orig_fen,
             })
 

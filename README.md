@@ -74,9 +74,9 @@ If the current player or the opponent can gain a tactical advantage via a captur
 
 - **Multi PV-Mode:** There are positions that force the engine to calcuate multiple PV alternative PV lines for a position on the same depth - If there multiple evaluations for the same position on the same depth, we assume the engine choose the best evaluation.
 
-- **End Game Cleaning:** The positions with <= 8 pieces should be solved using a Syzygy or the scores are grossly inflated - There is a special condition such that if it is under 8 pieces and there is a mate in <20, the evaluation is scaled as a valu between 250-300 centipawns, depending on the Mate Distance .
+- **Mate Cleaning:** The dataset includes positions with a known mate sequence - This is converted scaled score to -/+ (250.0 + (50.0 / max(1.0, mate_distance))) to capture information on King Safety 
 
-- **Data Augmentation & DeDuplication:** The filtered positions are augmented by rotating each board state 180 degrees. 
+- **Data Augmentation & DeDuplication:** The filtered positions are augmented by rotating each board state 180 degrees to duplicate training positions and to reduce White/ Black Bias
 
 This yields a total of **227,543,733 unique positions**.
 
@@ -86,8 +86,8 @@ This yields a total of **227,543,733 unique positions**.
 
 - **Schedule & Batching Dynamics:** 
   * **Total Duration:** 30 epochs.
-  * **Training Size:** 216,169,547
-  * **Validation Size:** 11,374,186
+  * **Training Size:** 185,754,315
+  * **Validation Size:** 9,776,095
   * **Batch Size:** 8,192 positions per step.
 - **Training Error:**
   * **Average Centipawn Error for positons +/- 2.5 Pawn Units**: 25 Centipawns

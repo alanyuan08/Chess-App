@@ -198,7 +198,7 @@ def train_nnue_on_fens():
     p_embed = embedding_layer(passive_input)  # Shape: (Batch, 32, 256)
 
     # =========================================================================
-    # 4. FIXED: Native Masked Sum Pooling (Replaces the broken manual 7044 masks)
+    # 4. Native Masked Sum Pooling (Replaces the broken manual 7044 masks)
     # GlobalSumPooling1D automatically honors mask_zero and ignores index 0 completely.
     # =========================================================================
     a_acc_raw = layers.Lambda(
