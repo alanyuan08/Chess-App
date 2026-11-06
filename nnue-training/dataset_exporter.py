@@ -12,8 +12,8 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # --- INITIALIZATION ENGINE CONSTANTS ---
 DATA_SIZE = 2_000_000
-# 10 Buckets * 11 Active Pieces (excluding own King) * 64 Squares + 4 Castling Squares = 7040
-INPUT_FEATURES = 10 * 11 * 64 + 4  # Dual-Perspective HalfKA Dimension (7040)
+# 10 Buckets * 11 Active Pieces (excluding own King) * 64 Squares + 4 Castling Squares = 7044
+INPUT_FEATURES = 10 * 11 * 64 + 4  # Dual-Perspective HalfKA Dimension (7044)
 MAX_PIECES = 32  
 
 # Map FEN character to an integer type 0-11
@@ -490,7 +490,9 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
                 MATE_MAX = 300.0
                 MATE_BASE = 250.0
                 
-                if mate_count > 0:
+                if mate_count == 0:
+                    continue
+                elif mate_count > 0:
                     # Mate-in-1  -> 250.0 + (50.0 / 1.0)  = 300.0 (Perfect Win Target)
                     # Mate-in-10 -> 250.0 + (50.0 / 10.0) = 255.0 (Lower priority win)
                     score_target = min(MATE_MAX, MATE_BASE + (50.0 / max(1.0, mate_count)))
@@ -544,6 +546,7 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
                 local_shard_counter += 1
                     
             # If the opponent has a mate in 10 and a mate in 1
+            # This only applies for the <= 8 pieces case
             abs_mate_val = abs(mate_val) if mate_val is not None else 999
 
             # Append rotated perspective

@@ -16,8 +16,8 @@ from keras import layers
 from permanent_dataset_manager import InfiniteConveyorDatasetManager
 
 # --- Global Configurations ---
-# 10 Buckets * 11 Active Pieces (excluding own King) * 64 Squares + 4 (Castling Squares)= 7040
-INPUT_FEATURES = 10 * 11 * 64 + 4  # Dual-Perspective HalfKA Dimension (7040)
+# 10 Buckets * 11 Active Pieces (excluding own King) * 64 Squares + 4 (Castling Squares)= 7044
+INPUT_FEATURES = 10 * 11 * 64 + 4  # Dual-Perspective HalfKA Dimension (7044)
 MAX_PIECES = 32                # Uniform layout array padding bound
 SCALE_MAX = 1.0                # Bounded Clipped ReLU limit 
 
@@ -188,6 +188,7 @@ def train_nnue_on_fens():
     embedding_layer = layers.Embedding(
         input_dim=INPUT_FEATURES + 1,
         output_dim=256,
+        mask_zero=True,
         embeddings_initializer=nnue_accumulator_init,
         name="accumulator_layer"
     )
@@ -196,21 +197,22 @@ def train_nnue_on_fens():
     a_embed = embedding_layer(active_input)  # Shape: (Batch, 32, 256)
     p_embed = embedding_layer(passive_input)  # Shape: (Batch, 32, 256)
 
-    # 4. Synthesize branchless masking vectors to zero-out padding index contributions
-    a_mask = keras.ops.cast(keras.ops.not_equal(active_input, INPUT_FEATURES), dtype="float32")
-    p_mask = keras.ops.cast(keras.ops.not_equal(passive_input, INPUT_FEATURES), dtype="float32")
-    
-    # Expand axes to allow effortless broadcasting across the 256 embedding dimensions
-    a_mask = keras.ops.expand_dims(a_mask, axis=-1) 
-    p_mask = keras.ops.expand_dims(p_mask, axis=-1)
+    # =========================================================================
+    # 4. FIXED: Native Masked Sum Pooling (Replaces the broken manual 7044 masks)
+    # GlobalSumPooling1D automatically honors mask_zero and ignores index 0 completely.
+    # =========================================================================
+    a_acc_raw = layers.Lambda(
+        lambda x: keras.ops.sum(x, axis=1), 
+        name="active_sum_pool"
+    )(a_embed)  # Shape: (Batch, 256)
 
-    # Execute masked sum pooling to reduce the tensor to the 256-element accumulator rails
-    a_acc_raw = keras.ops.sum(a_embed * a_mask, axis=1)  # Shape: (Batch, 256)
-    p_acc_raw = keras.ops.sum(p_embed * p_mask, axis=1)  # Shape: (Batch, 256)
+    p_acc_raw = layers.Lambda(
+        lambda x: keras.ops.sum(x, axis=1), 
+        name="passive_sum_pool"
+    )(p_embed)  # Shape: (Batch, 256)
 
     # =========================================================================
     # 5. SMOOTH BOUNDED RELU ACTIVATION (SIMD VECTOR REGISTER FRIENDLY)
-    # Uses branchless algebraic absolute value math to prevent gradient deadlocks
     # =========================================================================
     alpha_leak = 0.01  # Tiny 1% gradient retention to protect AdamW momentum tracking
 

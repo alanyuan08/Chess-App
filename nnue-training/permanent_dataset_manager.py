@@ -10,6 +10,9 @@ def _infinite_worker_loop(all_files, data_queue, shutdown_event, padding_index_v
     """
     100% autonomous data pump. Shuffles the master file pool, parses and chunks 
     the parquets, and loops back to the beginning forever until shutdown.
+    
+    CRUCIAL: Features are shifted up by 1 (+1) to free up index 0 strictly for 
+    Keras mask_zero=True structural padding.
     """
     np.random.seed(int(time.time() * 1000) % 2**32 ^ mp.current_process().pid)
     worker_files = list(all_files)
@@ -34,10 +37,22 @@ def _infinite_worker_loop(all_files, data_queue, shutdown_event, padding_index_v
                 flat_targets = np.stack(df['target'].to_numpy()).astype(np.float32).reshape(-1, 1)
                 del df
                 
-                # Apply structural pad values
-                flat_active[flat_active == -1] = np.int16(padding_index_value)
-                flat_passive[flat_passive == -1] = np.int16(padding_index_value)
+                # -------------------------------------------------------------
+                # STRUCTURAL MASK_ZERO ALIGNMENT (BUGBUSTED)
+                # -------------------------------------------------------------
+                # Create a strict boolean mask of legitimate, unshifted features
+                valid_active_mask = (flat_active >= 0) & (flat_active < padding_index_value)
+                valid_passive_mask = (flat_passive >= 0) & (flat_active < padding_index_value)
                 
+                # Only shift verified, legitimate board/castling features up by 1
+                flat_active[valid_active_mask] += 1
+                flat_passive[valid_passive_mask] += 1
+                
+                # Explicitly catch EVERYTHING else (including old -1 markers, 
+                # or rogue 7044 placeholders) and ground them to structural 0
+                flat_active[~valid_active_mask] = np.int16(0)
+                flat_passive[~valid_passive_mask] = np.int16(0)
+
                 # Row-level shuffle within the file to maximize information entropy
                 perm = np.random.permutation(len(flat_targets))
                 flat_active = flat_active[perm]

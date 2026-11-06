@@ -64,7 +64,7 @@ $$\text{Inputs (7044)} \rightarrow \text{Accumulator (256)} \rightarrow \text{Mu
 
 ## 4. NNuE Training
 
-- **Training Data:** The model is trained on **231,809,086 chess positions** sourced from the [Lichess Chess Position Evaluations](https://huggingface.co/datasets/Lichess/chess-position-evaluations) dataset, which features evaluations calculated by Stockfish at various depths. To ensure an even and unbiased distribution, the training and validation sets utilize separate shards, and the training data is thoroughly shuffled.
+- **Training Data:** The model is trained on 1+ billion positions sourced from the [Lichess Chess Position Evaluations](https://huggingface.co/datasets/Lichess/chess-position-evaluations) dataset, which features evaluations calculated by Stockfish at various depths. To ensure an even and unbiased distribution, the training and validation sets utilize separate shards, and the training data is thoroughly shuffled.
 
 - **Quiet Position Filtering:** The dataset is filtered to include only "quiet" positions. Board states are excluded if the king is in check, an immediate tactical win is available via captures, or a forced checkmate sequence exists. 
 
@@ -78,7 +78,7 @@ If the current player or the opponent can gain a tactical advantage via a captur
 
 - **Data Augmentation & DeDuplication:** The filtered positions are augmented by rotating each board state 180 degrees. 
 
-This yields a total of **249,691,999 unique positions**.
+This yields a total of **227,543,733 unique positions**.
 
 - **Target Optimization & Value Mapping:** The model transforms raw evaluation scores ($y_{\text{pawn}}$) into a bounded win probability scale $[0.0, 1.0]$, where 1.0 represents a guaranteed win, 0.5 a draw, and 0.0 a loss. This bounding suppresses extreme outliers and forces the network to focus its learning capacity on highly competitive positions.
 
@@ -86,8 +86,8 @@ This yields a total of **249,691,999 unique positions**.
 
 - **Schedule & Batching Dynamics:** 
   * **Total Duration:** 30 epochs.
-  * **Training Size:** 220,221,836
-  * **Validation Size:** 11,587,250
+  * **Training Size:** 216,169,547
+  * **Validation Size:** 11,374,186
   * **Batch Size:** 8,192 positions per step.
 - **Training Error:**
   * **Average Centipawn Error for positons +/- 2.5 Pawn Units**: 25 Centipawns
