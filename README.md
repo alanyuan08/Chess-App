@@ -72,9 +72,13 @@ If the current player or the opponent can gain a tactical advantage via a captur
 
 - **Depth Cleaning:** The dataset includes positions evaluated for 5+ minute deep analysis on depth 60+ and shallow games on mobile - These edge cases are unsuitable for training. However, if there are multiple positions, we priorize the deeper position.
 
-- **Multi PV-Mode:** There are positions that force the engine to calcuate multiple PV alternative PV lines for a position on the same depth - If there multiple evaluations for the same position on the same depth, we assume the engine choose the best evaluation.
+- **Multi PV-Mode:** There are positions that force the engine to calcuate multiple PV alternative PV lines for a position on the same depth - If there multiple evaluations for the same position on the same depth, we assume the engine choose the best evaluation. We also assume the best line is included
 
-- **Mate Cleaning:** The dataset includes positions with a known mate sequence - This is converted scaled score to -/+ (250.0 + (50.0 / max(1.0, mate_distance))) to capture information on King Safety 
+- **Tactical Mate Stratification:** Procesed positions with known mate distances within search range to advantageous positions
+	- **Near Mates (≤ 20 plies):** Linear scaling between ±3.61 and ±4.00 Pawns (4.00 - (plies - 1) × 0.01), driving the engine to choose the fastest checkmate.
+	- **Far Mates (> 20 plies):** Flat-capped at ±3.60 Pawns to guarantee they outrank material play without flatlining your gradients.
+
+- **Score Scaling:** Positions with 2.5 advantages are exponentially decayed towards an absolute ceiling of 4.50.
 
 - **Data Augmentation & DeDuplication:** The filtered positions are augmented by rotating each board state 180 degrees to duplicate training positions and to reduce White/ Black Bias
 

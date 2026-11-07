@@ -2,7 +2,7 @@ import os
 import sys
 import glob
 import numpy as np
-import shutil
+import math
 
 import chess
 import multiprocessing
@@ -450,42 +450,52 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
             if len(fen_parts) < 4:
                 continue
 
-            # 4. Invalid Line if Mate and Score
-            if mate_val and raw_score:
-                continue
-
+            # Raw_score -> Positive is White Winning/ Negative is Black Winning
+            # Mate_Score -> Positive is White has Winning Checkmate / Negative is Black has Winning Checkmate
             # =========================================================================
-            # 1. THE MATE ENGINE: TARGETED ENDGAME FILTERING
+            # 1. THE MATE ENGINE: TARGETED ENDGAME FILTERING (UNWARPED)
             # =========================================================================
             if mate_val is not None:
                 mate_count = float(mate_val)
-                mate_priority = abs(mate_count)
-
                 if mate_count == 0:
                     continue
 
-                # --- ORIGINAL TARGET SCALING (2.00 - 3.00 Pawns / 200.0 - 300.0 CP) ---
                 mate_sign = 1.0 if mate_count > 0 else -1.0
-                score_target = mate_sign * (250.0 + (50.0 / max(1.0, abs(mate_count))))
-                active_pawn_score = score_target / 100.0
+                abs_mate = abs(mate_count)
+
+                # --- THE HORIZON RE-ROUTING FIREWALL ---
+                # Deep mate sequences mean a crushing advantage where the opponent refuses to resign.
+                # If it's deeper than 20 plies (10 moves), route it straight to your maximum 
+                # unwarped positional cap (8.00 Pawns) to preserve vital endgame shapes.
+                if abs_mate > 20.0:
+                    continue
+                else:
+                    # Near Bounded Mate Zone (8.10 to 10.00 Pawns)
+                    # Mate-in-1 = 10.00. Every extra ply/half-move subtracts a 0.05 Pawn penalty.
+                    # This ensures the Alpha-Beta search always picks the absolute fastest path to mate.
+                    pawn_score = 10.00 - ((abs_mate - 1.0) * 0.05)
+                    active_pawn_score = mate_sign * max(8.10, pawn_score)
 
             # =========================================================================
-            # 2. THE POSITION ENGINE (Reached if it's a normal row OR a valid trained mate)
+            # 2.  THE POSITIONAL ENGINE: PURE LINEAR VALUE WITH STRICT HARD CUTOFF
             # =========================================================================
-            else:
-                if raw_score is None:
+            elif raw_score is not None:
+                score_target = float(raw_score)
+                pawn_score = score_target / 100.0
+                
+                # --- THE HARD CUTOFF FIREWALL ---
+                if abs(pawn_score) > 8.00:
                     continue
 
-                mate_priority = 1000
-
-                score_target = float(raw_score)
-                active_pawn_score = score_target / 100.0
+                # Keep the score 100% precise, linear, and uncompressed inside the window
+                active_pawn_score = pawn_score
+            else:
+                continue
 
             # =========================================================================
             # 3.  GLOBAL QUALITY GATE & VALIDATION FIREWALL
             # Centralized scope forces ALL entries to satisfy high-integrity parameters
             # =========================================================================
-            # Validate chess constraints
             board = chess.Board(fen)
             if board.is_check() or board.is_stalemate() or board.is_insufficient_material():
                 continue
@@ -527,7 +537,6 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
                 'active_indices': active_rot_pad,
                 'passive_indices': passive_rot_pad,
                 'target': active_player_target,
-                'mate_priority': mate_priority,
                 'depth': depth_val,
                 'fen': clean_rotated_fen,
             })
@@ -539,7 +548,6 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
                 'active_indices': active_orig,
                 'passive_indices': passive_orig,
                 'target': active_player_target,
-                'mate_priority': mate_priority, 
                 'depth': depth_val,
                 'fen': clean_orig_fen,
             })

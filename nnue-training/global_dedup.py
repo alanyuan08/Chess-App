@@ -14,7 +14,7 @@ NUM_BUCKETS = 64
 TEMP_DIR = "./dedup_temp_buckets"
 BUFFER_DIR = "./buffer_temp"  # NEW: Disk-backed buffer to prevent RAM buildup
 
-CANONICAL_COLUMNS = ["active_indices", "passive_indices", "target", "depth", "fen", "mate_priority"]
+CANONICAL_COLUMNS = ["active_indices", "passive_indices", "target", "depth", "fen", "mate"]
 
 def run_partitioned_deduplication():
     os.makedirs(PRODUCTION_DIR, exist_ok=True)
@@ -84,26 +84,19 @@ def run_partitioned_deduplication():
             lazy_bucket.group_by("fen")
             .agg([
                 # MULTI-PV FIREWALL WITH ENHANCED PERSPECTIVE RANKING
-                # 1. Secondary: Depth Descending (True). If multiple lines share the same 
-                #               mate horizon, the deepest, most stable engine lookup wins.
-                # 2. Primary: Extract the highest-quality, deepest search truth (Descending).
-                # 3. Tertiary: If no mates (0.0 tie), pick the strongest positional score (Descending).
+                # 1. Primary: If multiple lines share the same evaluations, pick deepest
+                # 2. Secondary: If multiple lines, assume the multi-PV picked the best value
                 pl.all()
                 .exclude("fen")
                 .sort_by(
                     by=[
-                        pl.col("depth"),     # Deepest calculation breaks ties (Descending)
-                        pl.col("mate_priority"),  # Closest distance wins (Ascending)
-                        pl.col("target")     # Strongest candidate score (Descending)
+                        pl.col("depth"),
+                        pl.col("target")
                     ], 
-                    descending=[True, False, True]
+                    descending=[True, True]
                 )
                 .first()
             ])
-            .filter(
-                # Drop the FEN if the isolated true positional score is uncompetitive
-                (pl.col("target").abs() < 6.00)
-            )
             .collect(engine="streaming")
         )
                         
