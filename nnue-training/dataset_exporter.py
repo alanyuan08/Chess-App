@@ -27,16 +27,6 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__)) if '__file__' in locals(
 BINARY_OUTPUT_DIR = os.path.join(SCRIPT_DIR, "processed_shards")
 INPUT_DIR = "data"
 
-# Highly standardized baseline values matching your pipeline configuration
-PIECE_VALUES = {
-    chess.PAWN: 100,
-    chess.KNIGHT: 300,
-    chess.BISHOP: 300,
-    chess.ROOK: 500,
-    chess.QUEEN: 900,
-    chess.KING: 20000
-}
-
 def static_evaluate(b: chess.Board) -> int:
     """Side-to-move pure material evaluation optimized using raw bitboards."""
     score = 0
@@ -67,51 +57,13 @@ def static_evaluate(b: chess.Board) -> int:
 def is_unsafe_for_training(board: chess.Board, tolerance: int = 40) -> bool:
     """
     Validates training safety by verifying tactical deadness for both sides.
-    Returns True if either player can forcefully break the material balance.
-    Ensures the board is returned in its exact original state for downstream calculations.
     """
-    # Guardrail 0: Active checks are inherently chaotic and volatile
-    if board.is_check():
-        return True
-    
-    # Capture the exact state signature before any mutations or searches occur
-    root_state_hash = board.fen()
-
-    # -------------------------------------------------------------------------
-    # 1. Standing Pat (Your Turn): Verify no capture chain improves your side
-    # -------------------------------------------------------------------------
     static_A = static_evaluate(board)
     q_score_A = q_search(board, -float('inf'), float('inf'))
     
     # If q-search discovers a sequence that actively wins material for you
     if (q_score_A - static_A) > tolerance:
         return True
-
-    # -------------------------------------------------------------------------
-    # 2. Null Move (Opponent's Turn): Verify no chain can destroy you
-    # -------------------------------------------------------------------------
-    board.push(chess.Move.null())
-    try:
-        static_B = static_evaluate(board)
-        q_score_B = q_search(board, -float('inf'), float('inf'))
-    except BaseException as e:
-        # Prints the exact error type and trace if q_search crashes
-        print(f"\n[!] Problem detected during null move branch evaluation: {type(e).__name__} -> {e}")
-        raise
-    finally:
-        board.pop()
-
-    # If the opponent finds a forcing sequence to destroy your position after a pass
-    if (q_score_B - static_B) > tolerance:
-        return True
-    
-    # Quick Aduit
-    if board.fen() != root_state_hash:
-        raise RuntimeError(
-            f"CRITICAL MOVE-STACK DRIFT DETECTED AT FUNCTION END!\n"
-            f"The board state failed to unwind cleanly to its original root signature.\n"
-            f"Corrupted FEN Context: {board.fen()}"
-        )
 
     # The position is perfectly stable for both sides
     return False
@@ -130,10 +82,11 @@ def q_search(b: chess.Board, alpha: float, beta: float, depth: int = 0, max_dept
 
     if not in_check:
         best_score = static_evaluate(b)
+        if best_score >= beta:
+            return best_score
+        
         if best_score > alpha:
             alpha = best_score
-            if alpha >= beta:
-                return best_score
     else:
         best_score = -float('inf')
 

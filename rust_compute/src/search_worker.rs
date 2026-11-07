@@ -283,7 +283,7 @@ impl SearchWorker {
         // Apply thread diversity adjustment
         let adjusted_reduction = base_reduction + (thread_offset * is_helper_thread);
         
-        // FIX: Type-safe branchless floor clamp to avoid zero-shattering
+        // Type-safe branchless floor clamp to avoid zero-shattering
         let reduction = adjusted_reduction * (adjusted_reduction > 0) as i16;
 
         // 3. Calculate raw reduced depth
