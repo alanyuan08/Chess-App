@@ -14,7 +14,7 @@ NUM_BUCKETS = 64
 TEMP_DIR = "./dedup_temp_buckets"
 BUFFER_DIR = "./buffer_temp"  # NEW: Disk-backed buffer to prevent RAM buildup
 
-CANONICAL_COLUMNS = ["active_indices", "passive_indices", "target", "depth", "fen", "mate"]
+CANONICAL_COLUMNS = ["active_indices", "passive_indices", "target", "depth", "fen"]
 
 def run_partitioned_deduplication():
     os.makedirs(PRODUCTION_DIR, exist_ok=True)

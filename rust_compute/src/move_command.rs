@@ -167,25 +167,22 @@ pub fn flip_square(sq: u8) -> u8 {
     sq ^ 63
 }
 
-// The optimized 10-bucket coordinate mapping layout array with horizontal mirroring.
-// Preserves absolute file resolution on Rank 1 and Rank 2 to lock down castling geometry,
-// and groups Ranks 3-5 and Ranks 6-8 into 2 high-density horizontal master pools.
 pub const KING_BUCKET_MAP: [u8; 64] = [
-    // Rank 1: Full file resolution strictly preserved (Buckets 0-3)
     0,  1,  2,  3,    3,  2,  1,  0,
     
-    // Rank 2: Full file resolution strictly preserved (Buckets 4-7)
     4,  5,  6,  7,    7,  6,  5,  4,
     
-    // Ranks 3, 4, 5: Consolidated Midgame Core Block (24 squares) (Bucket 8)
-    8,  8,  8,  8,    8,  8,  8,  8,
-    8,  8,  8,  8,    8,  8,  8,  8,
-    8,  8,  8,  8,    8,  8,  8,  8,
+    8,  9,  10, 11,   11, 10, 9,  8,
     
-    // Ranks 6, 7, 8: High-Density Active Attacking & Endgame Pool (24 squares) (Bucket 9)
-    9,  9,  9,  9,    9,  9,  9,  9,
-    9,  9,  9,  9,    9,  9,  9,  9,
-    9,  9,  9,  9,    9,  9,  9,  9
+    12, 13, 14, 15,   15, 14, 13, 12,
+    
+    16, 17, 18, 19,   19, 18, 17, 16,
+    
+    20, 21, 22, 23,   23, 22, 21, 20,
+    
+    24, 25, 26, 27,   27, 26, 25, 24,
+    
+    28, 29, 30, 31,   31, 30, 29, 28
 ];
 
 /// Computes the unique index [0..7040] for a piece from a specific player's perspective.

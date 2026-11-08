@@ -12,9 +12,15 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # --- INITIALIZATION ENGINE CONSTANTS ---
 DATA_SIZE = 2_000_000
-# 10 Buckets * 11 Active Pieces (excluding own King) * 64 Squares + 4 Castling Squares = 7044
-INPUT_FEATURES = 10 * 11 * 64 + 4  # Dual-Perspective HalfKA Dimension (7044)
-MAX_PIECES = 32  
+MAX_ACTIVE_FEATURES = 35
+
+# 11 Active Pices * 64 Squares = 704
+FEATURES_PER_BUCKET = 11 * 64 # 704
+
+# 32 Buckets * 11 Active Pieces (excluding own King) * 64 Squares = 22528
+CASTLING_BASE = 32 * 11 * 64 # 22528
+
+INPUT_FEATURES = 32 * 11 * 64 + 4  # Dual-Perspective HalfKA Dimension (22532)
 
 # Map FEN character to an integer type 0-11
 PIECE_MAP = {
@@ -128,24 +134,16 @@ def q_search(b: chess.Board, alpha: float, beta: float, depth: int = 0, max_dept
     
     return best_score
 
-
-# The 10-bucket coordinate mapping layout array with horizontal mirroring.
+# The 32-bucket coordinate mapping layout array with strict horizontal mirroring.
 KING_BUCKET_MAP = [
-    # Rank 1: Full file resolution (Buckets 0-3)
     0,  1,  2,  3,    3,  2,  1,  0,
-    
-    # Rank 2: Full file resolution (Buckets 4-7)
     4,  5,  6,  7,    7,  6,  5,  4,
-    
-    # Ranks 3, 4, 5: Consolidated Midgame Core Block (24 squares) (Bucket 8)
-    8,  8,  8,  8,    8,  8,  8,  8,
-    8,  8,  8,  8,    8,  8,  8,  8,
-    8,  8,  8,  8,    8,  8,  8,  8,
-    
-    # Ranks 6, 7, 8: High-Density Active Attacking & Endgame Pool (24 squares) (Bucket 9)
-    9,  9,  9,  9,    9,  9,  9,  9,
-    9,  9,  9,  9,    9,  9,  9,  9,
-    9,  9,  9,  9,    9,  9,  9,  9
+    8,  9,  10, 11,   11, 10, 9,  8,
+    12, 13, 14, 15,   15, 14, 13, 12,
+    16, 17, 18, 19,   19, 18, 17, 16,
+    20, 21, 22, 23,   23, 22, 21, 20,
+    24, 25, 26, 27,   27, 26, 25, 24,
+    28, 29, 30, 31,   31, 30, 29, 28
 ]
 
 def parse_fen_to_features(fen_string):
@@ -229,7 +227,7 @@ def parse_fen_to_features(fen_string):
             # If White King requires horizontal mirroring, flip this piece square horizontally
             final_w_sq = p_sq ^ 7 if mirror_white else p_sq
             
-            w_idx = (white_king_bucket * 704) + (w_compressed_type * 64) + final_w_sq
+            w_idx = (white_king_bucket * FEATURES_PER_BUCKET) + (w_compressed_type * 64) + final_w_sq
             white_perspective_indices.append(w_idx)
                 
         # ----------------------------------------------------------------------
@@ -248,13 +246,12 @@ def parse_fen_to_features(fen_string):
             # If Black King requires horizontal mirroring, flip this square horizontally too
             final_b_sq = b_sq_rotated ^ 7 if mirror_black else b_sq_rotated
             
-            b_idx = (black_king_bucket * 704) + (b_compressed_type * 64) + final_b_sq
+            b_idx = (black_king_bucket * FEATURES_PER_BUCKET) + (b_compressed_type * 64) + final_b_sq
             black_perspective_indices.append(b_idx)
 
     # --------------------------------------------------------------------------
     # --- TRADITIONAL CASTLING INFLATION LAYER (Indices 7040 - 7043) ---
     # --------------------------------------------------------------------------
-    CASTLING_BASE = 7040
     has_w_king  = 'K' in castling_part
     has_w_queen = 'Q' in castling_part
     has_b_king  = 'k' in castling_part
@@ -330,10 +327,10 @@ def is_invalid_training_row(depth_val: int, knodes: int) -> bool:
         return True
 
 def pad_indices(a_idx, p_idx):
-    a_pad = np.full(MAX_PIECES, INPUT_FEATURES, dtype=np.int32)
-    p_pad = np.full(MAX_PIECES, INPUT_FEATURES, dtype=np.int32)
-    a_pad[:min(len(a_idx), MAX_PIECES)] = a_idx[:min(len(a_idx), MAX_PIECES)]
-    p_pad[:min(len(p_idx), MAX_PIECES)] = p_idx[:min(len(p_idx), MAX_PIECES)]
+    a_pad = np.full(MAX_ACTIVE_FEATURES, INPUT_FEATURES, dtype=np.int16)
+    p_pad = np.full(MAX_ACTIVE_FEATURES, INPUT_FEATURES, dtype=np.int16)
+    a_pad[:min(len(a_idx), MAX_ACTIVE_FEATURES)] = a_idx[:min(len(a_idx), MAX_ACTIVE_FEATURES)]
+    p_pad[:min(len(p_idx), MAX_ACTIVE_FEATURES)] = p_idx[:min(len(p_idx), MAX_ACTIVE_FEATURES)]
     return a_pad.tolist(), p_pad.tolist()
 
 def save_parquet_shard(batch_records, output_dir, base_name, shard_idx):
@@ -416,18 +413,9 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
                 mate_sign = 1.0 if mate_count > 0 else -1.0
                 abs_mate = abs(mate_count)
 
-                # --- THE HORIZON RE-ROUTING FIREWALL ---
-                # Deep mate sequences mean a crushing advantage where the opponent refuses to resign.
-                # If it's deeper than 20 plies (10 moves), route it straight to your maximum 
-                # unwarped positional cap (8.00 Pawns) to preserve vital endgame shapes.
-                if abs_mate > 20.0:
-                    continue
-                else:
-                    # Near Bounded Mate Zone (8.10 to 10.00 Pawns)
-                    # Mate-in-1 = 10.00. Every extra ply/half-move subtracts a 0.05 Pawn penalty.
-                    # This ensures the Alpha-Beta search always picks the absolute fastest path to mate.
-                    pawn_score = 10.00 - ((abs_mate - 1.0) * 0.05)
-                    active_pawn_score = mate_sign * max(8.10, pawn_score)
+                # --- Mate Sequence --- #
+                pawn_score = 10.00 - ((abs_mate - 1.0) * 0.05)
+                active_pawn_score = mate_sign * pawn_score
 
             # =========================================================================
             # 2.  THE POSITIONAL ENGINE: PURE LINEAR VALUE WITH STRICT HARD CUTOFF
@@ -436,10 +424,6 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
                 score_target = float(raw_score)
                 pawn_score = score_target / 100.0
                 
-                # --- THE HARD CUTOFF FIREWALL ---
-                if abs(pawn_score) > 8.00:
-                    continue
-
                 # Keep the score 100% precise, linear, and uncompressed inside the window
                 active_pawn_score = pawn_score
             else:

@@ -50,14 +50,14 @@ The NNuE achieves an average of +/- 25 centipawns off stockfish for positions be
 
 - **Input Preprocessing:** The engine convert to CentiPawn: ($\text{Centipawn / 100.0}$) -> pawn_units
 
-$$\text{Inputs (7044)} \rightarrow \text{Accumulator (256)} \rightarrow \text{Multiplexed Perspective (256*2)} \rightarrow \text{Hidden 2 (64)} \rightarrow \text{Hidden 3 (32)} \rightarrow \text{Output (1)}$$
+$$\text{Inputs (22532)} \rightarrow \text{Accumulator (256)} \rightarrow \text{Multiplexed Perspective (256*2)} \rightarrow \text{Hidden 2 (64)} \rightarrow \text{Hidden 3 (32)} \rightarrow \text{Output (1)}$$
 
-- **Input Layer:** $10 \times 11 \times 64 = 7040$ sparse features mapping active piece-square configurations relative to your own active King's position.
-- **Accumulator Layer:** Shapes into $(7040, 256)$ weights quantized to signed 16-bit integers (`i16`). Uses branchless tensor multiplexing to concatenate White/Black points of view into a unified $256$-dimensional vector.
+- **Input Layer:** $32 \times 11 \times 64 \plus 4 = 22532$ sparse features mapping active piece-square configurations relative to your own active King's position.
+- **Accumulator Layer:** Shapes into $(22532, 256)$ weights quantized to signed 16-bit integers (`i16`). Uses branchless tensor multiplexing to concatenate White/Black points of view into a unified $256$-dimensional vector.
   - *Activation:* Clipped/Bounded Linear ReLU ($\text{ReLU1}$) bounded strictly between `0.0` and `1.0`.
-- **Hidden Layer 2:** Matrix transformation mapping $(256*2, 64)$ quantized to signed 8-bit weights (`i8`) and 32-bit biases (`i32`).
+- **Hidden Layer 2:** Matrix transformation mapping $(256*2, 32)$ quantized to signed 8-bit weights (`i8`) and 32-bit biases (`i32`).
   - *Activation:* Clipped/Bounded Linear ReLU ($\text{ReLU1}$) bounded strictly between `0.0` and `1.0`.
-- **Hidden Layer 3:** Matrix transformation mapping $(64, 32)$ quantized to signed 8-bit weights (`i8`) and 32-bit biases (`i32`).
+- **Hidden Layer 3:** Matrix transformation mapping $(32, 32)$ quantized to signed 8-bit weights (`i8`) and 32-bit biases (`i32`).
   - *Activation:* Clipped/Bounded Linear ReLU ($\text{ReLU1}$) bounded strictly between `0.0` and `1.0`.
 - **Output Layer:** Combines $(32, 1)$ outputs down to a single evaluation scalar using 8-bit weights (`i8`) and 32-bit biases (`i32`).
   - *Activation:* None
@@ -74,12 +74,6 @@ If the current player or the opponent can gain a tactical advantage via a captur
 
 - **Multi PV-Mode:** There are positions that force the engine to calcuate multiple PV alternative PV lines for a position on the same depth - If there multiple evaluations for the same position on the same depth, we assume the engine choose the best evaluation. We also assume the best line is included
 
-- **Tactical Mate Stratification:** Procesed positions with known mate distances within search range to advantageous positions
-	- **Near Mates (≤ 20 plies):** Linear scaling between ±3.61 and ±4.00 Pawns (4.00 - (plies - 1) × 0.01), driving the engine to choose the fastest checkmate.
-	- **Far Mates (> 20 plies):** Flat-capped at ±3.60 Pawns to guarantee they outrank material play without flatlining your gradients.
-
-- **Score Scaling:** Positions with 2.5 advantages are exponentially decayed towards an absolute ceiling of 4.50.
-
 - **Data Augmentation & DeDuplication:** The filtered positions are augmented by rotating each board state 180 degrees to duplicate training positions and to reduce White/ Black Bias
 
 This yields a total of **227,543,733 unique positions**.
@@ -90,8 +84,8 @@ This yields a total of **227,543,733 unique positions**.
 
 - **Schedule & Batching Dynamics:** 
   * **Total Duration:** 30 epochs.
-  * **Training Size:** 185,754,315
-  * **Validation Size:** 9,776,095
+  * **Training Size:** 239,818,191
+  * **Validation Size:** 12,617,911
   * **Batch Size:** 8,192 positions per step.
 - **Training Error:**
   * **Average Centipawn Error for positons +/- 2.5 Pawn Units**: 25 Centipawns

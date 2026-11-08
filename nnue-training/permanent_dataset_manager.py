@@ -38,18 +38,18 @@ def _infinite_worker_loop(all_files, data_queue, shutdown_event, padding_index_v
                 del df
                 
                 # -------------------------------------------------------------
-                # STRUCTURAL MASK_ZERO ALIGNMENT (BUGBUSTED)
+                # STRUCTURAL MASK_ZERO ALIGNMENT (BUGBUSTED FIXED)
                 # -------------------------------------------------------------
                 # Create a strict boolean mask of legitimate, unshifted features
                 valid_active_mask = (flat_active >= 0) & (flat_active < padding_index_value)
-                valid_passive_mask = (flat_passive >= 0) & (flat_active < padding_index_value)
+                valid_passive_mask = (flat_passive >= 0) & (flat_passive < padding_index_value) 
                 
                 # Only shift verified, legitimate board/castling features up by 1
                 flat_active[valid_active_mask] += 1
                 flat_passive[valid_passive_mask] += 1
                 
                 # Explicitly catch EVERYTHING else (including old -1 markers, 
-                # or rogue 7044 placeholders) and ground them to structural 0
+                # or rogue padding placeholders) and ground them to structural 0
                 flat_active[~valid_active_mask] = np.int16(0)
                 flat_passive[~valid_passive_mask] = np.int16(0)
 
@@ -95,7 +95,7 @@ class InfiniteConveyorDatasetManager:
         self.queue_size = queue_size
         self.batch_size = batch_size
         self.name = name
-        self.PADDING_INDEX_VALUE = 10 * 11 * 64 + 4
+        self.PADDING_INDEX_VALUE =  32 * 11 * 64 + 4 
         
         self.all_files = glob.glob(os.path.join(shard_directory, shard_pattern))
         if not self.all_files:

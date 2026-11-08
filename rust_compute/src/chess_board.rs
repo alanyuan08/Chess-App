@@ -840,40 +840,35 @@ impl ChessBoard {
             l2_right[i] = val.clamp(0, 127) as i8;
         }
 
-        // --- STEP 2: HIDDEN LAYER 2 (512 -> 64) ---
-        let l3_inputs: &mut [i8; 64] = unsafe { &mut *buffer.l3_inputs.as_mut_ptr().cast::<[i8; 64]>() };
+        // --- STEP 2: HIDDEN LAYER 2 (512 -> 32) ---
+        let l3_inputs = &mut buffer.l3_inputs;
 
-        for neuron in 0..64 {
+        for neuron in 0..32 {
             let mut sum: i32 = self.nnue_network.l2_biases[neuron];
             let row = &self.nnue_network.l2_weights[neuron];
 
             // Process in structural 32-byte chunks to explicitly force AVX2/NEON auto-vectorization loops
-            for (input_chunk, weight_chunk) in l2_inputs.chunks_exact(32).zip(row.chunks_exact(32)) {
-                let mut local_sum = 0i32;
-                for i in 0..32 {
-                    local_sum += (input_chunk[i] as i32) * (weight_chunk[i] as i32);
-                }
-                sum += local_sum;
+            let mut local_sum = 0i32;
+            for i in 0..512 {
+                local_sum += (l2_inputs[i] as i32) * (row[i] as i32);
+            }
+            sum += local_sum;
+                l3_inputs[neuron] = (sum >> 7).clamp(0, 127) as i8;
             }
 
-            l3_inputs[neuron] = (sum >> 7).clamp(0, 127) as i8;
-        }
-
-        // --- STEP 3: HIDDEN LAYER 3 (64 -> 32) ---
-        let l4_inputs: &mut [i8; 32] = unsafe { &mut *buffer.l4_inputs.as_mut_ptr().cast::<[i8; 32]>() };
+        // --- STEP 3: HIDDEN LAYER 3 (32 -> 32) ---
+        let l4_inputs = &mut buffer.l4_inputs;
 
         for neuron in 0..32 {
             let mut sum: i32 = self.nnue_network.l3_biases[neuron];
             let row = &self.nnue_network.l3_weights[neuron];
 
             // Process in structural 16-byte steps for streamlined register usage
-            for (input_chunk, weight_chunk) in l3_inputs.chunks_exact(16).zip(row.chunks_exact(16)) {
-                let mut local_sum = 0i32;
-                for i in 0..16 {
-                    local_sum += (input_chunk[i] as i32) * (weight_chunk[i] as i32);
-                }
-                sum += local_sum;
+            let mut local_sum = 0i32;
+            for i in 0..32 {
+                local_sum += (l3_inputs[i] as i32) * (row[i] as i32);
             }
+            sum += local_sum;
 
             l4_inputs[neuron] = (sum >> 5).clamp(0, 127) as i8;
         }
@@ -887,7 +882,7 @@ impl ChessBoard {
         }
 
         // --- STEP 5: FINAL OUTPUT SCALING & SHIFT ---
-        let centipawn_score = (final_sum * 100) >> 7;
+        let centipawn_score = final_sum >> 5;
         centipawn_score as i16
     }
 
