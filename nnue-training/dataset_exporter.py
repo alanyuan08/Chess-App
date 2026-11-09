@@ -414,18 +414,15 @@ def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SI
                 abs_mate = abs(mate_count)
 
                 # --- Mate Sequence --- #
-                pawn_score = 10.00 - ((abs_mate - 1.0) * 0.05)
-                active_pawn_score = mate_sign * pawn_score
+                centipawn_score = 30000.0 - ((abs_mate - 1.0) * 20.0)
+                active_pawn_score = mate_sign * centipawn_score
 
             # =========================================================================
             # 2.  THE POSITIONAL ENGINE: PURE LINEAR VALUE WITH STRICT HARD CUTOFF
             # =========================================================================
             elif raw_score is not None:
-                score_target = float(raw_score)
-                pawn_score = score_target / 100.0
-                
-                # Keep the score 100% precise, linear, and uncompressed inside the window
-                active_pawn_score = pawn_score
+                active_pawn_score = round(float(raw_score))
+
             else:
                 continue
 

@@ -1,6 +1,8 @@
 use std::fs::File;
 use std::io::{Read, BufReader};
 
+pub const CASTLING_BASE: usize = 22528;
+
 #[cfg_attr(target_arch = "aarch64", repr(C, align(128)))]
 #[cfg_attr(not(target_arch = "aarch64"), repr(C, align(64)))]
 #[derive(Clone, Copy, Debug)]

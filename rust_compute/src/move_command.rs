@@ -185,7 +185,7 @@ pub const KING_BUCKET_MAP: [u8; 64] = [
     28, 29, 30, 31,   31, 30, 29, 28
 ];
 
-/// Computes the unique index [0..7040] for a piece from a specific player's perspective.
+/// Computes the unique index [0..22528] for a piece from a specific player's perspective.
 /// Returns `None` if the piece is a King, signaling that it should not be added to the features.
 #[inline(always)]
 pub fn get_feature_index(

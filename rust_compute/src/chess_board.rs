@@ -761,53 +761,95 @@ impl ChessBoard {
 
     // Create from Scratch
     pub fn create_accumulator_from_scratch(&mut self, accumulators: &mut AccumulatorHistory) {
-        // Retrieve King Squares
+        // 1. Retrieve raw bitboard king squares for coordinate mapping references
         let w_king_sq = self.kings[Side::WHITE as usize].trailing_zeros() as u8;
         let b_king_sq = self.kings[Side::BLACK as usize].trailing_zeros() as u8;
         
-        // Grab current accumulator frame using explicit slice indexing on the Boxed array
+        // Grab current accumulator frame using explicit slice indexing
         let current_frame = &mut accumulators.moves[self.ply];
         let target_white: &mut [i16; 256] = &mut current_frame.white;
         let target_black: &mut [i16; 256] = &mut current_frame.black;
 
-        // Combine ALL piece bitboards
-        let mut pieces_bitboard = (self.pawns[0] | self.pawns[1])
-            | (self.knights[0] | self.knights[1])
-            | (self.bishops[0] | self.bishops[1])
-            | (self.rooks[0] | self.rooks[1])
-            | (self.queens[0] | self.queens[1])
-            | (self.kings[0] | self.kings[1]);
+        // Reset accumulation tracks to a perfectly clean, quiet baseline
+        target_white.fill(0);
+        target_black.fill(0);
 
-        let mut white_indices = [0usize; 32];
-        let mut black_indices = [0usize; 32];
-        let mut active_piece_count = 0;
+        // =========================================================================
+        // --- EXTRACTION MATRIX VIA self.all_pieces ---
+        // White tracks all non-king White pieces + ALL Black pieces.
+        // Black tracks all non-king Black pieces + ALL White pieces.
+        // =========================================================================
+        let white_occupied = self.all_pieces[Side::WHITE as usize];
+        let black_occupied = self.all_pieces[Side::BLACK as usize];
 
-        // --- SINGLE PASS: GATHER ALL FEATURE INDICES ---
-        while pieces_bitboard != 0 {
-            let sq = pieces_bitboard.trailing_zeros() as u8;
+        let mut white_pieces_bitboard = (white_occupied & !self.kings[Side::WHITE as usize]) | black_occupied;
+        let mut black_pieces_bitboard = (black_occupied & !self.kings[Side::BLACK as usize]) | white_occupied;
+
+        // Allocate local index collector arrays matching your exact 35 token ceiling
+        let mut white_indices = [0usize; 35];
+        let mut black_indices = [0usize; 35];
+        let mut w_count = 0;
+        let mut b_count = 0;
+
+        // =========================================================================
+        // --- UNCONDITIONAL BIT-SCANNING LOOPS ---
+        // =========================================================================
+        
+        // Pass 1: Gather White Perspective Positional Features
+        while white_pieces_bitboard != 0 {
+            let sq = white_pieces_bitboard.trailing_zeros() as u8;
             let piece = self.mailbox[sq as usize];
 
-            white_indices[active_piece_count] = get_feature_index(w_king_sq, piece, sq, false);
-            black_indices[active_piece_count] = get_feature_index(b_king_sq, piece, sq, true);
+            let w_idx = get_feature_index(w_king_sq, piece, sq, false);
+            debug_assert!(w_idx < CASTLING_BASE, "Positional white feature index drifted out of bounds: {}", w_idx);
+            white_indices[w_count] = w_idx;
+            w_count += 1;
             
-            active_piece_count += 1;
-            pieces_bitboard &= pieces_bitboard - 1;
+            white_pieces_bitboard &= white_pieces_bitboard - 1;
         }
 
-        // --- LOOP 1: PROCESS WHITE PERSPECTIVE COMPLETELY ---
-        // Exact [i16; 256] array sizing unlocks aggressive SIMD/AVX2 loop unrolling
-        for &w_idx in white_indices.iter().take(active_piece_count) {
-            let w_row: &[i16; 256] = &self.nnue_network.l1_weights[w_idx];
+        // Pass 2: Gather Black Perspective Positional Features
+        while black_pieces_bitboard != 0 {
+            let sq = black_pieces_bitboard.trailing_zeros() as u8;
+            let piece = self.mailbox[sq as usize];
+
+            let b_idx = get_feature_index(b_king_sq, piece, sq, true);
+            debug_assert!(b_idx < CASTLING_BASE, "Positional black feature index drifted out of bounds: {}", b_idx);
+            black_indices[b_count] = b_idx;
+            b_count += 1;
             
+            black_pieces_bitboard &= black_pieces_bitboard - 1;
+        }
+
+        // =========================================================================
+        // --- ADD GLOBAL CASTLING RIGHTS TO THE INDEX TRACKS (Indices 22528-22531) ---
+        // =========================================================================
+        let castling_base = CASTLING_BASE;
+        let rights = self.castling_rights;
+
+        // Append White Perspective Castling Indices
+        if (rights & WHITE_KINGSIDE)  != 0 { white_indices[w_count] = castling_base + 0; w_count += 1; }
+        if (rights & WHITE_QUEENSIDE) != 0 { white_indices[w_count] = castling_base + 1; w_count += 1; }
+        if (rights & BLACK_KINGSIDE)  != 0 { white_indices[w_count] = castling_base + 2; w_count += 1; }
+        if (rights & BLACK_QUEENSIDE) != 0 { white_indices[w_count] = castling_base + 3; w_count += 1; }
+
+        // Append Black Perspective Castling Indices
+        if (rights & WHITE_KINGSIDE)  != 0 { black_indices[b_count] = castling_base + 0; b_count += 1; }
+        if (rights & WHITE_QUEENSIDE) != 0 { black_indices[b_count] = castling_base + 1; b_count += 1; }
+        if (rights & BLACK_KINGSIDE)  != 0 { black_indices[b_count] = castling_base + 2; b_count += 1; }
+        if (rights & BLACK_QUEENSIDE) != 0 { black_indices[b_count] = castling_base + 3; b_count += 1; }
+        
+        // Loop 1: Process White Perspective Completely
+        for &w_idx in white_indices.iter().take(w_count) {
+            let w_row = &self.nnue_network.l1_weights[w_idx];
             for i in 0..256 {
                 target_white[i] = target_white[i].wrapping_add(w_row[i]);
             }
         }
 
-        // --- LOOP 2: PROCESS BLACK PERSPECTIVE COMPLETELY ---
-        for &b_idx in black_indices.iter().take(active_piece_count) {
-            let b_row: &[i16; 256] = &self.nnue_network.l1_weights[b_idx];
-            
+        // Loop 2: Process Black Perspective Completely
+        for &b_idx in black_indices.iter().take(b_count) {
+            let b_row = &self.nnue_network.l1_weights[b_idx];
             for i in 0..256 {
                 target_black[i] = target_black[i].wrapping_add(b_row[i]);
             }
@@ -829,15 +871,13 @@ impl ChessBoard {
         };
 
         // --- STEP 0: ACCUMULATOR MAPPING ---
-        let l2_inputs: &mut [i8; 512] = unsafe { &mut *buffer.l2_inputs.as_mut_ptr().cast::<[i8; 512]>() };
-        let (l2_left, l2_right) = l2_inputs.split_at_mut(256);
-
-        // --- STEP 1: Clipped ReLU (Branchless Vectorized Clamping) ---
-        for (i, &val) in active_acc.iter().enumerate().take(256) {
-            l2_left[i] = val.clamp(0, 127) as i8;
+        let l2_inputs = &mut buffer.l2_inputs;
+        
+        for i in 0..256 {
+            l2_inputs[i] = active_acc[i].clamp(0, 127) as i8;
         }
-        for (i, &val) in opp_acc.iter().enumerate().take(256) {
-            l2_right[i] = val.clamp(0, 127) as i8;
+        for i in 0..256 {
+            l2_inputs[i + 256] = opp_acc[i].clamp(0, 127) as i8;
         }
 
         // --- STEP 2: HIDDEN LAYER 2 (512 -> 32) ---
@@ -882,12 +922,15 @@ impl ChessBoard {
         }
 
         // --- STEP 5: FINAL OUTPUT SCALING & SHIFT ---
-        let centipawn_score = final_sum >> 5;
+        let centipawn_score = final_sum >> 7;
         centipawn_score as i16
     }
 
-    /// Progresses the network forward incrementally during move making
+    // Progresses the network forward incrementally during move making
     pub fn make_move(&mut self, mv: ForwardMove, accumulators: &mut AccumulatorHistory) {
+        // 1. Snapshot previous castling rights before execute_move updates them branchlessly
+        let prev_castling_rights = self.castling_rights;
+
         // Retrieve King Squares
         let w_king_sq = self.kings[Side::WHITE as usize].trailing_zeros() as u8;
         let b_king_sq = self.kings[Side::BLACK as usize].trailing_zeros() as u8;
@@ -898,16 +941,16 @@ impl ChessBoard {
         let mut added_piece = move_piece;
         match mv.move_type {
             MoveFlag::PROMOTIONQUEEN => {
-                added_piece = if move_piece == BoardPiece::WPAWN { BoardPiece::WQUEEN } else { BoardPiece::BQUEEN };
+                added_piece = if piece_player(move_piece) == Side::WHITE { BoardPiece::WQUEEN } else { BoardPiece::BQUEEN };
             }
             MoveFlag::PROMOTIONROOK => {
-                added_piece = if move_piece == BoardPiece::WPAWN { BoardPiece::WROOK } else { BoardPiece::BROOK };
+                added_piece = if piece_player(move_piece) == Side::WHITE { BoardPiece::WROOK } else { BoardPiece::BROOK };
             }
             MoveFlag::PROMOTIONBISHOP => {
-                added_piece = if move_piece == BoardPiece::WPAWN { BoardPiece::WBISHOP } else { BoardPiece::BBISHOP };
+                added_piece = if piece_player(move_piece) == Side::WHITE { BoardPiece::WBISHOP } else { BoardPiece::BBISHOP };
             }
             MoveFlag::PROMOTIONKNIGHT => {
-                added_piece = if move_piece == BoardPiece::WPAWN { BoardPiece::WKNIGHT } else { BoardPiece::BKNIGHT };
+                added_piece = if piece_player(move_piece) == Side::WHITE { BoardPiece::WKNIGHT } else { BoardPiece::BKNIGHT };
             }
             _ => {}
         }
@@ -930,8 +973,8 @@ impl ChessBoard {
         curr_white.copy_from_slice(&prev_acc.white);
         curr_black.copy_from_slice(&prev_acc.black);
 
-        // --- 4. Process Moving / Added Piece ---
-        // White Perspective: Tracks everything except its own White King
+        // --- 4. Process Moving / Added Piece (OWN-KING EXCLUSION ENFORCED) ---
+        // White Perspective: Omit our own King. It is tracked solely by the 32 King Buckets.
         if move_piece != BoardPiece::WKING {
             let w_remove = get_feature_index(w_king_sq, move_piece, mv.start_sq, false);
             let w_add = get_feature_index(w_king_sq, added_piece, mv.end_sq, false);
@@ -944,7 +987,7 @@ impl ChessBoard {
             }
         }
 
-        // Black Perspective: Tracks everything except its own Black King
+        // Black Perspective: Omit our own King. It is tracked solely by the 32 King Buckets.
         if move_piece != BoardPiece::BKING {
             let b_remove = get_feature_index(b_king_sq, move_piece, mv.start_sq, true);
             let b_add = get_feature_index(b_king_sq, added_piece, mv.end_sq, true);
@@ -957,8 +1000,12 @@ impl ChessBoard {
             }
         }
 
-        // --- 5. Process Captured Piece ---
+        // --- 5. Process Captured Piece (EN-ENEMY KING CAPTURE INSULATION) ---
         if captured_piece != BoardPiece::NONE {
+            // Safe protection guardrails (Kings can never be physically captured)
+            debug_assert!(captured_piece != BoardPiece::WKING);
+            debug_assert!(captured_piece != BoardPiece::BKING);
+
             let w_cap = get_feature_index(w_king_sq, captured_piece, captured_sq, false);
             let b_cap = get_feature_index(b_king_sq, captured_piece, captured_sq, true);
             
@@ -972,7 +1019,7 @@ impl ChessBoard {
         }
 
         // --- 6. Special Castling Logic (Incremental Rook Updating) ---
-        // If the King castles but stays within its bucket boundary, we must manually update the Rook features.
+        // If the King castles but stays within its bucket boundary, update the Rook features.
         if mv.move_type == MoveFlag::KINGSIDECASTLE || mv.move_type == MoveFlag::QUEENSIDECASTLE {
             let moving_side = piece_player(move_piece);
             
@@ -998,6 +1045,36 @@ impl ChessBoard {
             for i in 0..256 {
                 curr_white[i] = curr_white[i].wrapping_add(w_r_add_row[i]).wrapping_sub(w_r_rem_row[i]);
                 curr_black[i] = curr_black[i].wrapping_add(b_r_add_row[i]).wrapping_sub(b_r_rem_row[i]);
+            }
+        }
+
+        // =========================================================================
+        // --- 7. INCREMENTAL CASTLING INPUT FEATURE UPDATES (Indices 22528 - 22531) ---
+        // =========================================================================
+        let next_castling_rights = self.castling_rights;
+        if prev_castling_rights != next_castling_rights {
+            let castling_base = CASTLING_BASE;
+
+            let lost_w_k = ((prev_castling_rights & WHITE_KINGSIDE) != 0)  && ((next_castling_rights & WHITE_KINGSIDE) == 0);
+            let lost_w_q = ((prev_castling_rights & WHITE_QUEENSIDE) != 0) && ((next_castling_rights & WHITE_QUEENSIDE) == 0);
+            let lost_b_k = ((prev_castling_rights & BLACK_KINGSIDE) != 0)  && ((next_castling_rights & BLACK_KINGSIDE) == 0);
+            let lost_b_q = ((prev_castling_rights & BLACK_QUEENSIDE) != 0) && ((next_castling_rights & BLACK_QUEENSIDE) == 0);
+
+            if lost_w_k {
+                let row = &self.nnue_network.l1_weights[castling_base + 0];
+                for i in 0..256 { curr_white[i] = curr_white[i].wrapping_sub(row[i]); curr_black[i] = curr_black[i].wrapping_sub(row[i]); }
+            }
+            if lost_w_q {
+                let row = &self.nnue_network.l1_weights[castling_base + 1];
+                for i in 0..256 { curr_white[i] = curr_white[i].wrapping_sub(row[i]); curr_black[i] = curr_black[i].wrapping_sub(row[i]); }
+            }
+            if lost_b_k {
+                let row = &self.nnue_network.l1_weights[castling_base + 2];
+                for i in 0..256 { curr_white[i] = curr_white[i].wrapping_sub(row[i]); curr_black[i] = curr_black[i].wrapping_sub(row[i]); }
+            }
+            if lost_b_q {
+                let row = &self.nnue_network.l1_weights[castling_base + 3];
+                for i in 0..256 { curr_white[i] = curr_white[i].wrapping_sub(row[i]); curr_black[i] = curr_black[i].wrapping_sub(row[i]); }
             }
         }
     }
@@ -1165,7 +1242,7 @@ impl ChessBoard {
         if kings != 0 {
             let opponent_side = 1 - stm;
 
-            // 1. FIXED: Isolate direct opponent defenders currently in the pool.
+            // 1. Isolate direct opponent defenders currently in the pool.
             // Since pool is already pre-filtered in the SEE loop by the active live side masks,
             // we simply subtract the active stm's known pieces. Everything left belongs to alive opponents!
             let opponent_attackers_in_pool = pool & !self.all_pieces[stm];

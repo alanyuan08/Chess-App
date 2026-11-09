@@ -36,22 +36,29 @@ def _infinite_worker_loop(all_files, data_queue, shutdown_event, padding_index_v
                 flat_passive = np.stack(df['passive_indices'].to_numpy()).astype(np.int16)
                 flat_targets = np.stack(df['target'].to_numpy()).astype(np.float32).reshape(-1, 1)
                 del df
+
+                # =========================================================================
+                # DEFINITIVE OPTION A: MASK_ZERO=TRUE STRUCTURAL ALIGNMENT
+                # =========================================================================
+                # 1. Identify legitimate board/castling features (0 to 22531)
+                # We strictly exclude your padding index value (22532) from this mask
+                real_active_mask = (flat_active >= 0) & (flat_active < padding_index_value)
+                real_passive_mask = (flat_passive >= 0) & (flat_passive < padding_index_value)
                 
-                # -------------------------------------------------------------
-                # STRUCTURAL MASK_ZERO ALIGNMENT (BUGBUSTED FIXED)
-                # -------------------------------------------------------------
-                # Create a strict boolean mask of legitimate, unshifted features
-                valid_active_mask = (flat_active >= 0) & (flat_active < padding_index_value)
-                valid_passive_mask = (flat_passive >= 0) & (flat_passive < padding_index_value) 
+                # 2. Allocate clean, empty matrix targets pre-filled entirely with 0 
+                # (0 acts as Keras's universal structural padding trash can)
+                shifted_active = np.zeros_like(flat_active, dtype=np.int16)
+                shifted_passive = np.zeros_like(flat_passive, dtype=np.int16)
                 
-                # Only shift verified, legitimate board/castling features up by 1
-                flat_active[valid_active_mask] += 1
-                flat_passive[valid_passive_mask] += 1
+                # 3. Shift only your REAL chess features up by 1 to safely span from 1 to 22532
+                shifted_active[real_active_mask] = flat_active[real_active_mask] + 1
+                shifted_passive[real_passive_mask] = flat_passive[real_passive_mask] + 1
                 
-                # Explicitly catch EVERYTHING else (including old -1 markers, 
-                # or rogue padding placeholders) and ground them to structural 0
-                flat_active[~valid_active_mask] = np.int16(0)
-                flat_passive[~valid_passive_mask] = np.int16(0)
+                # Assign our safely shifted and padded arrays back to the main pointers.
+                # Anything that was a padding token (22532) or a rogue marker (-1)
+                # naturally remains exactly 0, matching mask_zero expectations perfectly.
+                flat_active = shifted_active
+                flat_passive = shifted_passive
 
                 # Row-level shuffle within the file to maximize information entropy
                 perm = np.random.permutation(len(flat_targets))
