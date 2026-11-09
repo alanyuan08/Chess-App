@@ -859,70 +859,51 @@ impl ChessBoard {
     pub fn evaluate(&mut self, accumulators: &AccumulatorHistory, buffer: &mut NnueInferenceBuffer) -> i16 {
         // --- PERSPECTIVE ROUTING ---
         let (active_acc, opp_acc) = match self.active_player {
-            Side::WHITE => (
-                &accumulators.moves[self.ply].white, 
-                &accumulators.moves[self.ply].black
-            ),
-            Side::BLACK => (
-                &accumulators.moves[self.ply].black, 
-                &accumulators.moves[self.ply].white
-            ),
+            Side::WHITE => (&accumulators.moves[self.ply].white, &accumulators.moves[self.ply].black),
+            Side::BLACK => (&accumulators.moves[self.ply].black, &accumulators.moves[self.ply].white),
             Side::NONE => panic!("Invalid Game State: active_player cannot be Side::NONE during NNUE accumulator fetching!"),
         };
 
         // --- STEP 0: ACCUMULATOR MAPPING ---
         let l2_inputs = &mut buffer.l2_inputs;
-        
         for i in 0..256 {
             l2_inputs[i] = active_acc[i].clamp(0, 127) as i8;
-        }
-        for i in 0..256 {
             l2_inputs[i + 256] = opp_acc[i].clamp(0, 127) as i8;
         }
 
         // --- STEP 2: HIDDEN LAYER 2 (512 -> 32) ---
         let l3_inputs = &mut buffer.l3_inputs;
-
         for (neuron, l3_out) in l3_inputs.iter_mut().enumerate().take(32) {
             let mut sum = self.nnue_network.l2_biases[neuron];
             
-            // Exact slicing to eliminate bounds checking and encourage AVX2/NEON vectorization
-            let weights = &self.nnue_network.l2_weights[neuron][..512];
-            let inputs = &l2_inputs[..512];
-
-            // Fold directly into sum
-            sum += weights.iter().zip(inputs).fold(0, |acc, (&w, &i)| {
-                acc + (i as i32) * (w as i32)
-            });
+            sum += self.nnue_network.l2_weights[neuron].iter()
+                .zip(l2_inputs.iter())
+                .fold(0, |acc, (&w, &i)| acc + (i as i32) * (w as i32));
 
             *l3_out = (sum >> 7).clamp(0, 127) as i8;
         }
 
         // --- STEP 3: HIDDEN LAYER 3 (32 -> 32) ---
         let l4_inputs = &mut buffer.l4_inputs;
-
         for (neuron, l4_out) in l4_inputs.iter_mut().enumerate().take(32) {
             let mut sum = self.nnue_network.l3_biases[neuron];
             
-            // Direct zip accumulation without intermediate slice variables
             sum += self.nnue_network.l3_weights[neuron].iter()
-                .zip(&l3_inputs)
+                .zip(l3_inputs.iter())
                 .fold(0, |acc, (&w, &i)| acc + (i as i32) * (w as i32));
 
             *l4_out = (sum >> 5).clamp(0, 127) as i8;
         }
 
         // --- STEP 4: OUTPUT LAYER (32 -> 1) ---
-        let mut final_sum: i32 = self.nnue_network.output_bias[0];
-        let row = &self.nnue_network.output_weights[0];
-
-        for i in 0..32 {
-            final_sum += (l4_inputs[i] as i32) * (row[i] as i32);
-        }
+        let mut final_sum = self.nnue_network.output_bias[0];
+        
+        final_sum += self.nnue_network.output_weights[0].iter()
+            .zip(l4_inputs.iter())
+            .fold(0, |acc, (&w, &i)| acc + (i as i32) * (w as i32));
 
         // --- STEP 5: FINAL OUTPUT SCALING & SHIFT ---
-        let centipawn_score = final_sum >> 7;
-        centipawn_score as i16
+        (final_sum >> 7) as i16
     }
 
     // Progresses the network forward incrementally during move making
