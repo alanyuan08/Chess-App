@@ -884,18 +884,17 @@ impl ChessBoard {
         let l3_inputs = &mut buffer.l3_inputs;
 
         for (neuron, l3_out) in l3_inputs.iter_mut().enumerate().take(32) {
-            let mut sum: i32 = self.nnue_network.l2_biases[neuron];
+            let mut sum = self.nnue_network.l2_biases[neuron];
             
-            // Explicitly slice to exactly 512 elements to eliminate bounds checking
-            let row_slice = &self.nnue_network.l2_weights[neuron][..512];
-            let inputs_slice = &l2_inputs[..512];
+            // Exact slicing to eliminate bounds checking and encourage AVX2/NEON vectorization
+            let weights = &self.nnue_network.l2_weights[neuron][..512];
+            let inputs = &l2_inputs[..512];
 
-            // Iterator-based dot product for optimal AVX2/NEON vectorization
-            let local_sum = row_slice.iter().zip(inputs_slice).fold(0i32, |acc, (&w, &i)| {
+            // Fold directly into sum
+            sum += weights.iter().zip(inputs).fold(0, |acc, (&w, &i)| {
                 acc + (i as i32) * (w as i32)
             });
 
-            sum += local_sum;
             *l3_out = (sum >> 7).clamp(0, 127) as i8;
         }
 
@@ -903,18 +902,13 @@ impl ChessBoard {
         let l4_inputs = &mut buffer.l4_inputs;
 
         for (neuron, l4_out) in l4_inputs.iter_mut().enumerate().take(32) {
-            let mut sum: i32 = self.nnue_network.l3_biases[neuron];
+            let mut sum = self.nnue_network.l3_biases[neuron];
             
-            // Explicitly slice to exactly 32 elements to eliminate bounds checking
-            let row_slice = &self.nnue_network.l3_weights[neuron];
-            let inputs_slice = &l3_inputs;
+            // Direct zip accumulation without intermediate slice variables
+            sum += self.nnue_network.l3_weights[neuron].iter()
+                .zip(&l3_inputs)
+                .fold(0, |acc, (&w, &i)| acc + (i as i32) * (w as i32));
 
-            // Iterator-based dot product for optimal AVX2/NEON vectorization
-            let local_sum = row_slice.iter().zip(inputs_slice).fold(0i32, |acc, (&w, &i)| {
-                acc + (i as i32) * (w as i32)
-            });
-
-            sum += local_sum;
             *l4_out = (sum >> 5).clamp(0, 127) as i8;
         }
 
