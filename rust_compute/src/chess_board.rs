@@ -828,7 +828,7 @@ impl ChessBoard {
         let rights = self.castling_rights;
 
         // Append White Perspective Castling Indices
-        if (rights & WHITE_KINGSIDE)  != 0 { white_indices[w_count] = castling_base + 0; w_count += 1; }
+        if (rights & WHITE_KINGSIDE)  != 0 { white_indices[w_count] = castling_base; w_count += 1; }
         if (rights & WHITE_QUEENSIDE) != 0 { white_indices[w_count] = castling_base + 1; w_count += 1; }
         if (rights & BLACK_KINGSIDE)  != 0 { white_indices[w_count] = castling_base + 2; w_count += 1; }
         if (rights & BLACK_QUEENSIDE) != 0 { white_indices[w_count] = castling_base + 3; w_count += 1; }
@@ -883,34 +883,39 @@ impl ChessBoard {
         // --- STEP 2: HIDDEN LAYER 2 (512 -> 32) ---
         let l3_inputs = &mut buffer.l3_inputs;
 
-        for neuron in 0..32 {
+        for (neuron, l3_out) in l3_inputs.iter_mut().enumerate().take(32) {
             let mut sum: i32 = self.nnue_network.l2_biases[neuron];
-            let row = &self.nnue_network.l2_weights[neuron];
+            
+            // Explicitly slice to exactly 512 elements to eliminate bounds checking
+            let row_slice = &self.nnue_network.l2_weights[neuron][..512];
+            let inputs_slice = &l2_inputs[..512];
 
-            // Process in structural 32-byte chunks to explicitly force AVX2/NEON auto-vectorization loops
-            let mut local_sum = 0i32;
-            for i in 0..512 {
-                local_sum += (l2_inputs[i] as i32) * (row[i] as i32);
-            }
+            // Iterator-based dot product for optimal AVX2/NEON vectorization
+            let local_sum = row_slice.iter().zip(inputs_slice).fold(0i32, |acc, (&w, &i)| {
+                acc + (i as i32) * (w as i32)
+            });
+
             sum += local_sum;
-                l3_inputs[neuron] = (sum >> 7).clamp(0, 127) as i8;
-            }
+            *l3_out = (sum >> 7).clamp(0, 127) as i8;
+        }
 
         // --- STEP 3: HIDDEN LAYER 3 (32 -> 32) ---
         let l4_inputs = &mut buffer.l4_inputs;
 
-        for neuron in 0..32 {
+        for (neuron, l4_out) in l4_inputs.iter_mut().enumerate().take(32) {
             let mut sum: i32 = self.nnue_network.l3_biases[neuron];
-            let row = &self.nnue_network.l3_weights[neuron];
+            
+            // Explicitly slice to exactly 32 elements to eliminate bounds checking
+            let row_slice = &self.nnue_network.l3_weights[neuron];
+            let inputs_slice = &l3_inputs;
 
-            // Process in structural 16-byte steps for streamlined register usage
-            let mut local_sum = 0i32;
-            for i in 0..32 {
-                local_sum += (l3_inputs[i] as i32) * (row[i] as i32);
-            }
+            // Iterator-based dot product for optimal AVX2/NEON vectorization
+            let local_sum = row_slice.iter().zip(inputs_slice).fold(0i32, |acc, (&w, &i)| {
+                acc + (i as i32) * (w as i32)
+            });
+
             sum += local_sum;
-
-            l4_inputs[neuron] = (sum >> 5).clamp(0, 127) as i8;
+            *l4_out = (sum >> 5).clamp(0, 127) as i8;
         }
 
         // --- STEP 4: OUTPUT LAYER (32 -> 1) ---
@@ -1061,7 +1066,7 @@ impl ChessBoard {
             let lost_b_q = ((prev_castling_rights & BLACK_QUEENSIDE) != 0) && ((next_castling_rights & BLACK_QUEENSIDE) == 0);
 
             if lost_w_k {
-                let row = &self.nnue_network.l1_weights[castling_base + 0];
+                let row = &self.nnue_network.l1_weights[castling_base];
                 for i in 0..256 { curr_white[i] = curr_white[i].wrapping_sub(row[i]); curr_black[i] = curr_black[i].wrapping_sub(row[i]); }
             }
             if lost_w_q {
