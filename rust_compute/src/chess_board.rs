@@ -834,7 +834,7 @@ impl ChessBoard {
         if (rights & BLACK_QUEENSIDE) != 0 { white_indices[w_count] = castling_base + 3; w_count += 1; }
 
         // Append Black Perspective Castling Indices
-        if (rights & WHITE_KINGSIDE)  != 0 { black_indices[b_count] = castling_base + 0; b_count += 1; }
+        if (rights & WHITE_KINGSIDE)  != 0 { black_indices[b_count] = castling_base; b_count += 1; }
         if (rights & WHITE_QUEENSIDE) != 0 { black_indices[b_count] = castling_base + 1; b_count += 1; }
         if (rights & BLACK_KINGSIDE)  != 0 { black_indices[b_count] = castling_base + 2; b_count += 1; }
         if (rights & BLACK_QUEENSIDE) != 0 { black_indices[b_count] = castling_base + 3; b_count += 1; }
