@@ -79,6 +79,27 @@ class AggressiveMemoryCleanup(keras.callbacks.Callback):
     def on_epoch_end(self, epoch, logs=None):
         gc.collect() 
 
+class ExtremePositionDecayCallback(keras.callbacks.Callback):
+    """
+    Gradually reduces the sampling rate of |eval| > 1000 cp positions
+    as training progresses to preserve active gradients in competitive ranges.
+    """
+    def __init__(self, keep_prob_var, start_prob=0.50, end_prob=0.10, decay_epochs=20, verbose=1):
+        super().__init__()
+        self.keep_prob_var = keep_prob_var
+        self.start_prob = start_prob
+        self.end_prob = end_prob
+        self.decay_epochs = decay_epochs
+        self.verbose = verbose
+
+    def on_epoch_begin(self, epoch, logs=None):
+        progress = min(epoch / max(self.decay_epochs, 1), 1.0)
+        new_prob = self.start_prob - progress * (self.start_prob - self.end_prob)
+        self.keep_prob_var.assign(new_prob)
+        
+        if self.verbose > 0:
+            print(f"\n[Curriculum] Epoch {epoch + 1}: >1000cp keep probability set to {new_prob:.2f}")
+
 class StockfishNNUE(Model):
     def __init__(self, input_features, scale_max=1.0, alpha_leak=0.01, **kwargs):
         super().__init__(**kwargs)
@@ -88,7 +109,7 @@ class StockfishNNUE(Model):
         self.max_active_features = MAX_ACTIVE_FEATURES
 
         # --- Architecture Layer Instantiations ---
-        nnue_accumulator_init = keras.initializers.RandomNormal(mean=0.0, stddev=0.005, seed=42)
+        nnue_accumulator_init = keras.initializers.RandomNormal(mean=0.0, stddev=0.05, seed=42)
         
         self.embedding_layer = layers.Embedding(
             input_dim=self.input_features + 1,
@@ -128,8 +149,13 @@ class StockfishNNUE(Model):
         active_input = inputs["active_features"]
         passive_input = inputs["passive_features"]
 
-        a_embed = self.embedding_layer(active_input)   
-        p_embed = self.embedding_layer(passive_input)  
+        # Create binary masks (1.0 for valid features, 0.0 for padding index 0)
+        a_mask = keras.ops.expand_dims(keras.ops.cast(active_input != 0, "float32"), -1)
+        p_mask = keras.ops.expand_dims(keras.ops.cast(passive_input != 0, "float32"), -1)
+
+        # Look up embeddings and zero out padded entries before summing
+        a_embed = self.embedding_layer(active_input) * a_mask
+        p_embed = self.embedding_layer(passive_input) * p_mask
 
         a_acc_raw = keras.ops.sum(a_embed, axis=1)
         p_acc_raw = keras.ops.sum(p_embed, axis=1)
@@ -147,7 +173,7 @@ class StockfishNNUE(Model):
         
         raw_eval = self.chess_eval(x3_act)
         
-        return raw_eval * 360.0 
+        return raw_eval * 360.0
     
     def train_step(self, data):
         x, y = data
@@ -424,18 +450,32 @@ def train_nnue_on_fens():
     def val_generator_wrapper():
         return val_manager.generator_fn()
 
+    extreme_keep_prob = tf.Variable(1.0, dtype=tf.float32, trainable=False)
+    def dynamic_extreme_filter(x, y):
+        # Always keep 100% of positions within [-500, +500] cp
+        is_extreme = tf.abs(tf.squeeze(y)) > 500.0
+        prob = tf.where(is_extreme, extreme_keep_prob, 1.0)
+        return tf.random.uniform([]) < prob
+
     # 3. Build structural dataset graph definitions EXACTLY ONCE with uniform infinite loops
     def get_fresh_train_dataset():
-        return tf.data.Dataset.from_generator(
-            generator=train_generator_wrapper,
-            output_signature=(
-                {
-                    "active_features": tf.TensorSpec(shape=(BATCH_SIZE, MAX_ACTIVE_FEATURES), dtype=tf.int16),
-                    "passive_features": tf.TensorSpec(shape=(BATCH_SIZE, MAX_ACTIVE_FEATURES), dtype=tf.int16),
-                },
-                tf.TensorSpec(shape=(BATCH_SIZE, 1), dtype=tf.float32)
+        return (
+            tf.data.Dataset.from_generator(
+                generator=train_generator_wrapper,
+                output_signature=(
+                    {
+                        "active_features": tf.TensorSpec(shape=(BATCH_SIZE, MAX_ACTIVE_FEATURES), dtype=tf.int16),
+                        "passive_features": tf.TensorSpec(shape=(BATCH_SIZE, MAX_ACTIVE_FEATURES), dtype=tf.int16),
+                    },
+                    tf.TensorSpec(shape=(BATCH_SIZE, 1), dtype=tf.float32)
+                )
             )
-        ).repeat().prefetch(tf.data.AUTOTUNE)
+            .unbatch()
+            .repeat()
+            .filter(dynamic_extreme_filter)
+            .batch(BATCH_SIZE)
+            .prefetch(tf.data.AUTOTUNE)
+        )
 
     def get_fresh_val_dataset():
         return tf.data.Dataset.from_generator(
@@ -474,6 +514,16 @@ def train_nnue_on_fens():
         verbose=1
     )
 
+    # Decays |eval| > 500cp sampling from 100% down to 20% over the first 15 epochs
+    # This is to preserve gradient
+    extreme_decay_cb = ExtremePositionDecayCallback(
+        keep_prob_var=extreme_keep_prob,
+        start_prob=1.0,
+        end_prob=0.20,
+        decay_epochs=15,
+        verbose=1
+    )
+
     # 6. Fit Execution: Runs perfectly synchronized across all 30 epochs
     model.fit(
         train_dataset,
@@ -482,7 +532,7 @@ def train_nnue_on_fens():
         validation_data=val_dataset,
         validation_steps=VALIDATION_PER_EPOCH,
         shuffle=False, 
-        callbacks=[newbob_callback, checkpoint_cb, cleanup_cb]
+        callbacks=[extreme_decay_cb, newbob_callback, checkpoint_cb, cleanup_cb]
     )
 
     print("\nTraining complete. Terminating background workers cleanly...")
