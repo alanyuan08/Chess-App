@@ -51,8 +51,6 @@ impl NnueNetwork {
         };
 
         // --- SAFE SEQUENTIAL FIELD READING ---
-        // We get raw mutable byte slices for EACH field individually.
-        // This naturally skips any hidden padding bytes the compiler inserts!
         unsafe {
             // Helper closure to map any typed slice directly to a mutable u8 byte slice
             let mut read_field = |ptr: *mut u8, elements_count: usize, element_size: usize| -> std::io::Result<()> {

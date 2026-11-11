@@ -791,10 +791,6 @@ impl ChessBoard {
         let mut w_count = 0;
         let mut b_count = 0;
 
-        // =========================================================================
-        // --- UNCONDITIONAL BIT-SCANNING LOOPS ---
-        // =========================================================================
-        
         // Pass 1: Gather White Perspective Positional Features
         while white_pieces_bitboard != 0 {
             let sq = white_pieces_bitboard.trailing_zeros() as u8;

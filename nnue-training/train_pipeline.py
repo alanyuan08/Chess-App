@@ -85,7 +85,7 @@ class StockfishNNUE(Model):
         self.input_features = input_features
         self.scale_max = scale_max
         self.alpha_leak = alpha_leak
-        self.max_active_features = 35
+        self.max_active_features = MAX_ACTIVE_FEATURES
 
         # --- Architecture Layer Instantiations ---
         nnue_accumulator_init = keras.initializers.RandomNormal(mean=0.0, stddev=0.005, seed=42)
