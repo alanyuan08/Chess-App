@@ -62,11 +62,8 @@ def static_evaluate(b: chess.Board) -> int:
 
 def is_unsafe_for_training(board: chess.Board, tolerance: int = 40) -> bool:
     """
-    Validates training safety by verifying tactical deadness for both sides.
+    Validates training safety by verifying tactical deadness for both STM.
     """
-    if board.is_check():
-        return True
-    
     # If q-search discovers a sequence that actively wins material for you
     static_A = static_evaluate(board)
     alpha_A = static_A + tolerance
@@ -75,19 +72,7 @@ def is_unsafe_for_training(board: chess.Board, tolerance: int = 40) -> bool:
     if q_score_A > alpha_A:
         return True
 
-    # Flip the Board
-    board.push(chess.Move.null())
-
-    # If q-search discovers a sequence that actively wins material for opponent
-    static_B = static_evaluate(board)
-    alpha_B = static_B + tolerance
-    q_score_B = q_search(board, alpha_B, float('inf'))
-    board.pop()
-    
-    if q_score_B > alpha_B:
-        return True
-
-    # The position is perfectly stable for both sides
+    # The position is perfectly stable for STM
     return False
 
 def q_search(b: chess.Board, alpha: float, beta: float, depth: int = 0, max_depth: int = 24) -> int:
