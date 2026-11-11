@@ -79,26 +79,59 @@ class AggressiveMemoryCleanup(keras.callbacks.Callback):
     def on_epoch_end(self, epoch, logs=None):
         gc.collect() 
 
-class ExtremePositionDecayCallback(keras.callbacks.Callback):
+class TieredPositionDecayCallback(keras.callbacks.Callback):
     """
-    Gradually reduces the sampling rate of |eval| > 1000 cp positions
-    as training progresses to preserve active gradients in competitive ranges.
+    Three-tier curriculum decay calibrated for SF_SCALE = 360.0:
+      - |eval| <= 150 cp:        Always 1.00 (peak WDL gradient zone)
+      - 150 < |eval| <= 300 cp:  Decays 1.00 -> 0.70 (Slight)
+      - 300 < |eval| <= 500 cp:  Decays 1.00 -> 0.40 (Mid)
+      - |eval| > 500 cp:         Decays 1.00 -> 0.10 (Extreme)
     """
-    def __init__(self, keep_prob_var, start_prob=0.50, end_prob=0.10, decay_epochs=20, verbose=1):
+    def __init__(
+        self,
+        slight_prob_var,
+        mid_prob_var,
+        extreme_prob_var,
+        warmup_epochs=3,
+        slight_end_prob=0.70,
+        mid_end_prob=0.40,
+        extreme_end_prob=0.10,
+        decay_epochs=15,
+        verbose=1
+    ):
         super().__init__()
-        self.keep_prob_var = keep_prob_var
-        self.start_prob = start_prob
-        self.end_prob = end_prob
+        self.slight_prob_var = slight_prob_var
+        self.mid_prob_var = mid_prob_var
+        self.extreme_prob_var = extreme_prob_var
+        self.warmup_epochs = warmup_epochs
+        self.slight_end_prob = slight_end_prob
+        self.mid_end_prob = mid_end_prob
+        self.extreme_end_prob = extreme_end_prob
         self.decay_epochs = decay_epochs
         self.verbose = verbose
 
     def on_epoch_begin(self, epoch, logs=None):
-        progress = min(epoch / max(self.decay_epochs, 1), 1.0)
-        new_prob = self.start_prob - progress * (self.start_prob - self.end_prob)
-        self.keep_prob_var.assign(new_prob)
-        
+        if epoch < self.warmup_epochs:
+            slight_p = 1.0
+            mid_p = 1.0
+            ext_p = 1.0
+        else:
+            progress = min((epoch - self.warmup_epochs) / max(self.decay_epochs, 1), 1.0)
+            slight_p = 1.0 - progress * (1.0 - self.slight_end_prob)
+            mid_p = 1.0 - progress * (1.0 - self.mid_end_prob)
+            ext_p = 1.0 - progress * (1.0 - self.extreme_end_prob)
+
+        self.slight_prob_var.assign(slight_p)
+        self.mid_prob_var.assign(mid_p)
+        self.extreme_prob_var.assign(ext_p)
+
         if self.verbose > 0:
-            print(f"\n[Curriculum] Epoch {epoch + 1}: >1000cp keep probability set to {new_prob:.2f}")
+            print(
+                f"\n[Curriculum] Epoch {epoch + 1}: "
+                f"Slight(150-300cp)={slight_p:.2f} | "
+                f"Mid(300-500cp)={mid_p:.2f} | "
+                f"Extreme(>500cp)={ext_p:.2f}"
+            )
 
 class StockfishNNUE(Model):
     def __init__(self, input_features, scale_max=1.0, alpha_leak=0.01, **kwargs):
@@ -450,11 +483,22 @@ def train_nnue_on_fens():
     def val_generator_wrapper():
         return val_manager.generator_fn()
 
-    extreme_keep_prob = tf.Variable(1.0, dtype=tf.float32, trainable=False)
-    def dynamic_extreme_filter(x, y):
-        # Always keep 100% of positions within [-500, +500] cp
-        is_extreme = tf.abs(tf.squeeze(y)) > 500.0
-        prob = tf.where(is_extreme, extreme_keep_prob, 1.0)
+    slight_keep_prob = tf.Variable(1.0, dtype=tf.float32, trainable=False)   # 150 to 300 cp
+    mid_keep_prob = tf.Variable(1.0, dtype=tf.float32, trainable=False)      # 300 to 500 cp
+    extreme_keep_prob = tf.Variable(1.0, dtype=tf.float32, trainable=False)  # > 500 cp
+
+    def tiered_dynamic_filter(x, y):
+        abs_y = tf.abs(tf.squeeze(y))
+
+        prob = tf.where(
+            abs_y > 500.0,
+            extreme_keep_prob,
+            tf.where(
+                abs_y > 300.0,
+                mid_keep_prob,
+                tf.where(abs_y > 150.0, slight_keep_prob, 1.0)
+            )
+        )
         return tf.random.uniform([]) < prob
 
     # 3. Build structural dataset graph definitions EXACTLY ONCE with uniform infinite loops
@@ -472,7 +516,7 @@ def train_nnue_on_fens():
             )
             .unbatch()
             .repeat()
-            .filter(dynamic_extreme_filter)
+            .filter(tiered_dynamic_filter)
             .batch(BATCH_SIZE)
             .prefetch(tf.data.AUTOTUNE)
         )
@@ -514,12 +558,15 @@ def train_nnue_on_fens():
         verbose=1
     )
 
-    # Decays |eval| > 500cp sampling from 100% down to 20% over the first 15 epochs
-    # This is to preserve gradient
-    extreme_decay_cb = ExtremePositionDecayCallback(
-        keep_prob_var=extreme_keep_prob,
-        start_prob=1.0,
-        end_prob=0.20,
+    # Decays |eval| > 150 / 300 / 500 CP advantages to preserve later gradient
+    tiered_decay_cb = TieredPositionDecayCallback(
+        slight_prob_var=slight_keep_prob,
+        mid_prob_var=mid_keep_prob,
+        extreme_prob_var=extreme_keep_prob,
+        warmup_epochs=3,
+        slight_end_prob=0.70,
+        mid_end_prob=0.40,
+        extreme_end_prob=0.10,
         decay_epochs=15,
         verbose=1
     )
@@ -532,7 +579,7 @@ def train_nnue_on_fens():
         validation_data=val_dataset,
         validation_steps=VALIDATION_PER_EPOCH,
         shuffle=False, 
-        callbacks=[extreme_decay_cb, newbob_callback, checkpoint_cb, cleanup_cb]
+        callbacks=[tiered_decay_cb, newbob_callback, checkpoint_cb, cleanup_cb]
     )
 
     print("\nTraining complete. Terminating background workers cleanly...")
