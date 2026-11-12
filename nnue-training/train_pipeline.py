@@ -79,58 +79,41 @@ class AggressiveMemoryCleanup(keras.callbacks.Callback):
     def on_epoch_end(self, epoch, logs=None):
         gc.collect() 
 
-class TieredPositionDecayCallback(keras.callbacks.Callback):
+class SmoothPositionDecayCallback(keras.callbacks.Callback):
     """
-    Three-tier curriculum decay calibrated for SF_SCALE = 360.0:
-      - |eval| <= 150 cp:        Always 1.00 (peak WDL gradient zone)
-      - 150 < |eval| <= 300 cp:  Decays 1.00 -> 0.70 (Slight)
-      - 300 < |eval| <= 500 cp:  Decays 1.00 -> 0.40 (Mid)
-      - |eval| > 500 cp:         Decays 1.00 -> 0.10 (Extreme)
+    Smoothly ramps `decay_strength` from 0.0 (100% natural data) to 1.0 (full bell-curve decay)
+    after an initial warmup phase, and reports live keep rates across key centipawn ranges.
     """
-    def __init__(
-        self,
-        slight_prob_var,
-        mid_prob_var,
-        extreme_prob_var,
-        warmup_epochs=3,
-        slight_end_prob=0.70,
-        mid_end_prob=0.40,
-        extreme_end_prob=0.10,
-        decay_epochs=15,
-        verbose=1
-    ):
+    def __init__(self, decay_strength_var, scale_cp=360.0, warmup_epochs=3, decay_epochs=15, verbose=1):
         super().__init__()
-        self.slight_prob_var = slight_prob_var
-        self.mid_prob_var = mid_prob_var
-        self.extreme_prob_var = extreme_prob_var
+        self.decay_strength_var = decay_strength_var
+        self.scale_cp = scale_cp
         self.warmup_epochs = warmup_epochs
-        self.slight_end_prob = slight_end_prob
-        self.mid_end_prob = mid_end_prob
-        self.extreme_end_prob = extreme_end_prob
         self.decay_epochs = decay_epochs
         self.verbose = verbose
 
+    def _keep_rate(self, cp, strength):
+        base_curve = 1.0 / (1.0 + (cp / self.scale_cp) ** 2)
+        return 1.0 - strength * (1.0 - base_curve)
+
     def on_epoch_begin(self, epoch, logs=None):
         if epoch < self.warmup_epochs:
-            slight_p = 1.0
-            mid_p = 1.0
-            ext_p = 1.0
+            strength = 0.0
         else:
-            progress = min((epoch - self.warmup_epochs) / max(self.decay_epochs, 1), 1.0)
-            slight_p = 1.0 - progress * (1.0 - self.slight_end_prob)
-            mid_p = 1.0 - progress * (1.0 - self.mid_end_prob)
-            ext_p = 1.0 - progress * (1.0 - self.extreme_end_prob)
+            strength = min((epoch - self.warmup_epochs) / max(self.decay_epochs, 1), 1.0)
 
-        self.slight_prob_var.assign(slight_p)
-        self.mid_prob_var.assign(mid_p)
-        self.extreme_prob_var.assign(ext_p)
+        self.decay_strength_var.assign(strength)
 
         if self.verbose > 0:
+            slight_p = self._keep_rate(225.0, strength)   # Midpoint of 150-300 cp
+            mid_p = self._keep_rate(400.0, strength)      # Midpoint of 300-500 cp
+            ext_p = self._keep_rate(750.0, strength)      # Representative >500 cp
+
             print(
-                f"\n[Curriculum] Epoch {epoch + 1}: "
-                f"Slight(150-300cp)={slight_p:.2f} | "
-                f"Mid(300-500cp)={mid_p:.2f} | "
-                f"Extreme(>500cp)={ext_p:.2f}"
+                f"\n[Curriculum] Epoch {epoch + 1} (Strength={strength:.2f}): "
+                f"Slight(~225cp)={slight_p:.2f} | "
+                f"Mid(~400cp)={mid_p:.2f} | "
+                f"Extreme(~750cp)={ext_p:.2f}"
             )
 
 class StockfishNNUE(Model):
@@ -331,7 +314,7 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
         layer2 = model.get_layer("hidden_layer_2") 
         w2, b2 = layer2.get_weights()
         w2_quant = np.ascontiguousarray(np.clip(np.round(w2.T * 32.0), -128, 127).astype(np.int8))
-        b2_quant = np.round(b2 * 32.0).astype(np.int32) 
+        b2_quant = np.round(b2 * 4096.0).astype(np.int32) 
         f.write(w2_quant.tobytes())
         f.write(b2_quant.tobytes())
         print(f"-> Hidden Layer 2 serialized. Shape: {w2.shape} (Weights: i8 / Bias: i32) [Rust -> Shift >> 7]")
@@ -342,7 +325,7 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
         layer3 = model.get_layer("hidden_layer_3")
         w3, b3 = layer3.get_weights()
         w3_quant = np.ascontiguousarray(np.clip(np.round(w3.T * 32.0), -128, 127).astype(np.int8))
-        b3_quant = np.round(b3 * 32.0).astype(np.int32)
+        b3_quant = np.round(b3 * 1024.0).astype(np.int32)
         f.write(w3_quant.tobytes())
         f.write(b3_quant.tobytes())
         print(f"-> Hidden Layer 3 serialized. Shape: {w3.shape} (Weights: i8 / Bias: i32) [Rust -> Shift >> 5]")
@@ -352,11 +335,11 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
         # Shift Right by 5 (>> 5) to get final scaled score.
         output_layer = model.get_layer("chess_eval")
         w4, b4 = output_layer.get_weights()
-        w4_quant = np.ascontiguousarray(np.clip(np.round(w4.T * 128.0), -128, 127).astype(np.int8))
-        b4_quant = np.round(b4 * 128.0).astype(np.int32)
+        w4_quant = np.ascontiguousarray(np.clip(np.round(w4.T * 32.0), -128, 127).astype(np.int8))
+        b4_quant = np.round(b4 * 1024.0).astype(np.int32)
         f.write(w4_quant.tobytes())
         f.write(b4_quant.tobytes())
-        print(f"-> Output Layer serialized. Shape: {w4.shape} (Weights: i8 / Bias: i32) [Rust -> Shift >> 5]")
+        print(f"-> Output Layer serialized. Shape: {w4.shape} (Weights: i8 / Bias: i32) [Rust -> Shift >> 10]")
 
     print(f"\n[SUCCESS] Safe NNUE file successfully compiled and written to: {file_path}")
 
@@ -483,23 +466,12 @@ def train_nnue_on_fens():
     def val_generator_wrapper():
         return val_manager.generator_fn()
 
-    slight_keep_prob = tf.Variable(1.0, dtype=tf.float32, trainable=False)   # 150 to 300 cp
-    mid_keep_prob = tf.Variable(1.0, dtype=tf.float32, trainable=False)      # 300 to 500 cp
-    extreme_keep_prob = tf.Variable(1.0, dtype=tf.float32, trainable=False)  # > 500 cp
-
-    def tiered_dynamic_filter(x, y):
+    decay_strength = tf.Variable(0.0, dtype=tf.float32, trainable=False)
+    def smooth_dynamic_filter(x, y):
         abs_y = tf.abs(tf.squeeze(y))
-
-        prob = tf.where(
-            abs_y > 500.0,
-            extreme_keep_prob,
-            tf.where(
-                abs_y > 300.0,
-                mid_keep_prob,
-                tf.where(abs_y > 150.0, slight_keep_prob, 1.0)
-            )
-        )
-        return tf.random.uniform([]) < prob
+        base_curve = 1.0 / (1.0 + tf.square(abs_y / 360.0))
+        keep_prob = 1.0 - decay_strength * (1.0 - base_curve)
+        return tf.random.uniform([]) < keep_prob
 
     # 3. Build structural dataset graph definitions EXACTLY ONCE with uniform infinite loops
     def get_fresh_train_dataset():
@@ -516,7 +488,7 @@ def train_nnue_on_fens():
             )
             .unbatch()
             .repeat()
-            .filter(tiered_dynamic_filter)
+            .filter(smooth_dynamic_filter)
             .batch(BATCH_SIZE)
             .prefetch(tf.data.AUTOTUNE)
         )
@@ -558,15 +530,10 @@ def train_nnue_on_fens():
         verbose=1
     )
 
-    # Decays |eval| > 150 / 300 / 500 CP advantages to preserve later gradient
-    tiered_decay_cb = TieredPositionDecayCallback(
-        slight_prob_var=slight_keep_prob,
-        mid_prob_var=mid_keep_prob,
-        extreme_prob_var=extreme_keep_prob,
+    smooth_decay_cb = SmoothPositionDecayCallback(
+        decay_strength_var=decay_strength,
+        scale_cp=360.0,
         warmup_epochs=3,
-        slight_end_prob=0.70,
-        mid_end_prob=0.40,
-        extreme_end_prob=0.10,
         decay_epochs=15,
         verbose=1
     )
@@ -579,7 +546,7 @@ def train_nnue_on_fens():
         validation_data=val_dataset,
         validation_steps=VALIDATION_PER_EPOCH,
         shuffle=False, 
-        callbacks=[tiered_decay_cb, newbob_callback, checkpoint_cb, cleanup_cb]
+        callbacks=[smooth_decay_cb, newbob_callback, checkpoint_cb, cleanup_cb]
     )
 
     print("\nTraining complete. Terminating background workers cleanly...")

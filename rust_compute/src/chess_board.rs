@@ -899,7 +899,7 @@ impl ChessBoard {
             .fold(0, |acc, (&w, &i)| acc + (i as i32) * (w as i32));
 
         // --- STEP 5: FINAL OUTPUT SCALING & SHIFT ---
-        (final_sum >> 7) as i16
+        (final_sum >> 10) as i16
     }
 
     // Progresses the network forward incrementally during move making
