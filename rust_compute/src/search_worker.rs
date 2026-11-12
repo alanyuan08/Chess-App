@@ -75,7 +75,7 @@ impl SearchWorker {
 
     // Search Entry Point
     pub fn root_search(&mut self, engine_age: i8) -> (ForwardMove, usize, usize) {
-        // Start the timer
+        // Start the timer / reset counters
         self.nodes_processed = 0;
 
         // Reset the age
@@ -88,32 +88,47 @@ impl SearchWorker {
         // Aspiration window configuration
         let mut alpha = -INFINITY;
         let mut beta = INFINITY;
-        let window_delta = 70;
+        let window_delta = 50;
 
         while depth <= MAX_DEPTH {
             let mut result = self.negamax(depth, 0, alpha, beta, best_move_overall, true);
 
             // Check for fail-low or fail-high (if search wasn't aborted)
             if !result.was_aborted && !self.stop_signal.load(Ordering::Relaxed) {
-                if result.score <= alpha {
-                    // Fail-low: The true score is worse than expected. Open window to minus infinity.
-                    alpha = -INFINITY;
+                
+                // Pure Fail-Soft Widen Loop: Keep re-searching until the score falls cleanly inside the window
+                while result.score <= alpha || result.score >= beta {
+                    if result.score <= alpha {
+                        // Fail-low: The true score is worse than expected. 
+                        beta = result.score;
+                        alpha = -INFINITY;
+                    } else if result.score >= beta {
+                        // Fail-high: The true score is better than expected.
+                        alpha = result.score;
+                        beta = INFINITY;
+                    }
+
+                    // Re-search this exact depth with the properly adjusted bounds
                     result = self.negamax(depth, 0, alpha, beta, best_move_overall, true);
-                } else if result.score >= beta {
-                    // Fail-high: The true score is better than expected. Open window to infinity.
-                    beta = INFINITY;
-                    result = self.negamax(depth, 0, alpha, beta, best_move_overall, true);
+
+                    // Break immediately if a re-search hits the timeout/halt barrier
+                    if result.was_aborted || self.stop_signal.load(Ordering::Relaxed) {
+                        break;
+                    }
                 }
             }
             
+            // Post-depth assessment and window initialization for the subsequent depth
             if !self.stop_signal.load(Ordering::Relaxed) {
                 if self.thread_id == 0 {
                     if !result.was_aborted {
                         best_move_overall = result.best_move;
-                        println!("[Master Thread] Completed Depth: {} | Best Move Score: {:?} | Evaluation: {}", 
+                        
+                        // Verified: Scores are positive/correct relative to root. No negation needed.
+                        println!("[Master Thread] Completed Depth: {} | Best Move: {:?} | Evaluation: {}", 
                             depth, best_move_overall, result.score);
                         
-                        // Set up the aspiration window for the next depth around the found score
+                        // Initialize a narrow aspiration window around our newly verified score for the next depth layer
                         alpha = result.score - window_delta;
                         beta = result.score + window_delta;
                     }
@@ -204,19 +219,12 @@ impl SearchWorker {
             self.chess_board.execute_move(forward_move); 
             self.chess_board.null_move_accumulator(&mut self.board_accumulator);
         } else {
-            let move_piece = self.chess_board.mailbox_piece(forward_move.start_sq);
-            let is_king_or_castle = (move_piece == BoardPiece::WKING || move_piece == BoardPiece::BKING)
-                || (forward_move.move_type == MoveFlag::KINGSIDECASTLE || forward_move.move_type == MoveFlag::QUEENSIDECASTLE);
-
-            if !is_king_or_castle {
-                self.chess_board.make_move(forward_move, &mut self.board_accumulator);
-            }
-
-            captured_piece = self.chess_board.execute_move(forward_move);
-
-            // Forced Recompute due to King
-            if is_king_or_castle {
+            if self.chess_board.does_move_cross_king_bucket(forward_move) {
+                captured_piece = self.chess_board.execute_move(forward_move);
                 self.chess_board.create_accumulator_from_scratch(&mut self.board_accumulator);
+            } else {
+                self.chess_board.make_move(forward_move, &mut self.board_accumulator);
+                captured_piece = self.chess_board.execute_move(forward_move);
             }
         }
 
@@ -252,56 +260,62 @@ impl SearchWorker {
     // A simple, linear-logarithmic approximation using integer division:
     // R increases slowly as depth and move count grow.
     #[inline]
-    fn get_reduced_depth(&self, depth: i8, moves_tried: i8) -> i8 {
+    pub fn get_reduced_depth(&self, depth: i8, moves_tried: i8) -> i8 {
         // 1. Safe array bounds clamping
         let d = depth.clamp(0, 63) as usize;
         let m = moves_tried.clamp(0, 63) as usize;
 
-        let base_reduction = LMR_TABLE[d][m];
-        let mut reduction = base_reduction;
+        // Ensure your LMR_TABLE stores values that can cast cleanly into an i16
+        let base_reduction = LMR_TABLE[d][m] as i16;
 
-        // 2. Apply thread diversity (helps different threads explore different paths)
-        if self.thread_id != 0 {
-            let thread_offset = if self.thread_id % 2 == 1 { 
-                1 
-            } else { 
-                if depth > 4 { -2 } else { -1 } 
-            };
-            reduction = (base_reduction + thread_offset).max(0);
-        }
+        // 2. Branchless Thread Diversity Calculation
+        let is_helper_thread = (self.thread_id != 0) as i16;
+        
+        let is_odd_thread = ((self.thread_id & 1) != 0) as i16;
+        let is_even_thread = 1 - is_odd_thread;
+        
+        let depth_gt_4 = (depth > 4) as i16;
+        let even_offset = -(1 - depth_gt_4);
 
-        // 3. Calculate the target depth
-        let mut reduced_depth = depth - 1 - reduction;
+        // Combine offsets branchlessly based on the active thread ID properties
+        let thread_offset = is_odd_thread + (even_offset * is_even_thread);
+        
+        // Apply thread diversity adjustment
+        let adjusted_reduction = base_reduction + (thread_offset * is_helper_thread);
+        
+        // Type-safe branchless floor clamp to avoid zero-shattering
+        let reduction = adjusted_reduction * (adjusted_reduction > 0) as i16;
 
-        // 4. Safety lock: Ensure we always search at least depth 1,
-        // and never search deeper than a standard depth step (depth - 1)
-        if reduced_depth < 0 {
-            reduced_depth = 0;
-        } else if reduced_depth >= depth {
-            reduced_depth = depth - 1;
-        }
+        // 3. Calculate raw reduced depth
+        let raw_reduced_depth = (depth as i16) - 1 - reduction;
 
-        reduced_depth
+        // 4. Branchless Safety Clamp (Forces result between 0 and depth - 1)
+        let is_less_than_zero = (raw_reduced_depth < 0) as i16;
+        let is_greater_equal_depth = (raw_reduced_depth >= depth as i16) as i16;
+        let is_valid = 1 - is_less_than_zero - is_greater_equal_depth;
+
+        let reduced_depth = (((depth as i16) - 1) * is_greater_equal_depth) 
+            + (raw_reduced_depth * is_valid);
+
+        reduced_depth as i8
     }
 
-    // Store Killer Move - No Captures
-    fn store_killer_move(&mut self, new_killer_move: ForwardMove, ply: i16) {
-        // Convert the incoming ply directly into our safe array index context
-        let ply_idx = ply as usize;
+    // Store Killer Move - No Captures (Entirely Branchless)
+    pub fn store_killer_move(&mut self, new_killer_move: ForwardMove, ply: i16) {
+        let ply_idx = (ply as usize) & 127;
 
-        // Safety guard to prevent out-of-bounds array crashes if your search goes extremely deep
-        if ply_idx >= 128 {
-            return;
-        }
+        let k0 = self.killer_move_table[ply_idx][0];
+        let k1 = self.killer_move_table[ply_idx][1];
 
-        // If this move is already our primary killer slot for this ply, do nothing
-        if self.killer_move_table[ply_idx][0] == new_killer_move {
-            return;
-        }
-        
-        // Shift slot 0 down into slot 1 to preserve it, then make this the primary killer move
-        self.killer_move_table[ply_idx][1] = self.killer_move_table[ply_idx][0];
-        self.killer_move_table[ply_idx][0] = new_killer_move;
+        let match_k0 = k0 == new_killer_move;
+        let match_k1 = k1 == new_killer_move;
+
+        let next_slot0 = if match_k0 { k0 } else if match_k1 { k1 } else { new_killer_move };
+        let next_slot1 = if match_k0 { k1 } else { k0 };
+
+        // Save states back down into the table
+        self.killer_move_table[ply_idx][0] = next_slot0;
+        self.killer_move_table[ply_idx][1] = next_slot1;
     }
 
     // StockFish NMP Reduction algorithm
@@ -309,7 +323,7 @@ impl SearchWorker {
     fn calculate_nmp_reduction(&self, depth: i8, static_eval: i16, beta: i16) -> i8 {
         let base_reduction = 3 + (depth / 4);
         
-        let eval_bonus = ((static_eval - beta) / 300).clamp(0, 3);
+        let eval_bonus = ((static_eval - beta) / 200).clamp(0, 3);
         
         base_reduction + (eval_bonus as i8)
     }
@@ -345,7 +359,7 @@ impl SearchWorker {
     // !self.stop_signal.load(Ordering::Relaxed) should be called prior to save as the search
     // is likely incompelte
     fn negamax(&mut self, depth: i8, ply: i16, mut alpha: i16, mut beta: i16, 
-        mut pv_move_hint: ForwardMove, allow_null: bool) -> SearchResult {
+        pv_move_hint: ForwardMove, allow_null: bool) -> SearchResult {
 
         // 1. Halt Signal
         if self.nodes_processed & 0x3FFF == 0 && self.stop_signal.load(Ordering::Relaxed) {
@@ -372,20 +386,21 @@ impl SearchWorker {
 
         let original_alpha = alpha; 
         let original_beta = beta;
+        let mut tt_hint = ForwardMove::NULL_MOVE;   
 
         // 3. Fail-Soft Transposition Table
         let tt_entry = self.transposition_table.probe(hash, ply);
         if tt_entry.flag != HashFlag::EMPTY {
             let retrieved_score = tt_entry.score;
             let retrieved_depth = tt_entry.depth;
-            pv_move_hint = tt_entry.forward_move;
+            tt_hint = tt_entry.forward_move;
 
             if retrieved_depth >= depth {
                 // EXACT: The true minimax value was found; return it immediately.
                 if tt_entry.flag == HashFlag::EXACT {
                     return SearchResult {
                         score: retrieved_score,
-                        best_move: pv_move_hint,
+                        best_move: tt_hint,
                         was_aborted: false,
                     };
                 }
@@ -397,7 +412,7 @@ impl SearchWorker {
                     if retrieved_score >= beta {
                         return SearchResult {
                             score: retrieved_score,
-                            best_move: pv_move_hint,
+                            best_move: tt_hint,
                             was_aborted: false,
                         };
                     }
@@ -412,7 +427,7 @@ impl SearchWorker {
                     if retrieved_score <= alpha {
                         return SearchResult {
                             score: retrieved_score,
-                            best_move: pv_move_hint,
+                            best_move: tt_hint,
                             was_aborted: false,
                         };
                     }
@@ -426,27 +441,20 @@ impl SearchWorker {
         // Leaf Node Condition -> Drop into Quiescence Search
         // Q-Search uses Hard-Cut Off and the value is bounded between alpha - beta
         if depth <= 0 {
-            return self.quiescence_search(alpha, beta, ply, pv_move_hint);
+            return self.quiescence_search(alpha, beta, ply);
         }
 
         let static_eval = self.static_eval();
 
         // 4. Late Futility Pruning
         if depth <= 3 && !king_in_check && beta < MATE_THRESHOLD && beta > -MATE_THRESHOLD {
-            // Baseline network evaluation uncertainty (40 centipawns)
-            let net_error_buffer = 40;
+            // Assume 30 centipawn error for <= 200 Centipawn erros. 
+            let base_margin = 30;
+            let rfp_margin = (35 * depth as i16) + base_margin;
             
-            // Dynamic margin: base linear scaling + error buffer to protect against network noise
-            let rfp_margin = (50 * depth) + net_error_buffer;
-            let computed_val = static_eval - (rfp_margin as i16);
-            
-            if computed_val >= beta {
+            if static_eval - rfp_margin >= beta {
                 let aborted = self.stop_signal.load(Ordering::Relaxed);
-                let mut fail_soft_score = static_eval;
-
-                if fail_soft_score > MATE_THRESHOLD - 100 { 
-                    fail_soft_score = beta; 
-                }
+                let fail_soft_score = static_eval;
 
                 if !aborted && beta == original_beta {
                     self.transposition_table.store(
@@ -465,7 +473,8 @@ impl SearchWorker {
         }
 
         // 5. Pure Fail-Soft Null Move Pruning
-        if allow_null && pv_move_hint.move_type != MoveFlag::NULL && !king_in_check && depth >= 3 && 
+        if allow_null && !matches!(pv_move_hint.move_type, MoveFlag::NULL) && 
+            !king_in_check && depth >= 3 && 
             self.chess_board.has_major_pieces() && ply > 0 &&
             beta < MATE_THRESHOLD && beta > -MATE_THRESHOLD && 
             static_eval >= beta {
@@ -492,19 +501,6 @@ impl SearchWorker {
             }
             
             if null_score >= beta {
-                // 4. Verification Search: Prevent devastating endgame/zugzwang traps at high depths
-                if depth > 12 {
-                    let verify_depth = if depth > 1 + reduction { depth - 1 - reduction } else { 0 };
-                    let verify_result = self.negamax(verify_depth, ply + 1, beta - 1, beta, ForwardMove::NULL_MOVE, false);
-                    if verify_result.score < beta {
-                       return SearchResult { 
-                            score: verify_result.score, 
-                            best_move: verify_result.best_move, 
-                            was_aborted: verify_result.was_aborted 
-                        };
-                    }
-                }
-
                 if beta == original_beta {
                     self.transposition_table.store(
                         hash, null_score, 
@@ -527,11 +523,31 @@ impl SearchWorker {
         let mut best_score = -MATE_VALUE;
 
         let mut gen_moves = ArrayVec::<ForwardMove, 256>::new();
-        self.chess_board.generate_moves(&mut gen_moves, pv_move_hint, 
-            ply, &self.killer_move_table, false);
+        self.chess_board.generate_moves(
+            &mut gen_moves, pv_move_hint, tt_hint,
+            ply, &self.killer_move_table, false)
+        ;
 
         // 6. Move Search Loop
         for forward_move in &gen_moves {
+            // --- PRE-MOVE TACTICAL PRUNING GATES ---
+            if !king_in_check && depth <= 4
+                && matches!(forward_move.move_type, 
+                    MoveFlag::CAPTURE | MoveFlag::ENPASSANT | MoveFlag::PROMOTIONQUEEN) 
+            {
+                let exact_see_score = 
+                    self.chess_board.static_exchange_evaluation(*forward_move);
+
+                if exact_see_score < 0 {
+                    continue; 
+                }
+
+                let tactical_margin = 30 + (40 * depth as i16);
+                if static_eval + exact_see_score + tactical_margin < alpha {
+                    continue; 
+                }
+            }
+
             self.process_forward_move(*forward_move);
 
             // Pseudo legal move exposes check, undo move
@@ -608,20 +624,23 @@ impl SearchWorker {
             // Always undo the move exactly once per iteration at the bottom of the loop lifecycle
             self.process_backward_move();
 
-            if score > best_score {
+             if score > best_score {
                 best_score = score;
                 best_move = *forward_move;
+            }
 
-                if score > alpha {
-                    alpha = score;
-
-                    if score >= beta {
-                        if matches!(best_move.move_type, MoveFlag::MOVE) {
-                            self.store_killer_move(best_move, ply); 
-                        }
-                        break;
-                    }
+            if score >= beta {
+                if matches!(
+                    best_move.move_type, 
+                    MoveFlag::MOVE | MoveFlag::PAWNOPENMOVE | MoveFlag::KINGSIDECASTLE | MoveFlag::QUEENSIDECASTLE
+                ) {
+                    self.store_killer_move(best_move, ply); 
                 }
+                break; 
+            }
+
+            if score > alpha {
+                alpha = score;
             }
         }
 
@@ -689,7 +708,7 @@ impl SearchWorker {
     // Quiescence Search -> Q-Search only uses Score and was_aborted. 
     // Fail-Soft -> Allows the function to return a value completely outside the [alpha, beta] window
     // Hard Cut-Off -> Once a value causes alpha >= beta, stop the search
-    fn quiescence_search(&mut self, mut alpha: i16, beta: i16, ply: i16, mut pv_move_hint: ForwardMove) -> SearchResult {        
+    fn quiescence_search(&mut self, mut alpha: i16, beta: i16, ply: i16) -> SearchResult {        
         // 1. Halt Signal
         if self.nodes_processed & 0x3FFF == 0 && self.stop_signal.load(Ordering::Relaxed) {
             return SearchResult { 
@@ -715,18 +734,19 @@ impl SearchWorker {
         const Q_DEPTH_MARKER: i8 = -1;
         let original_alpha = alpha;
         let original_beta = beta;
+        let mut tt_hint = ForwardMove::NULL_MOVE;   
 
         // 3. Tranposition Table
         let tt_entry = self.transposition_table.probe(hash, ply);
         if tt_entry.flag != HashFlag::EMPTY {
             let retrieved_score = tt_entry.score;
-            pv_move_hint = tt_entry.forward_move;
+            tt_hint = tt_entry.forward_move;
 
             // EXACT: The true minimax value was found; return it immediately.
             if tt_entry.flag == HashFlag::EXACT {
                 return SearchResult { 
                     score: retrieved_score, 
-                    best_move: pv_move_hint,
+                    best_move: tt_hint,
                     was_aborted: false,
                 };
             }
@@ -736,7 +756,7 @@ impl SearchWorker {
                 if retrieved_score >= beta {
                     return SearchResult {
                         score: retrieved_score,
-                        best_move: pv_move_hint,
+                        best_move: tt_hint,
                         was_aborted: false,
                     };
                 }
@@ -748,7 +768,7 @@ impl SearchWorker {
 
                 return SearchResult {
                     score: retrieved_score,
-                    best_move: pv_move_hint,
+                    best_move: tt_hint,
                     was_aborted: false,
                 };
             } 
@@ -790,7 +810,7 @@ impl SearchWorker {
         } else {
             // Evasion baseline tracking bounds prevents masking mate strings
             best_score = -MATE_VALUE + ply;
-            pruning_baseline = alpha - 200; 
+            pruning_baseline = alpha; 
         }
 
         // Generate strictly legal tactical moves directly onto the global stack
@@ -798,8 +818,10 @@ impl SearchWorker {
         let mut legal_moves_played = 0;
 
         let only_tactical = !king_in_check;
-        self.chess_board.generate_moves(&mut gen_moves, pv_move_hint, 
-            ply, &self.killer_move_table, only_tactical);
+        self.chess_board.generate_moves(
+            &mut gen_moves, ForwardMove::NULL_MOVE, tt_hint, 
+            ply, &self.killer_move_table, only_tactical
+        );
 
         // 5. Quiscence Search
         for forward_move in &gen_moves {
@@ -814,7 +836,7 @@ impl SearchWorker {
                 }
 
                 // 2. Delta Pruning Gate using check-safe baseline
-                if pruning_baseline + exact_see_score + 200 < alpha {
+                if pruning_baseline + exact_see_score + 120 < alpha {
                     continue; 
                 }
             }
@@ -829,7 +851,7 @@ impl SearchWorker {
             legal_moves_played += 1;
 
             // --- RECURSIVE SEARCH CASCADE ---
-            let search_result = self.quiescence_search(-beta, -alpha, ply + 1, ForwardMove::NULL_MOVE);
+            let search_result = self.quiescence_search(-beta, -alpha, ply + 1);
             self.process_backward_move();
 
             if search_result.was_aborted {
@@ -846,15 +868,15 @@ impl SearchWorker {
             if score > best_score {
                 best_score = score;
                 best_move = *forward_move;
-
-                if score > alpha {
-                    alpha = score;
-                    if score >= beta { 
-                        break; // Beta cutoff triggered cleanly
-                    }
-                }
             }
 
+            if score >= beta { 
+                break; 
+            }
+
+            if score > alpha {
+                alpha = score;
+            }
         }
 
         let aborted = self.stop_signal.load(Ordering::Relaxed);
@@ -868,23 +890,21 @@ impl SearchWorker {
                 };
             }
 
-            let terminal_score = if king_in_check {
-                -MATE_VALUE + ply
-            } else {
-                0
-            };
+            if king_in_check {
+                let terminal_score = -MATE_VALUE + ply;
+                
+                self.transposition_table.store(
+                    hash, terminal_score,
+                    Q_DEPTH_MARKER, ply, self.age,
+                    ForwardMove::NULL_MOVE, HashFlag::EXACT,
+                );
 
-            self.transposition_table.store(
-                hash, terminal_score,
-                Q_DEPTH_MARKER, ply, self.age,
-                ForwardMove::NULL_MOVE, HashFlag::EXACT,
-            );
-
-            return SearchResult { 
-                score: terminal_score,
-                best_move: ForwardMove::NULL_MOVE, 
-                was_aborted: false, 
-            };
+                return SearchResult { 
+                    score: terminal_score,
+                    best_move: ForwardMove::NULL_MOVE, 
+                    was_aborted: false, 
+                };
+            }
         }
 
         // Global halt catch before finalizing the Q-search node evaluation

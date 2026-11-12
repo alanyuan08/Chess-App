@@ -215,7 +215,7 @@ impl TranspositionTable {
                         end_sq: entry.end_sq,
                         capture_sq,
                         move_type: entry.move_type,
-                        pv_score: 0,
+                        pv_score: 32_000,
                     },
                 };
             }

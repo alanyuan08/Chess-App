@@ -167,23 +167,64 @@ pub fn flip_square(sq: u8) -> u8 {
     sq ^ 63
 }
 
-/// Computes the unique index [0..49151] for a piece from a specific player's perspective
-#[inline(always)]
-pub fn get_feature_index(king_sq: u8, piece: BoardPiece, 
-    piece_sq: u8, is_black_active: bool) -> usize {
-    let piece_type = piece.to_nnue_type();
+pub const KING_BUCKET_MAP: [u8; 64] = [
+    0,  1,  2,  3,    3,  2,  1,  0,
+    
+    4,  5,  6,  7,    7,  6,  5,  4,
+    
+    8,  9,  10, 11,   11, 10, 9,  8,
+    
+    12, 13, 14, 15,   15, 14, 13, 12,
+    
+    16, 17, 18, 19,   19, 18, 17, 16,
+    
+    20, 21, 22, 23,   23, 22, 21, 20,
+    
+    24, 25, 26, 27,   27, 26, 25, 24,
+    
+    28, 29, 30, 31,   31, 30, 29, 28
+];
 
-    let (k_sq, p_sq, p_type) = if is_black_active {
-        // From Black's perspective, flip the board vertically and invert piece colors
-        // In Python layout: White pieces are 0..5, Black pieces are 6..11
+/// Computes the unique index [0..22528] for a piece from a specific player's perspective.
+/// Returns `None` if the piece is a King, signaling that it should not be added to the features.
+#[inline(always)]
+pub fn get_feature_index(
+    king_sq: u8, 
+    piece: BoardPiece, 
+    piece_sq: u8, 
+    is_black_active: bool
+) -> usize {
+    let piece_type = piece.to_nnue_type(); // 0..11 based on your PIECE_MAP
+
+    // 1. Establish perspective baseline coordinates and handle color inversions
+    let (k_sq, p_sq, b_orig_type) = if is_black_active {
+        // Rotate 180 degrees vertically and invert side types for Black's perspective
         let inverted_type = (piece_type + 6) % 12;
-        (flip_square(king_sq), flip_square(piece_sq), inverted_type)
+        (king_sq ^ 63, piece_sq ^ 63, inverted_type)
     } else {
         (king_sq, piece_sq, piece_type)
     };
 
-    // Index Formula: (KingSquare * 768) + (PieceType * 64) + PieceSquare
-    (k_sq as usize) * 768 + (p_type as usize) * 64 + (p_sq as usize)
+    // 3. Compress piece IDs into a contiguous 0..10 space
+    let final_p_type = if b_orig_type < 5 {
+        b_orig_type
+    } else {
+        b_orig_type - 1
+    };
+
+    // 4. Resolve horizontal mirroring conditions based on active King's file position
+    let king_file = k_sq % 8;
+    let is_mirrored = king_file >= 4;
+
+    // Determine target lookup square for the bucket layout and piece features using branchless select
+    let lookup_king_sq = if is_mirrored { k_sq ^ 7 } else { k_sq };
+    let final_p_sq = if is_mirrored { p_sq ^ 7 } else { p_sq };
+
+    // Resolve the bucket ID (0..13)
+    let king_bucket = KING_BUCKET_MAP[lookup_king_sq as usize] as usize;
+
+    // 5. Index Formula: (KingBucket * 704) + (PieceType * 64) + PieceSquare
+    (king_bucket * 704) + (final_p_type as usize * 64) + (final_p_sq as usize)
 }
 
 pub fn is_pawn(piece: BoardPiece) -> bool {

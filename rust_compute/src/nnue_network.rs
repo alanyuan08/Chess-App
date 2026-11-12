@@ -1,27 +1,25 @@
 use std::fs::File;
 use std::io::{Read, BufReader};
 
+pub const CASTLING_BASE: usize = 22528;
+
 #[cfg_attr(target_arch = "aarch64", repr(C, align(128)))]
 #[cfg_attr(not(target_arch = "aarch64"), repr(C, align(64)))]
 #[derive(Clone, Copy, Debug)]
-// The NNUuE L1 / L2 and L3 weights should align 128 to avoid expensive cache splits
+// The NNUE L1 / L2 and L3 weights should align to avoid expensive cache splits
 pub struct NnueNetwork {
-    // i16 -> 2 bytes. 2*256 / 128 -> 4 Cache Lines * 49152
-    // i32 -> 4 bytes. 4*256 / 128 -> 8 Cache Lines
-    pub l1_weights: [[i16; 256]; 49152],
-    pub l1_biases: [i32; 256],
+    // i16 -> 2 bytes. Updated dimension for the 16-bucket pattern (32 * 64 * 11) + 4 castling flags
+    pub l1_weights: [[i16; 256]; 22532],
     
-    // i8-> 1 bytes. 512 / 128 -> 4 Cache Lines * 32
-    // i32 -> 4 bytes. 4*32 / 128 -> 1 Cache Lines
+    // i8 -> 1 byte. 512 / 128 -> 4 Cache Lines * 32
     pub l2_weights: [[i8; 512]; 32],
     pub l2_biases: [i32; 32],
 
-    // i8-> 1 bytes. 32 * 32 / 128 -> 8 Cache Lines
-    // i32 -> 4 bytes. 4*32 / 128 -> 1 Cache Lines
+    // i8 -> 1 byte. 32 * 32 / 128 -> 8 Cache Lines
     pub l3_weights: [[i8; 32]; 32],
     pub l3_biases: [i32; 32],
 
-    // i8-> 1 bytes. 32 + 4 bytes + 92 padding -> 1 Cache Line
+    // i8 -> 1 byte. 32 + 4 bytes + padding -> 1 Cache Line
     pub output_weights: [[i8; 32]; 1],
     pub output_bias: [i32; 1],
     
@@ -53,8 +51,6 @@ impl NnueNetwork {
         };
 
         // --- SAFE SEQUENTIAL FIELD READING ---
-        // We get raw mutable byte slices for EACH field individually.
-        // This naturally skips any hidden padding bytes the compiler inserts!
         unsafe {
             // Helper closure to map any typed slice directly to a mutable u8 byte slice
             let mut read_field = |ptr: *mut u8, elements_count: usize, element_size: usize| -> std::io::Result<()> {
@@ -62,9 +58,8 @@ impl NnueNetwork {
                 reader.read_exact(byte_slice)
             };
 
-            // 1. Accumulator Layer (l1_weights is i16 = 2 bytes, l1_biases is i32 = 4 bytes)
-            read_field(&mut network_box.l1_weights as *mut _ as *mut u8, 49152 * 256, 2)?;
-            read_field(&mut network_box.l1_biases as *mut _ as *mut u8, 256, 4)?;
+            // 1. Accumulator Layer (Updated size bounds for 7044 feature weights)
+            read_field(&mut network_box.l1_weights as *mut _ as *mut u8, 22532 * 256, 2)?;
 
             // 2. Hidden Layer 2
             read_field(&mut network_box.l2_weights as *mut _ as *mut u8, 32 * 512, 1)?;
