@@ -81,9 +81,9 @@ impl SearchWorker {
         let mut best_move_overall: ForwardMove = ForwardMove::NULL_MOVE;
         let mut depth = 1;
 
-        // Calibrated to a conservative 40 cp NNUE error floor:
-        // 30 cp initial window (~0.75x MAE) absorbs normal depth-to-depth jitter without extra re-searches.
-        const INITIAL_WINDOW_DELTA: i16 = 30;
+        // Calibrated to a conservative 50 cp NNUE error floor:
+        // 38 cp initial window (~0.75x MAE) absorbs normal depth-to-depth jitter without extra re-searches.
+        const INITIAL_WINDOW_DELTA: i16 = 38;
         let mut alpha = -INFINITY;
         let mut beta = INFINITY;
 
@@ -95,24 +95,24 @@ impl SearchWorker {
             if !result.was_aborted && !self.stop_signal.load(Ordering::Relaxed) {
                 while result.score <= alpha || result.score >= beta {
                     if result.score <= alpha {
+                        // Fail-low: pull beta down to midpoint, widen alpha downward
                         beta = alpha.saturating_add(beta) / 2;
-                        alpha = if delta >= 240 {
+                        alpha = if delta >= 304 {
                             -INFINITY
                         } else {
                             result.score.saturating_sub(delta)
                         };
                     } else if result.score >= beta {
-                        alpha = result.score.saturating_sub(delta / 2);
-                        beta = if delta >= 240 {
+                        // Fail-high: keep alpha at the proven fail-high bound, widen beta upward
+                        alpha = result.score;
+                        beta = if delta >= 304 {
                             INFINITY
                         } else {
                             result.score.saturating_add(delta)
                         };
                     }
 
-                    // Exponentially widen delta (30 -> 60 -> 120 -> 240 -> INFINITY)
                     delta = delta.saturating_mul(2);
-
                     result = self.negamax(depth, 0, alpha, beta, best_move_overall, true);
 
                     if result.was_aborted || self.stop_signal.load(Ordering::Relaxed) {
@@ -130,14 +130,14 @@ impl SearchWorker {
                         "[Master Thread] Completed Depth: {} | Best Move: {:?} | Evaluation: {}",
                         depth, best_move_overall, result.score
                     );
-
-                    if depth >= MAX_DEPTH {
-                        self.stop_signal.store(true, Ordering::Relaxed);
-                        break;
-                    }
                 }
 
-                // Engage 30 cp aspiration window once depth >= 4 stabilizes tactical noise
+                if depth >= MAX_DEPTH {
+                    self.stop_signal.store(true, Ordering::Relaxed);
+                    break;
+                }
+
+                // Engage 38 cp aspiration window once depth >= 4 stabilizes tactical noise
                 if depth >= 3 && result.score.abs() < MATE_THRESHOLD - 100 {
                     alpha = result.score.saturating_sub(INITIAL_WINDOW_DELTA);
                     beta = result.score.saturating_add(INITIAL_WINDOW_DELTA);
@@ -178,35 +178,27 @@ impl SearchWorker {
     #[inline(always)]
     fn is_three_move_repetition(&self, ply: i16) -> bool {
         let len = self.position_stack_len;
-        // Since len - 1 is the current position, the earliest possible repeat is 4 plies earlier at len - 5
         if len < 5 {
             return false;
         }
 
         let current_hash = self.chess_board.zobrist_hash();
-        let mut i = len - 3; // 2 plies before current position (same side to move)
+        let target_repeats = if ply > 0 { 2 } else { 3 };
         let mut count = 1;
+        let mut i = len - 3;
 
-        loop {
-            let past_hash = self.traversed_positions[i];
-
-            // Stop immediately at Null Move sentinel (0u64)
-            if past_hash == 0 {
-                break;
-            }
-
-            if past_hash == current_hash {
+        while self.traversed_positions[i] != 0 {
+            if self.traversed_positions[i] == current_hash {
                 count += 1;
-                if count >= 3 || (ply > 0 && count >= 2) {
+                if count == target_repeats {
                     return true;
                 }
             }
 
-            if i >= 2 {
-                i -= 2;
-            } else {
+            if i < 2 {
                 break;
             }
+            i -= 2;
         }
 
         false
@@ -468,20 +460,27 @@ impl SearchWorker {
         let static_eval = self.static_eval();
 
         // 4. Late Futility Pruning
-        if depth <= 3 && !king_in_check && beta < MATE_THRESHOLD && beta > -MATE_THRESHOLD {
-            // Assume 30 centipawn error for <= 200 Centipawn erros. 
-            let base_margin = 30;
-            let rfp_margin = (40 * depth as i16) + base_margin;
-            
+        let is_pv = beta - alpha > 1;
+        if !is_pv
+            && depth <= 3
+            && !king_in_check
+            && beta.abs() < MATE_THRESHOLD
+        {
+            let rfp_margin = (65 * depth as i16) + 10;
+
             if static_eval - rfp_margin >= beta {
                 let aborted = self.stop_signal.load(Ordering::Relaxed);
-                let fail_soft_score = static_eval;
+                let fail_soft_score = static_eval - rfp_margin;
 
-                if !aborted && beta == original_beta {
+                if !aborted {
                     self.transposition_table.store(
-                        hash, fail_soft_score, 
-                        depth, ply, self.age,
-                        ForwardMove::NULL_MOVE, HashFlag::LOWERBOUND
+                        hash,
+                        fail_soft_score,
+                        depth,
+                        ply,
+                        self.age,
+                        ForwardMove::NULL_MOVE,
+                        HashFlag::LOWERBOUND,
                     );
                 }
 
@@ -571,22 +570,25 @@ impl SearchWorker {
 
         // 6. Move Search Loop
         for forward_move in &gen_moves {
-            // --- PRE-MOVE TACTICAL PRUNING GATES ---
-            if !king_in_check && depth <= 4
+            // --- PRE-MOVE TACTICAL PRUNING GATES (Main Search, depth <= 4) ---
+            if !king_in_check
+                && depth <= 4
                 && moves_tried > 0
-                && matches!(forward_move.move_type, 
-                    MoveFlag::CAPTURE | MoveFlag::ENPASSANT) 
+                && alpha.abs() < MATE_THRESHOLD - 256
+                && matches!(forward_move.move_type, MoveFlag::CAPTURE | MoveFlag::ENPASSANT)
             {
-                let exact_see_score = 
-                    self.chess_board.static_exchange_evaluation(*forward_move);
+                let exact_see_score = self.chess_board.static_exchange_evaluation(*forward_move);
 
-                if exact_see_score < 0 {
-                    continue; 
+                // 1. Strict Tactical Gate: Drop losing exchanges on non-PV nodes (or severe blunders on PV)
+                let see_threshold = if is_pv { -50 * depth as i16 } else { 0 };
+                if exact_see_score < see_threshold {
+                    continue;
                 }
 
-                let tactical_margin = 30 + (40 * depth as i16);
+                // 2. Tactical Futility Gate calibrated to 34-50 cp NNUE error
+                let tactical_margin = 30 + (50 * depth as i16);
                 if static_eval + exact_see_score + tactical_margin < alpha {
-                    continue; 
+                    continue;
                 }
             }
 
