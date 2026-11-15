@@ -75,68 +75,75 @@ impl SearchWorker {
 
     // Search Entry Point
     pub fn root_search(&mut self, engine_age: i8) -> (ForwardMove, usize, usize) {
-        // Start the timer / reset counters
         self.nodes_processed = 0;
-
-        // Reset the age
         self.age = engine_age;
 
-        // --- ITERATIVE DEEPENING LOOP ---
         let mut best_move_overall: ForwardMove = ForwardMove::NULL_MOVE;
         let mut depth = 1;
 
-        // Aspiration window configuration
+        // Calibrated to a conservative 40 cp NNUE error floor:
+        // 30 cp initial window (~0.75x MAE) absorbs normal depth-to-depth jitter without extra re-searches.
+        const INITIAL_WINDOW_DELTA: i16 = 30;
         let mut alpha = -INFINITY;
         let mut beta = INFINITY;
-        let window_delta = 50;
 
         while depth <= MAX_DEPTH {
+            let mut delta = INITIAL_WINDOW_DELTA;
             let mut result = self.negamax(depth, 0, alpha, beta, best_move_overall, true);
 
-            // Check for fail-low or fail-high (if search wasn't aborted)
+            // Fail-soft gradual aspiration widening loop
             if !result.was_aborted && !self.stop_signal.load(Ordering::Relaxed) {
-                
-                // Pure Fail-Soft Widen Loop: Keep re-searching until the score falls cleanly inside the window
                 while result.score <= alpha || result.score >= beta {
                     if result.score <= alpha {
-                        // Fail-low: The true score is worse than expected. 
-                        beta = result.score;
-                        alpha = -INFINITY;
+                        beta = alpha.saturating_add(beta) / 2;
+                        alpha = if delta >= 240 {
+                            -INFINITY
+                        } else {
+                            result.score.saturating_sub(delta)
+                        };
                     } else if result.score >= beta {
-                        // Fail-high: The true score is better than expected.
-                        alpha = result.score;
-                        beta = INFINITY;
+                        alpha = result.score.saturating_sub(delta / 2);
+                        beta = if delta >= 240 {
+                            INFINITY
+                        } else {
+                            result.score.saturating_add(delta)
+                        };
                     }
 
-                    // Re-search this exact depth with the properly adjusted bounds
+                    // Exponentially widen delta (30 -> 60 -> 120 -> 240 -> INFINITY)
+                    delta = delta.saturating_mul(2);
+
                     result = self.negamax(depth, 0, alpha, beta, best_move_overall, true);
 
-                    // Break immediately if a re-search hits the timeout/halt barrier
                     if result.was_aborted || self.stop_signal.load(Ordering::Relaxed) {
                         break;
                     }
                 }
             }
-            
-            // Post-depth assessment and window initialization for the subsequent depth
-            if !self.stop_signal.load(Ordering::Relaxed) {
-                if self.thread_id == 0 {
-                    if !result.was_aborted {
-                        best_move_overall = result.best_move;
-                        
-                        // Verified: Scores are positive/correct relative to root. No negation needed.
-                        println!("[Master Thread] Completed Depth: {} | Best Move: {:?} | Evaluation: {}", 
-                            depth, best_move_overall, result.score);
-                        
-                        // Initialize a narrow aspiration window around our newly verified score for the next depth layer
-                        alpha = result.score - window_delta;
-                        beta = result.score + window_delta;
-                    }
 
-                    if depth >= MAX_DEPTH { 
+            // Post-depth bookkeeping and window setup for the next depth
+            if !self.stop_signal.load(Ordering::Relaxed) && !result.was_aborted {
+                best_move_overall = result.best_move;
+
+                if self.thread_id == 0 {
+                    println!(
+                        "[Master Thread] Completed Depth: {} | Best Move: {:?} | Evaluation: {}",
+                        depth, best_move_overall, result.score
+                    );
+
+                    if depth >= MAX_DEPTH {
                         self.stop_signal.store(true, Ordering::Relaxed);
                         break;
                     }
+                }
+
+                // Engage 30 cp aspiration window once depth >= 4 stabilizes tactical noise
+                if depth >= 3 && result.score.abs() < MATE_THRESHOLD - 100 {
+                    alpha = result.score.saturating_sub(INITIAL_WINDOW_DELTA);
+                    beta = result.score.saturating_add(INITIAL_WINDOW_DELTA);
+                } else {
+                    alpha = -INFINITY;
+                    beta = INFINITY;
                 }
             } else {
                 break;
@@ -144,47 +151,57 @@ impl SearchWorker {
 
             depth += 1;
         }
-        
+
         (best_move_overall, self.nodes_processed, self.thread_id)
     }
 
     // Call this when entering a node (making a move)
+    #[inline(always)]
     fn push_position(&mut self) {
         let hash = self.chess_board.zobrist_hash();
         self.traversed_positions[self.position_stack_len] = hash;
         self.position_stack_len += 1;
     }
 
-    // Call this when backing out of a node (undoing a move)
+    #[inline(always)]
+    fn push_null_position(&mut self) {
+        self.traversed_positions[self.position_stack_len] = 0;
+        self.position_stack_len += 1;
+    }
+    
+    #[inline(always)]
     fn pop_position(&mut self) {
         self.position_stack_len -= 1;
     }
 
     // Fast linear scan inside the L1 CPU cache stepping by 2
-    fn is_three_move_repetition(&self) -> bool {
-        let current_hash = self.chess_board.zobrist_hash();
-        
-        // A repetition requires at least 4 plies to pass (2 full moves) 
-        // for the same position to occur a second time on your turn.
-        if self.position_stack_len < 4 {
+    #[inline(always)]
+    fn is_three_move_repetition(&self, ply: i16) -> bool {
+        let len = self.position_stack_len;
+        // Since len - 1 is the current position, the earliest possible repeat is 4 plies earlier at len - 5
+        if len < 5 {
             return false;
         }
 
-        // Initialize to 1 because the current position is the 1st occurrence
-        let mut curr_count = 1;
-
-        // Start 2 plies back (the last time it was this player's turn)
-        let mut i = self.position_stack_len - 2;
+        let current_hash = self.chess_board.zobrist_hash();
+        let mut i = len - 3; // 2 plies before current position (same side to move)
+        let mut count = 1;
 
         loop {
-            if self.traversed_positions[i] == current_hash {
-                curr_count += 1;
-                if curr_count == 3 {
+            let past_hash = self.traversed_positions[i];
+
+            // Stop immediately at Null Move sentinel (0u64)
+            if past_hash == 0 {
+                break;
+            }
+
+            if past_hash == current_hash {
+                count += 1;
+                if count >= 3 || (ply > 0 && count >= 2) {
                     return true;
                 }
             }
 
-            // Clean underflow protection and loop exit
             if i >= 2 {
                 i -= 2;
             } else {
@@ -218,17 +235,24 @@ impl SearchWorker {
         if forward_move.move_type == MoveFlag::NULL {
             self.chess_board.execute_move(forward_move); 
             self.chess_board.null_move_accumulator(&mut self.board_accumulator);
+
+            self.push_null_position(); 
         } else {
             if self.chess_board.does_move_cross_king_bucket(forward_move) {
                 captured_piece = self.chess_board.execute_move(forward_move);
                 self.chess_board.create_accumulator_from_scratch(&mut self.board_accumulator);
             } else {
-                self.chess_board.make_move(forward_move, &mut self.board_accumulator);
-                captured_piece = self.chess_board.execute_move(forward_move);
+                let prev_castle_rights = self.chess_board.castle_rights();
+                captured_piece = self.chess_board.make_move_with_accumulator(
+                    forward_move,
+                    prev_castle_rights,
+                    &mut self.board_accumulator,
+                );
             }
+            self.push_position();
         }
 
-        let undo_state = UndoMove {
+        self.history[self.history_index] = UndoMove {
             start_sq: forward_move.start_sq,
             end_sq: forward_move.end_sq,
             capture_sq: forward_move.capture_sq,
@@ -237,9 +261,6 @@ impl SearchWorker {
             move_type,
             captured_piece,
         };
-        self.history[self.history_index] = undo_state;
-
-        self.push_position();
         self.history_index += 1;
     }
 
@@ -373,7 +394,7 @@ impl SearchWorker {
         self.nodes_processed += 1;
         
         // 2. Three Move Repetition Draw
-        if self.is_three_move_repetition() {
+        if self.is_three_move_repetition(ply) {
             return SearchResult {
                 score: 0,
                 best_move: ForwardMove::NULL_MOVE,
@@ -450,7 +471,7 @@ impl SearchWorker {
         if depth <= 3 && !king_in_check && beta < MATE_THRESHOLD && beta > -MATE_THRESHOLD {
             // Assume 30 centipawn error for <= 200 Centipawn erros. 
             let base_margin = 30;
-            let rfp_margin = (35 * depth as i16) + base_margin;
+            let rfp_margin = (40 * depth as i16) + base_margin;
             
             if static_eval - rfp_margin >= beta {
                 let aborted = self.stop_signal.load(Ordering::Relaxed);
@@ -472,47 +493,67 @@ impl SearchWorker {
             }
         }
 
-        // 5. Pure Fail-Soft Null Move Pruning
-        if allow_null && !matches!(pv_move_hint.move_type, MoveFlag::NULL) && 
-            !king_in_check && depth >= 3 && 
-            self.chess_board.has_major_pieces() && ply > 0 &&
-            beta < MATE_THRESHOLD && beta > -MATE_THRESHOLD && 
-            static_eval >= beta {
-
-            // Calculate Reduction
+        // 5. Pure Fail-Soft Null Move Pruning (Non-PV nodes only)
+        let is_pv = beta - alpha > 1;
+        if !is_pv
+            && allow_null
+            && !king_in_check
+            && depth >= 3
+            && ply > 0
+            && self.chess_board.has_non_pawn_material_for_active_side()
+            && beta.abs() < MATE_THRESHOLD
+            && static_eval >= beta
+        {
+            // Calculate reduction (ensure reduction accounts for the null-move ply)
             let reduction = self.calculate_nmp_reduction(depth, static_eval, beta);
-            let next_depth = (depth - reduction).max(0); 
+            let next_depth = depth.saturating_sub(reduction).max(0);
 
-            // Make the null move (switch sides, update en-passant/hash keys)
+            // Execute null move
             let null_move = ForwardMove::NULL_MOVE;
             self.process_forward_move(null_move);
-            
-            let null_result = self.negamax(next_depth, ply + 1, -beta, -beta + 1, ForwardMove::NULL_MOVE, false);
+
+            let null_result = self.negamax(
+                next_depth,
+                ply + 1,
+                -beta,
+                -beta + 1,
+                ForwardMove::NULL_MOVE,
+                false,
+            );
             let null_score = -null_result.score;
-            
+
             self.process_backward_move();
 
             if null_result.was_aborted {
-                return SearchResult { 
-                    score: 0, 
-                    best_move: ForwardMove::NULL_MOVE, 
-                    was_aborted: true 
+                return SearchResult {
+                    score: 0,
+                    best_move: ForwardMove::NULL_MOVE,
+                    was_aborted: true,
                 };
             }
-            
-            if null_score >= beta {
-                if beta == original_beta {
-                    self.transposition_table.store(
-                        hash, null_score, 
-                        depth, ply, self.age,
-                        ForwardMove::NULL_MOVE, HashFlag::LOWERBOUND
-                    );
-                }
 
-                return SearchResult { 
-                    score: null_score, 
-                    best_move: ForwardMove::NULL_MOVE, 
-                    was_aborted: false 
+            if null_score >= beta {
+                // Never return or store unverified mate scores from a null-move search
+                let verified_score = if null_score >= MATE_THRESHOLD {
+                    beta
+                } else {
+                    null_score
+                };
+
+                self.transposition_table.store(
+                    hash,
+                    verified_score,
+                    depth,
+                    ply,
+                    self.age,
+                    ForwardMove::NULL_MOVE,
+                    HashFlag::LOWERBOUND,
+                );
+
+                return SearchResult {
+                    score: verified_score,
+                    best_move: ForwardMove::NULL_MOVE,
+                    was_aborted: false,
                 };
             }
         }
@@ -532,8 +573,9 @@ impl SearchWorker {
         for forward_move in &gen_moves {
             // --- PRE-MOVE TACTICAL PRUNING GATES ---
             if !king_in_check && depth <= 4
+                && moves_tried > 0
                 && matches!(forward_move.move_type, 
-                    MoveFlag::CAPTURE | MoveFlag::ENPASSANT | MoveFlag::PROMOTIONQUEEN) 
+                    MoveFlag::CAPTURE | MoveFlag::ENPASSANT) 
             {
                 let exact_see_score = 
                     self.chess_board.static_exchange_evaluation(*forward_move);
@@ -573,7 +615,7 @@ impl SearchWorker {
             } else {
                 // 2. SUBSEQUENT MOVES: Run LMR or Scout verification
                 let mut lmr_eligibility = false;
-                if depth >= 3 && moves_tried > 4 && !king_in_check && matches!(forward_move.move_type, MoveFlag::MOVE)
+                if depth >= 3 && moves_tried > 3 && !king_in_check && matches!(forward_move.move_type, MoveFlag::MOVE)
                     && !self.chess_board.is_in_check() {
                     
                     lmr_eligibility = true;
@@ -722,7 +764,7 @@ impl SearchWorker {
         self.nodes_processed += 1;
 
         // 2. Three Move Repetition Draw
-        if self.is_three_move_repetition() {
+        if self.is_three_move_repetition(ply) {
             return SearchResult { 
                 score: 0, 
                 best_move: ForwardMove::NULL_MOVE,

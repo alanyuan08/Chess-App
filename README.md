@@ -6,7 +6,7 @@
   
 - **Compute Engine:** Rust Maturin for Adversarial Search - Negamax with Quiescence Search with advanced pruning techniques such as Killer Move Heuristics, Static Exchange Evaluation, Late Move Reduction, Principal Variation Search, and Null-Move Pruning.
 
-  The engine processes 24 + million nodes per second on Apple M4 Pro (8 Performance Threads) and averages 20+ depth on 15 second search. 
+  The engine processes 20+ million nodes per second on Apple M4 Pro (8 Performance Threads) and averages 20+ depth on 15 second search. 
 
 - **Move Generation:** BitBoard for board representation and BitBoard Magic Number to calculate moves for sliding pieces. 
 
@@ -16,7 +16,7 @@
 
 The positions are filtered for Quiet Positions and the score is converted to a win percentage between [0 to 1] using a Sigmoid Function.
 
-The NNuE achieves an average of +/- 25 centipawns off stockfish for positions between -2.5 to 2.5 pawns.
+The NNuE achieves an average of +/- 35 centipawns off stockfish for positions between -2.5 to 2.5 pawns.
   
 ## 1. Python Presentation & Validation Layer
 
@@ -46,7 +46,7 @@ The NNuE achieves an average of +/- 25 centipawns off stockfish for positions be
 
 ## 3. Neural Network Evaluation
 
-- **NNuE Architecture:** The engine features a customized **Dual-Perspective HalfKA King Bucket Model** perspective neural network utilizing a hybrid quantization layout. The model accounts for caslting. The architectural data pathways progress as follows:
+- **NNuE Architecture:** The engine features a customized **Dual-Perspective HalfKA Horizontally Mirrored** perspective neural network utilizing a hybrid quantization layout. The model accounts for caslting. The architectural data pathways progress as follows:
 
 - **Input Preprocessing:** The engine convert to CentiPawn: ($\text{Centipawn / 100.0}$) -> pawn_units
 
@@ -92,16 +92,13 @@ This yields a total of **260,472,584 unique positions**.
 
 ### 5. Synchronized Optimization Schedules
 
-This network implements a **synchronized scheduling loop** across both major optimization dials. 
+The network is trained using a three-stage optimization and data-filtering strategy designed to maximize positional accuracy inside a compact `32 -> 32` architecture:
 
-- **Learning Rate (LR) Decay**
-  * **Warmup Phase:** Ramps smoothly from `1e-6` up to a peak speed of `3e-4` over the first epoch (`STEPS_PER_EPOCH`) to stabilize early position training.
-  * **Cosine Smoothing:** Gradually slides the learning speed down along a cosine curve as training progresses.
-  * **The Floor:** Bottoms out at `1.67%` of peak speed (`alpha=0.0167`) to safely polish fine positional details without disrupting core network weights.
-
-- **Weight Decay (WD) Decay**
-  * **The Scheduled Solution:** This architecture decouples and synchronizes the weight decay schedule to match the LR curve exactly. It peaks at `0.01` and scales down proportionally over `decay_steps_calculated`.
-  * **Strategic Benefit:** Easing off the "forgetting tax" (WD) in tandem with learning speed (LR) ensures the network locks in nuanced, long-term strategic patterns—such as complex king relationships and endgame maneuvering advantages—right up until training concludes.
+* **Optimizer (`AdamW`):** Uses decoupled weight decay (`1e-5`) to prevent rarely visited king buckets from drifting on noisy gradients, alongside `epsilon=1e-5` and `global_clipnorm=1.0` to stabilize sparse feature updates against sharp tactical outliers.
+* **Adaptive Learning Rate (`Newbob`):** Starts at `1.0e-3` for rapid initial feature organization and halves the learning rate whenever validation loss fails to improve by at least `0.0001` (down to a floor of `1.0e-5`), allowing weights to settle smoothly into flat minima.
+* **Centipawn Curriculum Filtering:** 
+  * **Warmup (Epochs 1–3):** Trains on all positions (`strength = 0.0`) so the model first learns fundamental material values and decisive advantages.
+  * **Annealing (Epochs 3–18):** Linearly ramps filtering strength from `0.0` to `1.0` using a Lorentzian keep-rate curve (`1 / (1 + (cp / scale_cp)^2)`), progressively discarding lopsided blowouts (`>500 cp`) so the narrow hidden layer focuses its capacity on subtle, balanced positions (`0–225 cp`).
 
 ## 6. Playing Level
 

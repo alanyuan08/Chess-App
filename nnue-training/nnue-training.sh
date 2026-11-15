@@ -43,4 +43,4 @@ python train_pipeline.py
 
 # 10. Upload Weights to Hugging Face
 hf auth login
-# hf upload AlanYuan0408/nnue_weights.bin nnue_weights.bin
+hf upload AlanYuan0408/nnue_weights.bin nnue_weights.bin
