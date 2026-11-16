@@ -14,11 +14,9 @@ codegen-units = 1
 rustflags = ["-C", "target-cpu=native"]
 
 [dependencies]
-const-random = "0.1"
 rand = "0.10.1"
 arrayvec = "0.7"
 crossbeam-channel = "0.5"
-polyglot = "0.1" 
 portable-atomic = { version = "1.0", features = ["fallback"] }
 
 [dependencies.pyo3]

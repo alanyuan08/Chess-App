@@ -16,9 +16,9 @@ pub static ZOBRIST_TABLE_MAP: LazyLock<Box<[[u64; SQUARES]; PIECE_TYPES]>> = Laz
     let mut table = Box::new([[0u64; SQUARES]; PIECE_TYPES]);
     let mut rng = rand::rng();
 
-    for j in 1..PIECE_TYPES {
-        for i in 0..SQUARES {
-            table[j][i] = rng.random();
+    for row in table.iter_mut().skip(1) {
+        for cell in row.iter_mut() {
+            *cell = rng.random();
         }
     }
     table
