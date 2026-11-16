@@ -48,7 +48,7 @@ The NNuE achieves an average of +/- 35 centipawns off stockfish for positions be
 
 - **NNuE Architecture:** The engine features a customized **Dual-Perspective HalfKA Horizontally Mirrored** perspective neural network utilizing a hybrid quantization layout. The model accounts for caslting. The architectural data pathways progress as follows:
 
-- **Input Preprocessing:** The engine convert to CentiPawn: ($\text{Centipawn / 100.0}$) -> pawn_units
+- **Input Preprocessing:**
 
 $$\text{Inputs (22532)} \rightarrow \text{Accumulator (256)} \rightarrow \text{Multiplexed Perspective (256*2)} \rightarrow \text{Hidden 2 (64)} \rightarrow \text{Hidden 3 (32)} \rightarrow \text{Output (1)}$$
 
