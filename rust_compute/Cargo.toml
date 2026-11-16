@@ -5,18 +5,18 @@ edition = "2021"
 rand = "0.9"
 
 [profile.release]
-debug = true
+opt-level = 3
+lto = "fat"
+codegen-units = 1
 
 [build]
 # Forces the compiler to auto-vectorize loops into AVX2 / Neon SIMD registers
 rustflags = ["-C", "target-cpu=native"]
 
 [dependencies]
-const-random = "0.1"
 rand = "0.10.1"
 arrayvec = "0.7"
 crossbeam-channel = "0.5"
-polyglot = "0.1" 
 portable-atomic = { version = "1.0", features = ["fallback"] }
 
 [dependencies.pyo3]

@@ -281,6 +281,7 @@ impl ChessBoard {
     pub fn generate_moves(&mut self, 
         gen_moves: &mut ArrayVec::<ForwardMove, 256>, 
         pv_move_hint: ForwardMove,
+        tt_move: ForwardMove,
         ply_idx: i16,
         killer_move_table: &[[ForwardMove; 2]; 128],
         only_tactical: bool, 
@@ -291,13 +292,9 @@ impl ChessBoard {
 
         // Generate Moves
         king_moves(self, player_index, opp_index, _opponent_attack_targets, gen_moves, only_tactical);
-
         knight_moves(self, player_index, opp_index, gen_moves, only_tactical);
-
         rook_moves(self, player_index, opp_index, gen_moves, only_tactical);
-
         bishop_moves(self, player_index, opp_index, gen_moves, only_tactical);
-
         queen_moves(self, player_index, opp_index, gen_moves, only_tactical);
 
         match self.active_player {
@@ -311,21 +308,33 @@ impl ChessBoard {
         }
         
         if ply_idx < 128 {
-            let has_valid_pv = pv_move_hint.move_type != MoveFlag::NULL;
+            let has_valid_tt = (tt_move.move_type != MoveFlag::NULL) as i16;
+            // PV is valid only if it's not a NULL move and not identical to the higher-priority TT move
+            let has_valid_pv = (pv_move_hint.move_type != MoveFlag::NULL && (has_valid_tt == 0 || pv_move_hint != tt_move)) as i16;
+            
             let k0 = killer_move_table[ply_idx as usize][0];
             let k1 = killer_move_table[ply_idx as usize][1];
             
-            let has_k0 = k0.move_type != MoveFlag::NULL && (!has_valid_pv || k0 != pv_move_hint);
-            let has_k1 = k1.move_type != MoveFlag::NULL && (!has_valid_pv || k1 != pv_move_hint);
+            // Deduplicate killer moves against both TT and PV hints
+            let is_k0_dup = (has_valid_tt != 0 && k0 == tt_move) || (has_valid_pv != 0 && k0 == pv_move_hint);
+            let is_k1_dup = (has_valid_tt != 0 && k1 == tt_move) || (has_valid_pv != 0 && k1 == pv_move_hint);
+
+            let has_k0 = (k0.move_type != MoveFlag::NULL && !is_k0_dup) as i16;
+            let has_k1 = (k1.move_type != MoveFlag::NULL && !is_k1_dup) as i16;
 
             for m in gen_moves.iter_mut() {
-                if has_valid_pv && *m == pv_move_hint {
-                    m.pv_score = 32_000;
-                } else if has_k0 && *m == k0 {
-                    m.pv_score = 500;
-                } else if has_k1 && *m == k1 {
-                    m.pv_score = 400;
-                }
+                // 1. Evaluate matching properties using strict i16 bitwise mapping
+                let is_tt = has_valid_tt & (*m == tt_move) as i16;
+                let is_pv = (1 - is_tt) * (has_valid_pv & (*m == pv_move_hint) as i16);
+                let is_k0 = (1 - is_tt) * (1 - is_pv) * (has_k0 & (*m == k0) as i16);
+                let is_k1 = (1 - is_tt) * (1 - is_pv) * (1 - is_k0) * (has_k1 & (*m == k1) as i16);
+
+                // 2. Accumulate values over a strict linear i16 equation (TT=32000 > PV=28000 > K0=500 > K1=400)
+                let added_score = (is_tt * 32_000) + (is_pv * 28_000) + (is_k0 * 500) + (is_k1 * 400);
+
+                // 3. Scale baseline scores safely without control flow jumps
+                let remains_unchanged = 1 - is_tt - is_pv - is_k0 - is_k1;
+                m.pv_score = (m.pv_score * remains_unchanged) + added_score;
             }
         }
 
@@ -344,11 +353,7 @@ impl ChessBoard {
         let player_index = self.player_index(piece_player(move_piece));
 
         match move_piece {
-            BoardPiece::WPAWN => {
-                self.pawns[player_index] ^= 1u64 << move_command.start_sq;
-                self.pawns[player_index] ^= 1u64 << move_command.end_sq;
-            },
-            BoardPiece::BPAWN => {
+            BoardPiece::WPAWN | BoardPiece::BPAWN=> {
                 self.pawns[player_index] ^= 1u64 << move_command.start_sq;
                 self.pawns[player_index] ^= 1u64 << move_command.end_sq;
             },
@@ -433,10 +438,7 @@ impl ChessBoard {
         let player_index = self.player_index(piece_player(piece_type));
 
         match piece_type {
-            BoardPiece::WPAWN => {
-                self.pawns[player_index] ^= 1u64 << place_sq;
-            },
-            BoardPiece::BPAWN => {
+            BoardPiece::WPAWN | BoardPiece::BPAWN => {
                 self.pawns[player_index] ^= 1u64 << place_sq;
             },
             BoardPiece::WBISHOP | BoardPiece::BBISHOP => {
@@ -470,6 +472,33 @@ impl ChessBoard {
         self.zobrist_hash ^= ZOBRIST_SIDE_TO_MOVE[active_player_zobrist(self.active_player)];
         self.zobrist_hash ^= ZOBRIST_EN_PASSANT[en_passant_zobrist(self.en_passant)];
         self.zobrist_hash ^= ZOBRIST_CASTLING[self.castling_rights as usize];
+    }
+
+    #[inline(always)]
+    fn get_normalized_king_state(king_sq: u8, is_black: bool) -> (u8, bool) {
+        // 1. If it's a black king, swap it to a white "side to move" king via vertical flip
+        let k_sq = if is_black { king_sq ^ 63 } else { king_sq };
+        
+        // 2. Resolve horizontal wing mirroring (Files E-H map to A-D)
+        let is_mirrored = (k_sq % 8) >= 4;
+        let lookup_sq = if is_mirrored { k_sq ^ 7 } else { k_sq };
+        
+        (KING_BUCKET_MAP[lookup_sq as usize], is_mirrored)
+    }
+
+    #[inline(always)]
+    pub fn does_move_cross_king_bucket(&self, forward_move: ForwardMove) -> bool {
+        let move_piece = self.mailbox_piece(forward_move.start_sq);
+        let is_wking = move_piece == BoardPiece::WKING;
+        let is_bking = move_piece == BoardPiece::BKING;
+
+        // Only King moves can ever alter a king bucket or horizontal mirror line
+        (is_wking || is_bking) && {
+            let is_black = is_bking;
+            let (before, after) = Self::get_normalized_king_state(forward_move.start_sq, is_black);
+            let (next_bucket, next_mirror) = Self::get_normalized_king_state(forward_move.end_sq, is_black);
+            (before != next_bucket) || (after != next_mirror)
+        }
     }
 
     pub fn execute_move(&mut self, move_command: ForwardMove) -> BoardPiece {
@@ -575,10 +604,7 @@ impl ChessBoard {
             MoveFlag::PROMOTIONQUEEN | MoveFlag::PROMOTIONROOK |
             MoveFlag::PROMOTIONBISHOP | MoveFlag::PROMOTIONKNIGHT => {
                 self._remove_piece(move_command.start_sq as usize);
-
-                if remove_piece != BoardPiece::NONE {
-                    self._remove_piece(move_command.capture_sq as usize);
-                }
+                self._remove_piece(move_command.capture_sq as usize);
 
                 match self.active_player {
                     Side::WHITE => {
@@ -727,63 +753,86 @@ impl ChessBoard {
 
     // Create from Scratch
     pub fn create_accumulator_from_scratch(&mut self, accumulators: &mut AccumulatorHistory) {
-        // Retrieve King Squares
+        // 1. Retrieve raw bitboard king squares for coordinate mapping references
         let w_king_sq = self.kings[Side::WHITE as usize].trailing_zeros() as u8;
         let b_king_sq = self.kings[Side::BLACK as usize].trailing_zeros() as u8;
         
-        // Grab current accumulator frame using explicit slice indexing on the Boxed array
+        // Grab current accumulator frame using explicit slice indexing
         let current_frame = &mut accumulators.moves[self.ply];
         let target_white: &mut [i16; 256] = &mut current_frame.white;
         let target_black: &mut [i16; 256] = &mut current_frame.black;
 
-        // Initialize both sides with biases first (casting i32 to i16)
-        let biases = &self.nnue_network.l1_biases;
+        // Reset accumulation tracks to a perfectly clean, quiet baseline
+        target_white.fill(0);
+        target_black.fill(0);
 
-        // Using zip allows the compiler to optimize the loop boundaries and apply SIMD
-        for (i, &bias) in biases.iter().enumerate().take(256) {
-            let casted_bias = bias as i16;
-            target_white[i] = casted_bias;
-            target_black[i] = casted_bias;
-        }
+        // =========================================================================
+        // --- EXTRACTION MATRIX VIA self.all_pieces ---
+        // White tracks all non-king White pieces + ALL Black pieces.
+        // Black tracks all non-king Black pieces + ALL White pieces.
+        // =========================================================================
+        let white_occupied = self.all_pieces[Side::WHITE as usize];
+        let black_occupied = self.all_pieces[Side::BLACK as usize];
 
-        // Combine ALL piece bitboards
-        let mut pieces_bitboard = (self.pawns[0] | self.pawns[1])
-            | (self.knights[0] | self.knights[1])
-            | (self.bishops[0] | self.bishops[1])
-            | (self.rooks[0] | self.rooks[1])
-            | (self.queens[0] | self.queens[1])
-            | (self.kings[0] | self.kings[1]);
+        let mut white_pieces_bitboard = (white_occupied & !self.kings[Side::WHITE as usize]) | black_occupied;
+        let mut black_pieces_bitboard = (black_occupied & !self.kings[Side::BLACK as usize]) | white_occupied;
 
-        let mut white_indices = [0usize; 32];
-        let mut black_indices = [0usize; 32];
-        let mut active_piece_count = 0;
+        // Allocate local index collector arrays matching your exact 35 token ceiling
+        let mut white_indices = [0usize; 35];
+        let mut black_indices = [0usize; 35];
+        let mut w_count = 0;
+        let mut b_count = 0;
 
-        // --- SINGLE PASS: GATHER ALL FEATURE INDICES ---
-        while pieces_bitboard != 0 {
-            let sq = pieces_bitboard.trailing_zeros() as u8;
+        // Pass 1: Gather White Perspective Positional Features
+        while white_pieces_bitboard != 0 {
+            let sq = white_pieces_bitboard.trailing_zeros() as u8;
             let piece = self.mailbox[sq as usize];
 
-            white_indices[active_piece_count] = get_feature_index(w_king_sq, piece, sq, false);
-            black_indices[active_piece_count] = get_feature_index(b_king_sq, piece, sq, true);
+            let w_idx = get_feature_index(w_king_sq, piece, sq, false);
+            white_indices[w_count] = w_idx;
+            w_count += 1;
             
-            active_piece_count += 1;
-            pieces_bitboard &= pieces_bitboard - 1;
+            white_pieces_bitboard &= white_pieces_bitboard - 1;
         }
 
-        // --- LOOP 1: PROCESS WHITE PERSPECTIVE COMPLETELY ---
-        // Exact [i16; 256] array sizing unlocks aggressive SIMD/AVX2 loop unrolling
-        for &w_idx in white_indices.iter().take(active_piece_count) {
-            let w_row: &[i16; 256] = &self.nnue_network.l1_weights[w_idx];
+        // Pass 2: Gather Black Perspective Positional Features
+        while black_pieces_bitboard != 0 {
+            let sq = black_pieces_bitboard.trailing_zeros() as u8;
+            let piece = self.mailbox[sq as usize];
+
+            let b_idx = get_feature_index(b_king_sq, piece, sq, true);
+            black_indices[b_count] = b_idx;
+            b_count += 1;
             
+            black_pieces_bitboard &= black_pieces_bitboard - 1;
+        }
+
+        // =========================================================================
+        // --- ADD GLOBAL CASTLING RIGHTS TO THE INDEX TRACKS (Indices 22528-22531) ---
+        // =========================================================================
+        let mut rights = self.castling_rights & 0x0F;
+        while rights != 0 {
+            let idx = CASTLING_BASE + (rights.trailing_zeros() as usize);
+            white_indices[w_count] = idx;
+            w_count += 1;
+            black_indices[b_count] = idx;
+            b_count += 1;
+            rights &= rights - 1;
+        }
+
+        let weights = &self.nnue_network.l1_weights;
+
+        // Loop 1: Process White Perspective Completely
+        for idx in 0..w_count {
+            let w_row = &weights[white_indices[idx]];
             for i in 0..256 {
                 target_white[i] = target_white[i].wrapping_add(w_row[i]);
             }
         }
 
-        // --- LOOP 2: PROCESS BLACK PERSPECTIVE COMPLETELY ---
-        for &b_idx in black_indices.iter().take(active_piece_count) {
-            let b_row: &[i16; 256] = &self.nnue_network.l1_weights[b_idx];
-            
+        // Loop 2: Process Black Perspective Completely
+        for idx in 0..b_count {
+            let b_row = &weights[black_indices[idx]];
             for i in 0..256 {
                 target_black[i] = target_black[i].wrapping_add(b_row[i]);
             }
@@ -793,168 +842,149 @@ impl ChessBoard {
     pub fn evaluate(&mut self, accumulators: &AccumulatorHistory, buffer: &mut NnueInferenceBuffer) -> i16 {
         // --- PERSPECTIVE ROUTING ---
         let (active_acc, opp_acc) = match self.active_player {
-            Side::WHITE => (
-                &accumulators.moves[self.ply].white, 
-                &accumulators.moves[self.ply].black
-            ),
-            Side::BLACK => (
-                &accumulators.moves[self.ply].black, 
-                &accumulators.moves[self.ply].white
-            ),
+            Side::WHITE => (&accumulators.moves[self.ply].white, &accumulators.moves[self.ply].black),
+            Side::BLACK => (&accumulators.moves[self.ply].black, &accumulators.moves[self.ply].white),
             Side::NONE => panic!("Invalid Game State: active_player cannot be Side::NONE during NNUE accumulator fetching!"),
         };
 
-        // --- STEP 0: ACCUMULATOR ---
-        let l2_left: &mut [i8; 256] = 
-            unsafe { &mut *buffer.l2_inputs.as_mut_ptr().cast::<[i8; 256]>() };
-        let l2_right: &mut [i8; 256] = 
-            unsafe { &mut *buffer.l2_inputs.as_mut_ptr().add(256).cast::<[i8; 256]>() };
-
-        // --- STEP 1: Clipped ReLU ---
+        // --- STEP 0: ACCUMULATOR MAPPING ---
+        let l2_inputs = &mut buffer.l2_inputs;
         for i in 0..256 {
-            l2_left[i] = active_acc[i].clamp(0, 127) as i8;
-        }
-        for i in 0..256 {
-            l2_right[i] = opp_acc[i].clamp(0, 127) as i8;
+            l2_inputs[i] = active_acc[i].clamp(0, 127) as i8;
+            l2_inputs[i + 256] = opp_acc[i].clamp(0, 127) as i8;
         }
 
         // --- STEP 2: HIDDEN LAYER 2 (512 -> 32) ---
+        let l3_inputs = &mut buffer.l3_inputs;
+        let l2_weights = &self.nnue_network.l2_weights;
         let l2_biases = &self.nnue_network.l2_biases;
-        let l2_inputs: &[i8; 512] = 
-            unsafe { &*buffer.l2_inputs.as_ptr().cast::<[i8; 512]>() };
-        let l3_inputs: &mut [i8; 32] = 
-            unsafe { &mut *buffer.l3_inputs.as_mut_ptr().cast::<[i8; 32]>() };
 
         for neuron in 0..32 {
-            let mut sum: i32 = l2_biases[neuron];
-            let row: &[i8; 512] = &self.nnue_network.l2_weights[neuron];
+            let weights = &l2_weights[neuron];
+            let mut sum = l2_biases[neuron];
 
             for i in 0..512 {
-                sum += (l2_inputs[i] as i32) * (row[i] as i32);
+                sum += (l2_inputs[i] as i32) * (weights[i] as i32);
             }
 
-            let activated = sum >> 6;
-            l3_inputs[neuron] = activated.clamp(0, 127) as i8;
+            l3_inputs[neuron] = (sum >> 7).clamp(0, 127) as i8;
         }
 
         // --- STEP 3: HIDDEN LAYER 3 (32 -> 32) ---
+        let l4_inputs = &mut buffer.l4_inputs;
+        let l3_weights = &self.nnue_network.l3_weights;
         let l3_biases = &self.nnue_network.l3_biases;
-        let l4_inputs: &mut [i8; 32] = 
-            unsafe { &mut *buffer.l4_inputs.as_mut_ptr().cast::<[i8; 32]>() };
 
         for neuron in 0..32 {
-            let mut sum: i32 = l3_biases[neuron];
-            let row: &[i8; 32] = &self.nnue_network.l3_weights[neuron];
+            let weights = &l3_weights[neuron];
+            let mut sum = l3_biases[neuron];
 
             for i in 0..32 {
-                sum += (l3_inputs[i] as i32) * (row[i] as i32);
+                sum += (l3_inputs[i] as i32) * (weights[i] as i32);
             }
 
-            let activated = sum >> 6;
-            l4_inputs[neuron] = activated.clamp(0, 127) as i8;
+            l4_inputs[neuron] = (sum >> 5).clamp(0, 127) as i8;
         }
 
         // --- STEP 4: OUTPUT LAYER (32 -> 1) ---
-        let mut final_sum: i32 = self.nnue_network.output_bias[0];
-        let row: &[i8; 32] = &self.nnue_network.output_weights[0];
+        let out_weights = &self.nnue_network.output_weights;
+        let mut final_sum = self.nnue_network.output_bias;
 
         for i in 0..32 {
-            final_sum += (l4_inputs[i] as i32) * (row[i] as i32);
+            final_sum += (l4_inputs[i] as i32) * (out_weights[i] as i32);
         }
 
-        let score_scaled = (final_sum * 100) >> 12;
-
-        score_scaled as i16
+        // --- STEP 5: FINAL OUTPUT SCALING & SHIFT ---
+        ((final_sum * 360) >> 10) as i16
     }
 
-    /// Progresses the network forward incrementally during move making
-    pub fn make_move(&mut self, mv: ForwardMove, accumulators: &mut AccumulatorHistory) {
-        // Retrieve King Squares
-        let w_king_sq = self.kings[Side::WHITE as usize].trailing_zeros() as u8;
-        let b_king_sq = self.kings[Side::BLACK as usize].trailing_zeros() as u8;
-
-        let move_piece: BoardPiece = self.mailbox[mv.start_sq as usize];
-
-        // --- 1. Identify Target Added Piece (Handles Promotions) ---
-        let mut added_piece = move_piece;
-        match mv.move_type {
-            MoveFlag::PROMOTIONQUEEN => {
-                added_piece = if move_piece == BoardPiece::WPAWN { BoardPiece::WQUEEN } else { BoardPiece::BQUEEN };
-            }
-            MoveFlag::PROMOTIONROOK => {
-                added_piece = if move_piece == BoardPiece::WPAWN { BoardPiece::WROOK } else { BoardPiece::BROOK };
-            }
-            MoveFlag::PROMOTIONBISHOP => {
-                added_piece = if move_piece == BoardPiece::WPAWN { BoardPiece::WBISHOP } else { BoardPiece::BBISHOP };
-            }
-            MoveFlag::PROMOTIONKNIGHT => {
-                added_piece = if move_piece == BoardPiece::WPAWN { BoardPiece::WKNIGHT } else { BoardPiece::BKNIGHT };
-            }
-            _ => {}
-        }
-
-         // --- 2. Identify Captured Piece & Coordinate (Handles En Passant) ---
-        let (captured_sq, captured_piece) = (mv.capture_sq, self.mailbox[mv.capture_sq as usize]);
-
-        // --- 3. Compute Sparse Feature Indices for the Moving Piece ---
-        let w_remove = get_feature_index(w_king_sq, move_piece, mv.start_sq, false);
-        let b_remove = get_feature_index(b_king_sq, move_piece, mv.start_sq, true);
-
-        let w_add = get_feature_index(w_king_sq, added_piece, mv.end_sq, false);
-        let b_add = get_feature_index(b_king_sq, added_piece, mv.end_sq, true);
-
-        let w_rem_row: &[i16; 256] = &self.nnue_network.l1_weights[w_remove];
-        let b_rem_row: &[i16; 256] = &self.nnue_network.l1_weights[b_remove];
-        let w_add_row: &[i16; 256] = &self.nnue_network.l1_weights[w_add];
-        let b_add_row: &[i16; 256] = &self.nnue_network.l1_weights[b_add];
-
-        // --- 4. Setup Target and Source Frame Boundaries Safely ---
+    // Progresses the network forward incrementally during move making
+    pub fn make_move_with_accumulator(
+        &mut self,
+        mv: ForwardMove,
+        prev_castle_rights: u8,
+        accumulators: &mut AccumulatorHistory,
+    ) -> BoardPiece {
         let curr_ply = self.ply;
         let prev_ply = curr_ply - 1;
 
-        // Split the mutable array slice to satisfy the borrow checker cleanly
+        let w_king_sq = self.kings[Side::WHITE as usize].trailing_zeros() as u8;
+        let b_king_sq = self.kings[Side::BLACK as usize].trailing_zeros() as u8;
+
+        let move_piece = self.mailbox[mv.start_sq as usize];
+        let moving_side = piece_player(move_piece);
+
+        // 1. Resolve target piece (handles promotions)
+        let added_piece = match mv.move_type {
+            MoveFlag::PROMOTIONQUEEN  => if moving_side == Side::WHITE { BoardPiece::WQUEEN }  else { BoardPiece::BQUEEN },
+            MoveFlag::PROMOTIONROOK   => if moving_side == Side::WHITE { BoardPiece::WROOK }   else { BoardPiece::BROOK },
+            MoveFlag::PROMOTIONBISHOP => if moving_side == Side::WHITE { BoardPiece::WBISHOP } else { BoardPiece::BBISHOP },
+            MoveFlag::PROMOTIONKNIGHT => if moving_side == Side::WHITE { BoardPiece::WKNIGHT } else { BoardPiece::BKNIGHT },
+            _ => move_piece,
+        };
+
+        // 2. Capture pre-move target piece before execute_move mutates the mailbox
+        let captured_sq = mv.capture_sq;
+        let captured_piece = self.mailbox[captured_sq as usize];
+
+        // 3. Execute move so self.castle_rights() is updated by the board's single source of truth
+        let exec_captured = self.execute_move(mv);
+
+        // 4. Copy parent accumulator frame forward
         let (left, right) = accumulators.moves.split_at_mut(curr_ply);
         let prev_acc = &left[prev_ply];
         let curr_acc = &mut right[0];
 
-        let curr_white: &mut [i16; 256] = &mut curr_acc.white;
-        let curr_black: &mut [i16; 256] = &mut curr_acc.black;
-        
-        let prev_white: &[i16; 256] = &prev_acc.white;
-        let prev_black: &[i16; 256] = &prev_acc.black;
+        let curr_white = &mut curr_acc.white;
+        let curr_black = &mut curr_acc.black;
+        curr_white.copy_from_slice(&prev_acc.white);
+        curr_black.copy_from_slice(&prev_acc.black);
 
-        // --- 5. High-Density Auto-Vectorized Accumulation Pass ---
+        let weights = &self.nnue_network.l1_weights;
+
+        // 5. Update moving piece across both perspectives
+        let w_rem = &weights[get_feature_index(w_king_sq, move_piece, mv.start_sq, false)];
+        let w_add = &weights[get_feature_index(w_king_sq, added_piece, mv.end_sq, false)];
+        for i in 0..256 {
+            curr_white[i] = curr_white[i].wrapping_add(w_add[i]).wrapping_sub(w_rem[i]);
+        }
+
+        let b_rem = &weights[get_feature_index(b_king_sq, move_piece, mv.start_sq, true)];
+        let b_add = &weights[get_feature_index(b_king_sq, added_piece, mv.end_sq, true)];
+        for i in 0..256 {
+            curr_black[i] = curr_black[i].wrapping_add(b_add[i]).wrapping_sub(b_rem[i]);
+        }
+
+        // 6. Subtract captured piece from both perspectives
         if captured_piece != BoardPiece::NONE {
-            let w_cap = get_feature_index(w_king_sq, captured_piece, captured_sq, false);
-            let b_cap = get_feature_index(b_king_sq, captured_piece, captured_sq, true);
-            
-            let w_cap_row: &[i16; 256] = &self.nnue_network.l1_weights[w_cap];
-            let b_cap_row: &[i16; 256] = &self.nnue_network.l1_weights[b_cap];
+            let w_cap = &weights[get_feature_index(w_king_sq, captured_piece, captured_sq, false)];
+            let b_cap = &weights[get_feature_index(b_king_sq, captured_piece, captured_sq, true)];
 
-            // Single loop updates both perspectives at once, minimizing cache misses
             for i in 0..256 {
-                curr_white[i] = prev_white[i]
-                    .wrapping_add(w_add_row[i])
-                    .wrapping_sub(w_rem_row[i])
-                    .wrapping_sub(w_cap_row[i]);
-                
-                curr_black[i] = prev_black[i]
-                    .wrapping_add(b_add_row[i])
-                    .wrapping_sub(b_rem_row[i])
-                    .wrapping_sub(b_cap_row[i]);
+                curr_white[i] = curr_white[i].wrapping_sub(w_cap[i]);
             }
-        } else {
-            // Standard quiet move pattern: 1 addition, 1 subtraction
             for i in 0..256 {
-                curr_white[i] = prev_white[i]
-                    .wrapping_add(w_add_row[i])
-                    .wrapping_sub(w_rem_row[i]);
-                
-                curr_black[i] = prev_black[i]
-                    .wrapping_add(b_add_row[i])
-                    .wrapping_sub(b_rem_row[i]);
+                curr_black[i] = curr_black[i].wrapping_sub(b_cap[i]);
             }
         }
+
+        // 7. Subtract lost castling-right features using exact bitmasks (1, 2, 4, 8)
+        let mut lost_rights = prev_castle_rights & !self.castle_rights();
+        while lost_rights != 0 {
+            let offset = lost_rights.trailing_zeros() as usize;
+            let row = &weights[CASTLING_BASE + offset];
+
+            for i in 0..256 {
+                curr_white[i] = curr_white[i].wrapping_sub(row[i]);
+            }
+            for i in 0..256 {
+                curr_black[i] = curr_black[i].wrapping_sub(row[i]);
+            }
+
+            lost_rights &= lost_rights - 1;
+        }
+
+        exec_captured
     }
 
     #[inline]
@@ -964,6 +994,18 @@ impl ChessBoard {
         debug_assert!(self.ply > 0, "Catastrophic: Attempted to unmake_move at root ply 0!");
 
         self.ply -= 1;
+    }
+
+    #[inline(always)]
+    pub fn has_non_pawn_material_for_active_side(&self) -> bool {
+        let side = self.active_player as usize;
+        (self.knights[side] | self.bishops[side] | self.rooks[side] | self.queens[side]) != 0
+    }
+
+    #[inline(always)]
+    pub fn total_piece_count(&self) -> u8 {
+        let all_pieces_mask = self.all_pieces[0] | self.all_pieces[1];
+        all_pieces_mask.count_ones() as u8
     }
 
     #[inline]
@@ -1038,7 +1080,7 @@ impl ChessBoard {
 
         colinear & valid_ray & same_direction
     }
-
+    
     /// Generates sliding attacks on the fly using your engine's ray paths.
     fn get_slider_attackers(&self, target_sq: u8, occupied: u64) -> u64 {
         let mut attackers = 0u64;
@@ -1114,7 +1156,7 @@ impl ChessBoard {
         if kings != 0 {
             let opponent_side = 1 - stm;
 
-            // 1. FIXED: Isolate direct opponent defenders currently in the pool.
+            // 1. Isolate direct opponent defenders currently in the pool.
             // Since pool is already pre-filtered in the SEE loop by the active live side masks,
             // we simply subtract the active stm's known pieces. Everything left belongs to alive opponents!
             let opponent_attackers_in_pool = pool & !self.all_pieces[stm];
@@ -1159,36 +1201,23 @@ impl ChessBoard {
         let mut leapers = 0u64;
         let target_bb = 1u64 << target_sq;
 
-        // -----------------------------------------------------------------
-        // Knights lookups across BOTH player colors (With File Wrap Protection)
-        // -----------------------------------------------------------------
-        // If your KNIGHT_ATTACKS table has leak overflows, filtering the source 
-        // knight bits with file guards prevents cross-board wrap attacks.
-        let all_knights = self.knights[0] | self.knights[1];
-        leapers |= KNIGHT_ATTACKS[target_sq as usize] & all_knights;
-        
-        // Kings lookup across BOTH player colors
+        // 1. Knights & Kings (Standard Lookups)
+        leapers |= KNIGHT_ATTACKS[target_sq as usize] & (self.knights[0] | self.knights[1]);
         leapers |= KING_ATTACKS[target_sq as usize] & (self.kings[0] | self.kings[1]);
 
-        // -----------------------------------------------------------------
-        // White Pawns attacking TO target_sq (moving up the board)
-        // -----------------------------------------------------------------
-        // Target is North-West (Up-Left) from pawn -> pawn is South-East (Down-Right)
-        // A pawn moving Up-Left cannot originate from the A-File.
-        let w_pawn_from_right = (target_bb >> 7) & NOT_A_FILE;
-        
-        // Target is North-East (Up-Right) from pawn -> pawn is South-West (Down-Left)
-        // A pawn moving Up-Right cannot originate from the H-File.
-        let w_pawn_from_left = (target_bb >> 9) & NOT_H_FILE;
-        
-        // Intersect with White Pawns ([0])
-        leapers |= (w_pawn_from_right | w_pawn_from_left) & self.pawns[0];
+         // 2. Pawns (Branchless - STM Perspective)
+    
+        // --- White Pawns ---
+        // White Pawn attacks left
+        leapers |= (((self.pawns[0] & NOT_A_FILE) << 9) & target_bb) >> 9;
+        // White Pawn attacks right
+        leapers |= (((self.pawns[0] & NOT_H_FILE) << 7) & target_bb) >> 7;
 
-        let b_pawn_from_right = (target_bb << 9) & NOT_A_FILE;
-        let b_pawn_from_left = (target_bb << 7) & NOT_H_FILE;
-        
-        // Intersect with Black Pawns ([1])
-        leapers |= (b_pawn_from_right | b_pawn_from_left) & self.pawns[1];
+        // --- Black Pawns ---
+        // Black Pawn attacks left
+        leapers |= (((self.pawns[1] & NOT_H_FILE) >> 7) & target_bb) << 7;
+        // Black Pawn attacks right
+        leapers |= (((self.pawns[1] & NOT_A_FILE) >> 9) & target_bb) << 9;
 
         leapers
     }
@@ -1199,13 +1228,11 @@ impl ChessBoard {
         let target_sq = forward_move.end_sq;
         let capture_sq = forward_move.capture_sq;
 
-        // Since the move hasn't happened yet, stm is our current active player (the attacker)
         let stm = self.player_index(self.active_player);
         
         let mut capture_gain = [0i16; 32];
         let mut defender = 0;
 
-        // Read the moving piece and the captured victim straight from the current board states
         let piece_moving = self.mailbox[from_sq as usize];
         let piece_captured = self.mailbox[capture_sq as usize];
         
@@ -1216,39 +1243,41 @@ impl ChessBoard {
         capture_gain[defender] = base_captured_value + promotion_bonus;
         current_piece_value += promotion_bonus;
 
-        // 1. Simulate the initial move step on our tracking sandbox masks
+        // 1. Initial State Sandbox
         let mut occupancy = self.occupied;
         occupancy &= !(1u64 << from_sq);
         occupancy &= !(1u64 << capture_sq);
-        occupancy |= 1u64 << target_sq;
 
-        // Isolate dynamic side piece tracks to accurately compute sandbox cross-pins
+        if capture_sq == target_sq {
+            occupancy |= 1u64 << target_sq;
+        }
+
         let mut side_pieces = [self.all_pieces[0], self.all_pieces[1]];
-        let clear_attacker_bits = !(1u64 << from_sq);
-        let clear_victim_bits = !(1u64 << capture_sq);
+        side_pieces[stm] &= !(1u64 << from_sq);
+        side_pieces[1 - stm] &= !(1u64 << capture_sq);
         
-        side_pieces[stm] &= clear_attacker_bits;
-        side_pieces[1 - stm] &= clear_victim_bits;
-        side_pieces[stm] |= 1u64 << target_sq;
+        if capture_sq == target_sq {
+            occupancy |= 1u64 << target_sq;
+        }
 
-        // 2. Construct the initial pool of subsequent recapturers
+        let initial_pinned_white = self.compute_pinned_mask_with_custom_state(self.occupied, self.all_pieces[0], 0);
+        let initial_pinned_black = self.compute_pinned_mask_with_custom_state(self.occupied, self.all_pieces[1], 1);
+        let pinned_masks = [initial_pinned_white, initial_pinned_black];
+
+        // 2. Initial Attack Pool Construction
         let mut attackers_pool = self.get_leaper_attacks_to(target_sq) 
             | self.get_slider_attackers(target_sq, occupancy);
-
-        // Filter the pool strictly against active live simulated pieces
         attackers_pool &= side_pieces[0] | side_pieces[1];
 
-        // Flip immediately to the defender's side-to-move index for the loop
         let mut loop_stm = 1 - stm;
 
         // 3. Recapture Simulation Loop
         while attackers_pool != 0 {
             let defender_king_sq = self.kings[loop_stm].trailing_zeros() as u8;
             
-            // Evaluate pins safely based on the simulated layout progression
-            let current_pinned_mask = self.compute_pinned_mask_with_custom_state(occupancy, side_pieces[loop_stm], loop_stm);
+            // Fast, cheap retrieval using our single-pass pre-calculated pin-mask
+            let current_pinned_mask = pinned_masks[loop_stm];
 
-            // Passing the dynamic opponent piece tracker to ensure the King avoids phantom defenders
             let (att_sq, att_piece) = self.get_least_valuable_attacker(
                 attackers_pool, 
                 current_pinned_mask, 
@@ -1263,30 +1292,30 @@ impl ChessBoard {
             }
 
             defender += 1;
+            // Standard Negamax exchange calculation step
             capture_gain[defender] = current_piece_value - capture_gain[defender - 1];
             current_piece_value = piece_value(att_piece);
 
-            // Safe bitwise clear for the attacker's square inside our local state masks
+            // Update sandbox tracking arrays
             let clear_mask = !(1u64 << att_sq);
             occupancy &= clear_mask;
             side_pieces[loop_stm] &= clear_mask;
 
-            // Re-calculate attack vectors targeting the destination pad under modified states
+            // Re-calculate attacks looking through cleared slider lines
             attackers_pool = self.get_leaper_attacks_to(target_sq) 
                 | self.get_slider_attackers(target_sq, occupancy);
-            
-            // Shield the newly recalculated pool against ghost/captured pieces
             attackers_pool &= side_pieces[0] | side_pieces[1];
 
             loop_stm = 1 - loop_stm;
         }
 
-        // 4. Minimax back up the choice path
+        // 4. Corrected Minimax Rollback (Min Bound Truncation)
         while defender > 0 {
-            capture_gain[defender - 1] = std::cmp::max(-capture_gain[defender], capture_gain[defender - 1]);
+            capture_gain[defender - 1] = (-capture_gain[defender]).min(capture_gain[defender - 1]);
             defender -= 1;
         }
 
         capture_gain[0]
     }
+
 }

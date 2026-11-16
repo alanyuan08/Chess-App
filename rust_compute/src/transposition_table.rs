@@ -183,13 +183,10 @@ impl TranspositionTable {
         let bucket_idx = (key as usize) & self.mask;
         let bucket = &self.buckets[bucket_idx];
 
-        for i in 0..SLOTS_PER_BUCKET {
-            let bits = bucket.slots[i].load(Ordering::Relaxed);
-            if bits == 0 {
-                continue;
-            }
-
-            let entry = TTEntry::unpack(bits);           
+        for atomic_slot in &bucket.slots {
+            let bits = atomic_slot.load(Ordering::Relaxed);
+            let entry = TTEntry::unpack(bits);
+                   
             if entry.key == key {
                 let mut local_score = entry.score;
 
@@ -215,7 +212,7 @@ impl TranspositionTable {
                         end_sq: entry.end_sq,
                         capture_sq,
                         move_type: entry.move_type,
-                        pv_score: 0,
+                        pv_score: 32_000,
                     },
                 };
             }
@@ -230,10 +227,15 @@ impl TranspositionTable {
     // Always-Replace -> Randomly replace an entry 
     #[inline(always)]
     #[allow(clippy::too_many_arguments)]
-    pub fn store(&self, 
-        hash: u64, score: i16, 
-        depth: i8, ply: i16, age: i8,
-        mv: ForwardMove, flag: HashFlag, 
+    pub fn store(
+        &self,
+        hash: u64,
+        score: i16,
+        depth: i8,
+        ply: i16,
+        age: i8,
+        mv: ForwardMove,
+        flag: HashFlag,
     ) {
         let bucket_idx = (hash as usize) & self.mask;
         let bucket = &self.buckets[bucket_idx];
@@ -243,74 +245,68 @@ impl TranspositionTable {
         let is_neg_mate = score <= -MATE_THRESHOLD;
         let adjusted_score = score + (is_pos_mate as i16 * ply) - (is_neg_mate as i16 * ply);
 
-       let new_entry = TTEntry { 
-            key: hash, 
+        let packed_new = TTEntry {
+            key: hash,
             start_sq: mv.start_sq,
             end_sq: mv.end_sq,
             move_type: mv.move_type,
-            score: adjusted_score, 
-            depth, 
-            flag, 
-            age 
-        };
-        let packed_new = new_entry.pack();
+            score: adjusted_score,
+            depth,
+            flag,
+            age,
+        }
+        .pack();
 
-        // --- PHASE 1: IF HASH EXISTS, REPLACE THAT ITEM ---
-        // Enforces the rule that all keys across the bucket must be completely unique.
-        for i in 0..SLOTS_PER_BUCKET {
-            let bits = bucket.slots[i].load(Ordering::Relaxed);
-            if bits == 0 { continue; }
+        // Track best replacement candidate in Tier 1 (0..midpoint) while scanning for an exact key match
+        let mut best_idx = midpoint + (((hash >> 12) as usize) % (SLOTS_PER_BUCKET - midpoint));
+        let mut lowest_priority = i32::MAX;
+
+        for (i, atomic_slot) in bucket.slots.iter().enumerate() {
+            let bits = atomic_slot.load(Ordering::Relaxed);
+
+            // Empty slot inside Tier 1 claims immediately if no duplicate key exists later
+            if bits == 0 {
+                if i < midpoint && lowest_priority > -1 {
+                    best_idx = i;
+                    lowest_priority = -1;
+                }
+                continue;
+            }
 
             let slot = TTEntry::unpack(bits);
+
+            // 1. Exact key match: enforce unique key per bucket
             if slot.key == hash {
                 let is_stale = slot.age != age;
-                let is_depth_preferred = i < midpoint;
+                let is_tier2 = i >= midpoint;
                 let meets_depth = depth >= slot.depth;
-                
-                let should_replace = is_stale | !is_depth_preferred | (is_depth_preferred & meets_depth);
-                let final_bits = if should_replace { packed_new } else { bits };
-                bucket.slots[i].store(final_bits, Ordering::Relaxed);
-        
-                return;
-            }
-        }
 
-        // --- PHASE 2: NEW HASH INSERTION ---
-        
-        // --- STEP A: Depth First Search ---
-        // Replace Stale then Shallow-Depth
-        let mut best_tier1_idx = 0;
-        let mut lowest_priority = MAX_DEPTH;
-
-        for i in 0..midpoint {
-            let bits = bucket.slots[i].load(Ordering::Relaxed);
-            if bits == 0 {
-                bucket.slots[i].store(packed_new, Ordering::Relaxed);
+                if is_stale || is_tier2 || meets_depth {
+                    atomic_slot.store(packed_new, Ordering::Relaxed);
+                }
                 return;
             }
 
-            let slot = TTEntry::unpack(bits);
-            if slot.age != age {
-                bucket.slots[i].store(packed_new, Ordering::Relaxed);
-                return; // Claim stale slot instantly
-            }
+            // 2. Score Tier 1 replacement candidates: stale entries (age != slot.age) rank below all current-age entries
+            if i < midpoint {
+                let age_bonus = ((slot.age == age) as i32) * 256;
+                let priority = age_bonus + (slot.depth as i32);
 
-            if slot.depth < lowest_priority {
-                lowest_priority = slot.depth;
-                best_tier1_idx = i;
+                if priority < lowest_priority {
+                    lowest_priority = priority;
+                    best_idx = i;
+                }
             }
         }
 
-        if depth > lowest_priority {
-            bucket.slots[best_tier1_idx].store(packed_new, Ordering::Relaxed);
-            return;
-        }
+        // Write to the winning Tier 1 victim (if empty, stale, or shallower) or fall back to Tier 2 always-replace slot
+        let tier1_accepts = lowest_priority < 256 + (depth as i32);
+        let final_idx = if tier1_accepts {
+            best_idx
+        } else {
+            midpoint + (((hash >> 12) as usize) % (SLOTS_PER_BUCKET - midpoint))
+        };
 
-        // --- STEP B: Always Replace ---
-        // Always Replace - Traffic is high and ovewrites are common.
-        let random_offset = (hash >> 12) as usize % midpoint;
-        let target_tier2_idx = midpoint + random_offset; 
-
-        bucket.slots[target_tier2_idx].store(packed_new, Ordering::Relaxed);
+        bucket.slots[final_idx].store(packed_new, Ordering::Relaxed);
     }
 }

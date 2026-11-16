@@ -1,5 +1,7 @@
 import os
 import glob
+import gc
+import random
 import polars as pl
 
 import numpy as np
@@ -11,11 +13,12 @@ from keras import Model
 from keras import layers
 
 # Import your newly written modular classes
-from permanent_dataset_manager import EpochSynchronizedDatasetManager
+from permanent_dataset_manager import InfiniteConveyorDatasetManager
 
 # --- Global Configurations ---
-INPUT_FEATURES = 64 * 64 * 12  # Dual-Perspective HalfKA Dimension (49152)
-MAX_PIECES = 32                # Uniform layout array padding bound
+# 32 Buckets * 11 Active Pieces (excluding own King) * 64 Squares + 4 Castling Squares = 22532
+INPUT_FEATURES = 32 * 11 * 64 + 4  # Dual-Perspective HalfKA Dimension (22532)
+MAX_ACTIVE_FEATURES = 35               # Uniform layout array padding bound
 SCALE_MAX = 1.0                # Bounded Clipped ReLU limit 
 
 # --- Step-Based Architecture Configuration ---
@@ -23,12 +26,17 @@ SCALE_MAX = 1.0                # Bounded Clipped ReLU limit
 BATCH_SIZE = 8192
 TOTAL_EPOCHS = 30  
 
+# Mixed Data Sets
+CLEAN_DATASET_DIR = "./balanced_shards" 
+BIN_SAVE_PATH = "nnue_weights.bin"
+
 def compute_dynamic_epoch_geometry(train_dir="./balanced_shards/training", 
                                    val_dir="./balanced_shards/validation", 
-                                   batch_size=8192):
+                                   batch_size=BATCH_SIZE):
     """
     Scans the compiled parquet sharding directories to instantly compute
     flawless, exact step parameters based on physical file constraints.
+    Rounds down step counts to guarantee clean epoch-boundary recycles.
     """
     print("-> Dynamically calculating training universe step geometry...")
     
@@ -43,106 +51,19 @@ def compute_dynamic_epoch_geometry(train_dir="./balanced_shards/training",
     total_train_rows = sum(pl.scan_parquet(f).select(pl.len()).collect().item() for f in train_files)
     total_val_rows = sum(pl.scan_parquet(f).select(pl.len()).collect().item() for f in val_files) if val_files else 0
     
-    # 3. Apply strict block geometry calculations
+    # 3. Apply strict block geometry calculations (Floor division rounds down explicitly)
     steps_per_epoch = total_train_rows // batch_size
     validation_per_epoch = total_val_rows // batch_size
     
-    print(f"   [TRAIN UNIVERSE] Physical Rows: {total_train_rows:,} -> Steps/Epoch: {steps_per_epoch}")
-    print(f"   [VAL UNIVERSE]   Physical Rows: {total_val_rows:,} -> Steps/Epoch: {validation_per_epoch}")
+    # Calculate leftovers to verify drop alignment
+    train_leftovers = total_train_rows % batch_size
+    val_leftovers = total_val_rows % batch_size
+    
+    print(f"   [TRAIN UNIVERSE] Physical Rows: {total_train_rows:,} -> Steps/Epoch: {steps_per_epoch} (Dropped trailing remainder: {train_leftovers:,} rows)")
+    print(f"   [VAL UNIVERSE]   Physical Rows: {total_val_rows:,} -> Steps/Epoch: {validation_per_epoch} (Dropped trailing remainder: {val_leftovers:,} rows)")
     
     return steps_per_epoch, validation_per_epoch
-
-STEPS_PER_EPOCH, VALIDATION_PER_EPOCH = compute_dynamic_epoch_geometry(
-    train_dir="./balanced_shards/training",
-    val_dir="./balanced_shards/validation",
-    batch_size=BATCH_SIZE
-)
-WARMUP_STEPS = int(STEPS_PER_EPOCH * 0.25) 
-
-# Mixed Data Sets
-CLEAN_DATASET_DIR = "./balanced_shards" 
-BIN_SAVE_PATH = "nnue_weights.bin"
-
-# Fallback structures for metric and loop calculations
-class AggressiveMemoryCleanup(keras.callbacks.Callback):
-    """Triggers forced garbage collection loops to maintain training VRAM stability."""
-    def on_epoch_end(self, epoch, logs=None):
-        import gc
-        gc.collect()
-        keras.backend.clear_session()
-
-# --- THE TELEMETRY TRACKER CALLBACK ---
-@keras.utils.register_keras_serializable(package="CustomSchedules")
-class CustomWarmupCosineSchedule(keras.optimizers.schedules.LearningRateSchedule):
-    def __init__(self, warmup_steps, cosine_schedule, initial_lr=1e-6):
-        super().__init__()
-        self.warmup_steps = warmup_steps
-        self.cosine_schedule = cosine_schedule
-        self.initial_lr = initial_lr
         
-        # Dynamically extract peak LR from the underlying cosine schedule config
-        if hasattr(cosine_schedule, 'initial_learning_rate'):
-            self.peak_lr = cosine_schedule.initial_learning_rate
-        else:
-            # Fallback if config structure varies
-            self.peak_lr = cosine_schedule.get_config().get('initial_learning_rate', 3e-4)
-
-    def __call__(self, step):
-        step_f = tf.cast(step, tf.float32)
-        warmup_steps_f = tf.cast(self.warmup_steps, tf.float32)
-        
-        # Epoch 1: Linear upward ramp
-        warmup_lr = self.initial_lr + (self.peak_lr - self.initial_lr) * (step_f / warmup_steps_f)
-        
-        # Epochs 2-30: Native Cosine Decay tracking steps past warmup
-        decay_step = tf.maximum(step_f - warmup_steps_f, 0.0)
-        cosine_lr = self.cosine_schedule(decay_step)
-        
-        # Graph-safe conditional selection
-        return tf.where(step_f < warmup_steps_f, warmup_lr, cosine_lr)
-
-    def get_config(self):
-        # Must return primitive types or serializable Keras objects
-        return {
-            "warmup_steps": self.warmup_steps,
-            "cosine_schedule": keras.optimizers.schedules.serialize(self.cosine_schedule),
-            "initial_lr": self.initial_lr
-        }
-
-    @classmethod
-    def from_config(cls, config):
-        # Correctly deserializes the nested schedule upon loading
-        config["cosine_schedule"] = keras.optimizers.schedules.deserialize(config["cosine_schedule"])
-        return cls(**config)
-
-@keras.utils.register_keras_serializable()
-class SharedAccumulatorBias(layers.Layer):
-    """
-    Custom Keras layer hosting a single, shared trainable 
-    256-dimensional accumulator bias vector (b1) applied to a single perspective.
-    """
-    def __init__(self, output_dim=256, **kwargs):
-        super().__init__(**kwargs)
-        self.output_dim = output_dim
-
-    def build(self, input_shape):
-        self.bias = self.add_weight(
-            shape=(self.output_dim,),
-            initializer="zeros",
-            trainable=True,
-            name="accumulator_bias_vector"
-        )
-        super().build(input_shape)
-
-    def call(self, inputs):
-        # Broadcasts the (256,) bias vector across the (Batch, 256) incoming tensor
-        return inputs + self.bias
-
-    def get_config(self):
-        config = super().get_config()
-        config.update({"output_dim": self.output_dim})
-        return config
-
 def get_local_shard_directories():
     """
     Defines the storage locations for your exported clean Parquet files.
@@ -152,28 +73,240 @@ def get_local_shard_directories():
     val_dir = "./balanced_shards/validation/"
     return train_dir, val_dir
 
-# --- Export NNuE Weights for Rust ---
+# Fallback structures for metric and loop calculations
+class AggressiveMemoryCleanup(keras.callbacks.Callback):
+    """Safely frees dead CPU worker references to prevent RAM accumulation."""
+    def on_epoch_end(self, epoch, logs=None):
+        gc.collect() 
+
+class SmoothPositionDecayCallback(keras.callbacks.Callback):
+    """
+    Smoothly ramps `decay_strength` from 0.0 (100% natural data) to 1.0 (full bell-curve decay)
+    after an initial warmup phase, and reports live keep rates across key centipawn ranges.
+    """
+    def __init__(self, decay_strength_var, scale_cp=360.0, warmup_epochs=3, decay_epochs=15, verbose=1):
+        super().__init__()
+        self.decay_strength_var = decay_strength_var
+        self.scale_cp = scale_cp
+        self.warmup_epochs = warmup_epochs
+        self.decay_epochs = decay_epochs
+        self.verbose = verbose
+
+    def _keep_rate(self, cp, strength):
+        base_curve = 1.0 / (1.0 + (cp / self.scale_cp) ** 2)
+        return 1.0 - strength * (1.0 - base_curve)
+
+    def on_epoch_begin(self, epoch, logs=None):
+        if epoch < self.warmup_epochs:
+            strength = 0.0
+        else:
+            strength = min((epoch - self.warmup_epochs) / max(self.decay_epochs, 1), 1.0)
+
+        self.decay_strength_var.assign(strength)
+
+        if self.verbose > 0:
+            slight_p = self._keep_rate(225.0, strength)   # Midpoint of 150-300 cp
+            mid_p = self._keep_rate(400.0, strength)      # Midpoint of 300-500 cp
+            ext_p = self._keep_rate(750.0, strength)      # Representative >500 cp
+
+            print(
+                f"\n[Curriculum] Epoch {epoch + 1} (Strength={strength:.2f}): "
+                f"Slight(~225cp)={slight_p:.2f} | "
+                f"Mid(~400cp)={mid_p:.2f} | "
+                f"Extreme(~750cp)={ext_p:.2f}"
+            )
+
+class StockfishNNUE(Model):
+    def __init__(self, input_features, scale_max=1.0, alpha_leak=0.01, **kwargs):
+        super().__init__(**kwargs)
+        self.input_features = input_features
+        self.scale_max = scale_max
+        self.alpha_leak = alpha_leak
+        self.max_active_features = MAX_ACTIVE_FEATURES
+
+        # --- Architecture Layer Instantiations ---
+        nnue_accumulator_init = keras.initializers.RandomNormal(mean=0.0, stddev=0.05, seed=42)
+        
+        self.embedding_layer = layers.Embedding(
+            input_dim=self.input_features + 1,
+            output_dim=256, 
+            mask_zero=True, 
+            embeddings_initializer=nnue_accumulator_init,
+            name="accumulator_layer"
+        )
+        
+        self.concat = layers.Concatenate(name="perspective_multiplex")
+        
+        hidden_init = keras.initializers.HeNormal(seed=42)
+        self.dense2 = layers.Dense(32, activation=None, use_bias=True, kernel_initializer=hidden_init, name="hidden_layer_2")
+        self.dense3 = layers.Dense(32, activation=None, use_bias=True, kernel_initializer=hidden_init, name="hidden_layer_3")
+        self.chess_eval = layers.Dense(1, activation=None, use_bias=True, kernel_initializer=hidden_init, name="chess_eval")
+
+    def get_config(self):
+        """
+        Enables Keras to cleanly serialize and recreate this exact model configuration 
+        during ModelCheckpoint saving and loading operations.
+        """
+        config = super().get_config()
+        config.update({
+            "input_features": self.input_features,
+            "scale_max": self.scale_max,
+            "alpha_leak": self.alpha_leak,
+        })
+        return config
+
+    def safe_leaky_clipped_relu(self, x):
+        floor_handled = keras.ops.maximum(x, 0.0) + self.alpha_leak * keras.ops.minimum(x, 0.0)
+        capped = keras.ops.minimum(floor_handled, self.scale_max)
+        overshoot = keras.ops.maximum(floor_handled - self.scale_max, 0.0)
+        return capped + (self.alpha_leak * overshoot)
+
+    def call(self, inputs):
+        active_input = inputs["active_features"]
+        passive_input = inputs["passive_features"]
+
+        # Create binary masks (1.0 for valid features, 0.0 for padding index 0)
+        a_mask = keras.ops.expand_dims(keras.ops.cast(active_input != 0, "float32"), -1)
+        p_mask = keras.ops.expand_dims(keras.ops.cast(passive_input != 0, "float32"), -1)
+
+        # Look up embeddings and zero out padded entries before summing
+        a_embed = self.embedding_layer(active_input) * a_mask
+        p_embed = self.embedding_layer(passive_input) * p_mask
+
+        a_acc_raw = keras.ops.sum(a_embed, axis=1)
+        p_acc_raw = keras.ops.sum(p_embed, axis=1)
+
+        a_act = self.safe_leaky_clipped_relu(a_acc_raw)
+        p_act = self.safe_leaky_clipped_relu(p_acc_raw)
+
+        merged = self.concat([a_act, p_act])
+        
+        x2_raw = self.dense2(merged)
+        x2_act = self.safe_leaky_clipped_relu(x2_raw)
+
+        x3_raw = self.dense3(x2_act)
+        x3_act = self.safe_leaky_clipped_relu(x3_raw)
+        
+        raw_eval = self.chess_eval(x3_act)
+        
+        return raw_eval * 360.0
+    
+    def train_step(self, data):
+        x, y = data
+        
+        with tf.GradientTape() as tape:
+            y_pred = self(x, training=True)
+            loss = self.compute_loss(x=x, y=y, y_pred=y_pred)
+            
+        gradients = tape.gradient(loss, self.trainable_variables)
+        self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
+        
+        # 1. Manually update your custom centipawn evaluation metrics
+        for metric in self.metrics:
+            if metric.name != "loss":
+                metric.update_state(y, y_pred)
+                
+        # 2. Build the output tracker and explicitly inject the computed loss scalar
+        results = {m.name: m.result() for m in self.metrics if m.name != "loss"}
+        results["loss"] = loss
+        return results
+
+    def test_step(self, data):
+        x, y = data
+        y_pred = self(x, training=False)
+        loss = self.compute_loss(x=x, y=y, y_pred=y_pred)
+        
+        # 1. Update validation metric logs
+        for metric in self.metrics:
+            if metric.name != "loss":
+                metric.update_state(y, y_pred)
+                
+        # 2. Build the output tracker and explicitly inject the validation loss
+        results = {m.name: m.result() for m in self.metrics if m.name != "loss"}
+        results["loss"] = loss
+        return results
+
+# =========================================================================
+# COMPLETED REWRITTEN NEWBOB SCHEDULER CALLBACK
+# =========================================================================
+class NewbobLearningRateScheduler(keras.callbacks.Callback):
+    """
+    Classic Chess NNUE Newbob Learning Rate Scheduler.
+    """
+    def __init__(self, initial_lr=1.0e-3, decay_factor=0.5, threshold=1.0e-4, min_lr=5.0e-5, verbose=1):
+        super().__init__()
+        self.initial_lr = initial_lr
+        self.decay_factor = decay_factor
+        self.threshold = threshold  
+        self.min_lr = min_lr
+        self.verbose = verbose
+        
+        self.best_loss = np.inf
+        self.current_lr = initial_lr
+
+    def on_train_begin(self, logs=None):
+        if hasattr(self.model.optimizer, "learning_rate"):
+            self.model.optimizer.learning_rate.assign(self.initial_lr)
+            self.current_lr = self.initial_lr
+        if self.verbose > 0:
+            print(f"\n[Newbob] Training initiated. Initial learning rate configured to: {self.current_lr}")
+
+    def on_epoch_end(self, epoch, logs=None):
+        logs = logs or {}
+        val_loss = logs.get("val_loss")
+
+        if val_loss is None:
+            if self.verbose > 0:
+                print(f"\n[Newbob Warning] 'val_loss' not found in logs for epoch {epoch + 1}. Skipping step.")
+            return
+
+        if self.best_loss == np.inf:
+            self.best_loss = val_loss
+            if self.verbose > 0:
+                print(f"\n[Newbob] Baseline validation loss established: {self.best_loss:.6f}")
+            return
+
+        improvement = self.best_loss - val_loss
+
+        if improvement > self.threshold:
+            self.best_loss = val_loss
+            if self.verbose > 0:
+                print(f"\n[Newbob] Validation loss improved by {improvement:.6f} (Threshold: {self.threshold}). "
+                      f"New best loss: {self.best_loss:.6f}. Keeping LR: {self.current_lr:.1e}")
+        else:
+            old_lr = self.current_lr
+            new_lr = old_lr * self.decay_factor
+
+            if new_lr < self.min_lr:
+                new_lr = self.min_lr
+                if self.verbose > 0:
+                    print(f"\n[Newbob] Plateau detected, but learning rate is locked at min_lr boundary: {self.min_lr:.1e}")
+            else:
+                self.current_lr = new_lr
+                if hasattr(self.model.optimizer, "learning_rate"):
+                    self.model.optimizer.learning_rate.assign(self.current_lr)
+                
+                if self.verbose > 0:
+                    print(f"\n[Newbob Plateau] Loss improvement ({improvement:.6f}) failed to clear threshold ({self.threshold}). "
+                          f"Decaying learning rate from {old_lr:.1e} to {self.current_lr:.1e}")
+    
+
+# --- Export NNUE Weights for Rust ---
 def export_dense_nnue_for_rust(model, file_path="model.nnue"):
     with open(file_path, "wb") as f:
         print("--- Commencing Weight Quantization & Serialization for Rust ---")
         
-        # 1. Accumulator Layer (49152 -> 256)
+        # 1. Accumulator Layer (22532 -> 256)
         # Input: Binary (0/1) | Weights: i16 | Bias/Output Accumulator: i32
         acc_layer = model.get_layer("accumulator_layer")
         embedding_weights = acc_layer.get_weights()[0]
 
-        # Accumlator Weights
-        w1_real = embedding_weights[:49152, :]
+        # Accumulator Weights (Updated dimension bound for 16-bucket layout)
+        w1_real = embedding_weights[1:INPUT_FEATURES + 1, :]
         w1_quant = np.ascontiguousarray(np.round(w1_real * 128.0)).astype(np.int16)
 
-        # Accumlator Bias
-        bias_layer = model.get_layer("accumulator_bias")
-        b1_real = bias_layer.get_weights()[0]
-        b1_quant = np.round(b1_real * 128.0).astype(np.int32)
-        # Write exactly the same bytes structure as before
         f.write(w1_quant.tobytes())
-        f.write(b1_quant.tobytes())
-        print(f"-> Accumulator Layer serialized. Shape: {w1_real.shape} (Weights: i16 / Synthetic Bias: i32)")
+        print(f"-> Accumulator Layer serialized. Shape: {w1_real.shape} (Weights: i16 / Bias: NONE)")
 
         # 2. Hidden Layer 2 (256*2 -> 32)
         # Input: i16 (Clipped from Accumulator) | Weights: i8 | Bias/Output: i32
@@ -181,7 +314,7 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
         layer2 = model.get_layer("hidden_layer_2") 
         w2, b2 = layer2.get_weights()
         w2_quant = np.ascontiguousarray(np.clip(np.round(w2.T * 32.0), -128, 127).astype(np.int8))
-        b2_quant = np.round(b2 * 32.0).astype(np.int32) 
+        b2_quant = np.round(b2 * 4096.0).astype(np.int32) 
         f.write(w2_quant.tobytes())
         f.write(b2_quant.tobytes())
         print(f"-> Hidden Layer 2 serialized. Shape: {w2.shape} (Weights: i8 / Bias: i32) [Rust -> Shift >> 7]")
@@ -192,7 +325,7 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
         layer3 = model.get_layer("hidden_layer_3")
         w3, b3 = layer3.get_weights()
         w3_quant = np.ascontiguousarray(np.clip(np.round(w3.T * 32.0), -128, 127).astype(np.int8))
-        b3_quant = np.round(b3 * 32.0).astype(np.int32)
+        b3_quant = np.round(b3 * 1024.0).astype(np.int32)
         f.write(w3_quant.tobytes())
         f.write(b3_quant.tobytes())
         print(f"-> Hidden Layer 3 serialized. Shape: {w3.shape} (Weights: i8 / Bias: i32) [Rust -> Shift >> 5]")
@@ -202,210 +335,185 @@ def export_dense_nnue_for_rust(model, file_path="model.nnue"):
         # Shift Right by 5 (>> 5) to get final scaled score.
         output_layer = model.get_layer("chess_eval")
         w4, b4 = output_layer.get_weights()
-        w4_quant = np.ascontiguousarray(np.clip(np.round(w4.T * 128.0), -128, 127).astype(np.int8))
-        b4_quant = np.round(b4 * 128.0).astype(np.int32)
+        w4_quant = np.ascontiguousarray(np.clip(np.round(w4.T * 32.0), -128, 127).astype(np.int8))
+        b4_quant = np.round(b4 * 1024.0).astype(np.int32)
         f.write(w4_quant.tobytes())
         f.write(b4_quant.tobytes())
-        print(f"-> Output Layer serialized. Shape: {w4.shape} (Weights: i8 / Bias: i32) [Rust -> Shift >> 5]")
+        print(f"-> Output Layer serialized. Shape: {w4.shape} (Weights: i8 / Bias: i32) [Rust -> Shift >> 10]")
 
     print(f"\n[SUCCESS] Safe NNUE file successfully compiled and written to: {file_path}")
 
+def centipawn_probability_mse_loss(y_true, y_pred):
+    """
+    Tuned for your 32-neuron bottleneck outputting CENTIPAWN units.
+    Ensures gradients heavily prioritize precision between -200 and +200 centipawns.
+    """
+    SF_SCALE = 360.0 
+    
+    # Mathematical conversion factor: ln(10) / 360.0
+    # 2.30258509299 / 360.0 ≈ 0.00639607
+    scale_factor = 2.30258509299 / SF_SCALE
+    
+    y_true_float = keras.ops.cast(y_true, "float32")
+    y_pred_float = keras.ops.cast(y_pred, "float32")
+    
+    y_true_prob = keras.ops.sigmoid(y_true_float * scale_factor)
+    y_pred_prob = keras.ops.sigmoid(y_pred_float * scale_factor)
+    
+    # Calculate MSE on the probability landscape using stable continuous operations
+    loss = keras.ops.square(y_true_prob - y_pred_prob)
+    return keras.ops.mean(loss)
+
+def close_position_error_all(y_true, y_pred):
+    """
+    Calculates Mean Absolute Error only for Non-Mate positions evaluating 
+    within standard tactical play boundaries (up to 1000 centipawns / 10 pawns).
+    """
+    y_true_float = keras.ops.cast(y_true, "float32")
+    y_pred_float = keras.ops.cast(y_pred, "float32")
+
+    # 1. Compute raw absolute error per position
+    raw_error = keras.ops.abs(y_true_float - y_pred_float)
+    
+    # 2. Create a mask for positions within the 0 to 1000 centipawn range (absolute value)
+    is_close_position = keras.ops.abs(y_true_float) <= 1000.0
+    mask = keras.ops.cast(is_close_position, "float32")
+    
+    # 3. Filter the error using the mask
+    masked_error = raw_error * mask
+    
+    # 4. Compute the mean using only the valid filtered positions
+    total_error = keras.ops.sum(masked_error)
+    valid_count = keras.ops.sum(mask)
+    
+    # Avoid division by zero if a batch happens to contain zero close positions
+    return total_error / (valid_count + 1e-8)
+
+def close_position_error(y_true, y_pred):
+    """
+    Calculates MAE only for critical competitive positions with a true evaluation 
+    between 0 and 250 centipawns (2.5 pawns), where engine choice matters most.
+    """
+    y_true_float = keras.ops.cast(y_true, "float32")
+    y_pred_float = keras.ops.cast(y_pred, "float32")
+
+    # 1. Compute raw absolute error per position
+    raw_error = keras.ops.abs(y_true_float - y_pred_float)
+    
+    # 2. Create a mask for positions within the 0 to 250 centipawn range (absolute value)
+    is_close_position = keras.ops.abs(y_true_float) <= 250.0
+    mask = keras.ops.cast(is_close_position, "float32")
+    
+    # 3. Filter the error using the mask
+    masked_error = raw_error * mask
+    
+    # 4. Compute the mean using only the valid filtered positions
+    total_error = keras.ops.sum(masked_error)
+    valid_count = keras.ops.sum(mask)
+    
+    # Avoid division by zero if a batch happens to contain zero close positions
+    return total_error / (valid_count + 1e-8)
+
 def train_nnue_on_fens():
-    # 1. Inputs: Sequences of active feature index tokens matching your Parquet shapes
-    active_input = keras.Input(shape=(MAX_PIECES,), dtype="int32", name="active_features")
-    passive_input = keras.Input(shape=(MAX_PIECES,), dtype="int32", name="passive_features")
-
-    # 2. Shared Accumulator Layer (Using Embedding Reduction to replace the old sparse matrix bottleneck)
-    nnue_accumulator_init = keras.initializers.TruncatedNormal(mean=0.0, stddev=0.005)
-    
-    # We dimension the lookup array to INPUT_FEATURES + 1 to house the positive padding index row
-    embedding_layer = layers.Embedding(
-        input_dim=INPUT_FEATURES + 1,
-        output_dim=256,
-        embeddings_initializer=nnue_accumulator_init,
-        mask_zero=True,
-        name="accumulator_layer"
-    )
-
-    accumulator_bias_layer = SharedAccumulatorBias(
-        name="accumulator_bias", 
-        output_dim=256
-    )
-
-    # 3. Pull dense weights representations for all slots
-    a_embed = embedding_layer(active_input) # Target shape: (Batch, 16, 256)
-    p_embed = embedding_layer(passive_input) # Target shape: (Batch, 16, 256)
-
-    # 4. Synthesize masking vectors to isolate and zero-out padding weight contributions
-    a_mask = keras.ops.cast(keras.ops.not_equal(active_input, INPUT_FEATURES), dtype="float32")
-    p_mask = keras.ops.cast(keras.ops.not_equal(passive_input, INPUT_FEATURES), dtype="float32")
-    
-    # Expand to allow broadcasting dimensions across the 256 embedding properties
-    a_mask = keras.ops.expand_dims(a_mask, axis=-1) 
-    p_mask = keras.ops.expand_dims(p_mask, axis=-1)
-
-    # Execute masked pool aggregation to compile the 256 accumulator vectors
-    a_acc_raw = keras.ops.sum(a_embed * a_mask, axis=1)  # Target shape: (Batch, 256)
-    p_acc_raw = keras.ops.sum(p_embed * p_mask, axis=1)  # Target shape: (Batch, 256)
-
-    # INJECT THE ACCUMULATOR BIAS BEFORE CLIP/RELU
-    a_acc_biased = accumulator_bias_layer(a_acc_raw)
-    p_acc_biased = accumulator_bias_layer(p_acc_raw)
-
-    # 5. Clipped ReLU Activation (ReLU1 / Bounded ReLU)
-    a_act = keras.ops.clip(a_acc_biased, 0.0, SCALE_MAX)
-    p_act = keras.ops.clip(p_acc_biased, 0.0, SCALE_MAX)
-    
-    # 6. Perspective Multiplexing Layer (Shape: Batch, 256*2)
-    merged = layers.Concatenate(name="perspective_multiplex")([a_act, p_act]) 
-    
-    # 7. Hidden Layer 2 with ReLU1 activation
-    x = layers.Dense(
-        32, 
-        activation=None, 
-        use_bias=True, 
-        kernel_initializer=keras.initializers.HeNormal(),
-        name="hidden_layer_2"
-    )(merged)
-    x = keras.ops.clip(x, 0.0, SCALE_MAX)
-
-    # 8. Hidden Layer 3 with ReLU1 activation
-    x = layers.Dense(
-        32, 
-        activation=None, 
-        use_bias=True, 
-        kernel_initializer=keras.initializers.HeNormal(),
-        name="hidden_layer_3"
-    )(x)
-    x = keras.ops.clip(x, 0.0, SCALE_MAX)
-    
-    # 9. Output Layer (Linear, Pawn-Scale Evaluation Output)
-    output = layers.Dense(
-        1, 
-        activation=None, 
-        use_bias=True, 
-        kernel_initializer=keras.initializers.HeNormal(),
-        name="chess_eval"
-    )(x)
-
-    model = Model(
-        inputs=[active_input, passive_input],
-        outputs=output
-    )
-        
-    def pawn_probability_mse_loss(y_true, y_pred):
-        """
-        Tuned for an ultra-lean 8-neuron bottleneck outputting PAWN units.
-        Ensures gradients heavily prioritize precision between -2.0 and +2.0 Pawns.
-        """
-        # 3.6 Pawns acts as the scaling factor (Equivalent to 360 Centipawns).
-        # This aligns the log-odds win probability to a standard Pawn-scale model output.
-        SF_SCALE = 3.6 
-        
-        # Mathematical conversion factor: ln(10) / 3.6
-        # 2.30258509299 / 3.6 ≈ 0.639607
-        scale_factor = 2.30258509299 / SF_SCALE
-        
-        # Cast tensors to float32 to protect numerical precision during sigmoid scaling
-        # Expects y_true and y_pred to be float values like 0.5, 1.2, -3.0
-        y_true_prob = tf.math.sigmoid(keras.ops.cast(y_true, "float32") * scale_factor)
-        y_pred_prob = tf.math.sigmoid(keras.ops.cast(y_pred, "float32") * scale_factor)
-        
-        # Calculate MSE on the probability landscape
-        loss = tf.math.squared_difference(y_true_prob, y_pred_prob)
-        return tf.reduce_mean(loss)
-    
-    def close_position_error_all(y_true, y_pred):
-        raw_error = tf.abs(y_true - y_pred)
-        return tf.reduce_mean(raw_error)
-    
-    def close_position_error_3(y_true, y_pred):
-        """
-        Calculates MAE only for positions with a true evaluation between 0 and 3 pawns.
-        Assumes y_true is scaled in pawns (e.g., 1.0 = 1 pawn, 3.0 = 3 pawns).
-        """
-        # 1. Compute raw absolute error per position
-        raw_error = tf.abs(y_true - y_pred)
-        
-        # 2. Create a mask for positions within the 0 to 3 pawn range (absolute value)
-        is_close_position = tf.abs(y_true) <= 3.0
-        mask = tf.cast(is_close_position, tf.float32)
-        
-        # 3. Filter the error using the mask
-        masked_error = raw_error * mask
-        
-        # 4. Compute the mean using only the valid filtered positions
-        total_error = tf.reduce_sum(masked_error)
-        valid_count = tf.reduce_sum(mask)
-        
-        # divide_no_nan prevents a 0/0 crash if a batch happens to have zero close positions
-        return tf.math.divide_no_nan(total_error, valid_count)
+    # Setup Model
+    model = StockfishNNUE(input_features=INPUT_FEATURES, scale_max=SCALE_MAX)
 
     # 2. Bind directly to your engineered AdamW
-    base_cosine_schedule = keras.optimizers.schedules.CosineDecay(
-        initial_learning_rate=3e-4,
-        decay_steps=(TOTAL_EPOCHS - 1) * STEPS_PER_EPOCH,
-        alpha=0.0167
+    STEPS_PER_EPOCH, VALIDATION_PER_EPOCH = compute_dynamic_epoch_geometry(
+        train_dir="./balanced_shards/training",
+        val_dir="./balanced_shards/validation",
+        batch_size=BATCH_SIZE
     )
     
-    lr_schedule = CustomWarmupCosineSchedule(
-        warmup_steps=STEPS_PER_EPOCH, 
-        cosine_schedule=base_cosine_schedule
+    stockfish_optimizer = keras.optimizers.AdamW(
+        learning_rate=1.0e-3,
+        weight_decay=1e-5,
+        epsilon=1e-5,
+        global_clipnorm=1.0 
     )
 
-    stockfish_optimizer = keras.optimizers.AdamW(
-        learning_rate=lr_schedule,
-        weight_decay=0.01,
-        epsilon=1e-8,
-        global_clipnorm=1.0
-    )
-    # --- Compile the model ---
     model.compile(
         optimizer=stockfish_optimizer,
-        loss=pawn_probability_mse_loss,
-        metrics=[close_position_error_all, close_position_error_3]
+        loss=centipawn_probability_mse_loss,
+        metrics=[close_position_error_all, close_position_error]
     )
 
-    # Track file storage roots for local Parquet files
     train_dir, val_dir = get_local_shard_directories()
-
-    # Create the permanent managers ONCE. They spawn background processes that live forever.
-    train_manager = EpochSynchronizedDatasetManager(
-        shard_directory=train_dir, shard_pattern="*.parquet", num_workers=4, 
-        queue_size=5000, batch_size=BATCH_SIZE
+    optimal_train_workers = 6
+    
+    # 1. Instantiate both managers with identical lowercase tracking keys
+    train_manager = InfiniteConveyorDatasetManager(
+        shard_directory=train_dir, 
+        shard_pattern="*.parquet", 
+        num_workers=optimal_train_workers, 
+        queue_size=32, 
+        batch_size=BATCH_SIZE, 
+        name="training"
     )
-    val_manager = EpochSynchronizedDatasetManager(
-        shard_directory=val_dir, shard_pattern="*.parquet", num_workers=1,
-        queue_size=5000, batch_size=BATCH_SIZE
+    val_manager = InfiniteConveyorDatasetManager(
+        shard_directory=val_dir, 
+        shard_pattern="*.parquet", 
+        num_workers=2,
+        queue_size=32, 
+        batch_size=BATCH_SIZE, 
+        name="validation"  
     )
 
-    # --- Train Dataset (Updated to accept dense list tokens signatures) ---
-    train_dataset = tf.data.Dataset.from_generator(
-        generator=lambda: train_manager.generator_fn(total_epoch_steps=STEPS_PER_EPOCH),
-        output_signature=(
-            {
-                "active_features": tf.TensorSpec(shape=(BATCH_SIZE, MAX_PIECES), dtype=tf.int32),
-                "passive_features": tf.TensorSpec(shape=(BATCH_SIZE, MAX_PIECES), dtype=tf.int32),
-            },
-            tf.TensorSpec(shape=(BATCH_SIZE, 1), dtype=tf.float32)
-        )
-    ).prefetch(tf.data.AUTOTUNE)
+    # 2. Named generator bindings (No loops, no inline lambdas)
+    def train_generator_wrapper():
+        return train_manager.generator_fn()
 
-    # --- Validation Dataset ---
-    val_dataset = tf.data.Dataset.from_generator(
-        generator=lambda: val_manager.generator_fn(total_epoch_steps=VALIDATION_PER_EPOCH),
-        output_signature=(
-            {
-                "active_features": tf.TensorSpec(shape=(BATCH_SIZE, MAX_PIECES), dtype=tf.int32),
-                "passive_features": tf.TensorSpec(shape=(BATCH_SIZE, MAX_PIECES), dtype=tf.int32),
-            },
-            tf.TensorSpec(shape=(BATCH_SIZE, 1), dtype=tf.float32)
-        )
-    ).prefetch(tf.data.AUTOTUNE)
+    def val_generator_wrapper():
+        return val_manager.generator_fn()
 
-    print("\n--- Model compilation complete. Commencing Training Step ---")
+    decay_strength = tf.Variable(0.0, dtype=tf.float32, trainable=False)
+    def smooth_dynamic_filter(x, y):
+        abs_y = tf.abs(tf.squeeze(y))
+        base_curve = 1.0 / (1.0 + tf.square(abs_y / 360.0))
+        keep_prob = 1.0 - decay_strength * (1.0 - base_curve)
+        return tf.random.uniform([]) < keep_prob
+
+    # 3. Build structural dataset graph definitions EXACTLY ONCE with uniform infinite loops
+    def get_fresh_train_dataset():
+        return (
+            tf.data.Dataset.from_generator(
+                generator=train_generator_wrapper,
+                output_signature=(
+                    {
+                        "active_features": tf.TensorSpec(shape=(BATCH_SIZE, MAX_ACTIVE_FEATURES), dtype=tf.int16),
+                        "passive_features": tf.TensorSpec(shape=(BATCH_SIZE, MAX_ACTIVE_FEATURES), dtype=tf.int16),
+                    },
+                    tf.TensorSpec(shape=(BATCH_SIZE, 1), dtype=tf.float32)
+                )
+            )
+            .unbatch()
+            .repeat()
+            .filter(smooth_dynamic_filter)
+            .batch(BATCH_SIZE)
+            .prefetch(tf.data.AUTOTUNE)
+        )
+
+    def get_fresh_val_dataset():
+        return tf.data.Dataset.from_generator(
+            generator=val_generator_wrapper,
+            output_signature=(
+                {
+                    "active_features": tf.TensorSpec(shape=(BATCH_SIZE, MAX_ACTIVE_FEATURES), dtype=tf.int16),
+                    "passive_features": tf.TensorSpec(shape=(BATCH_SIZE, MAX_ACTIVE_FEATURES), dtype=tf.int16),
+                },
+                tf.TensorSpec(shape=(BATCH_SIZE, 1), dtype=tf.float32)
+            )
+        ).repeat().prefetch(tf.data.AUTOTUNE) 
+
+    # 4. Instantiate static, backend-agnostic dataset graphs
+    train_dataset = get_fresh_train_dataset()
+    val_dataset = get_fresh_val_dataset()
+
+    print(f"\n--- Model compilation complete. Commencing Training with {optimal_train_workers} Workers ---")
+
+    # 5. Core callback lifecycle infrastructure
     checkpoint_path = "best_chess_nnue.keras"
-    checkpoint_cb = tf.keras.callbacks.ModelCheckpoint(
+    checkpoint_cb = keras.callbacks.ModelCheckpoint(
         filepath=checkpoint_path,
         monitor='val_loss',
         save_best_only=False,
@@ -414,19 +522,36 @@ def train_nnue_on_fens():
 
     cleanup_cb = AggressiveMemoryCleanup()
 
-    # Train model execution call
+    newbob_callback = NewbobLearningRateScheduler(
+        initial_lr=1.0e-3,
+        decay_factor=0.5, 
+        threshold=1.0e-4, 
+        min_lr=1.0e-5,
+        verbose=1
+    )
+
+    smooth_decay_cb = SmoothPositionDecayCallback(
+        decay_strength_var=decay_strength,
+        scale_cp=360.0,
+        warmup_epochs=3,
+        decay_epochs=15,
+        verbose=1
+    )
+
+    # 6. Fit Execution: Runs perfectly synchronized across all 30 epochs
     model.fit(
-        train_dataset, 
+        train_dataset,
+        epochs=TOTAL_EPOCHS,
         steps_per_epoch=STEPS_PER_EPOCH,
-        epochs=TOTAL_EPOCHS, 
         validation_data=val_dataset,
         validation_steps=VALIDATION_PER_EPOCH,
-        callbacks=[checkpoint_cb, cleanup_cb]
+        shuffle=False, 
+        callbacks=[smooth_decay_cb, newbob_callback, checkpoint_cb, cleanup_cb]
     )
 
     print("\nTraining complete. Terminating background workers cleanly...")
-    train_manager.shutdown()
-    val_manager.shutdown()
+    train_manager.stop_epoch_stream()
+    val_manager.stop_epoch_stream()
 
     return model
 

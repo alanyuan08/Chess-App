@@ -17,13 +17,13 @@ use crate::nnue_network::*;
 use crate::search_command::*;
 use crate::move_command::*;
 
-pub const MAX_DEPTH: i8 = 30;
+pub const MAX_DEPTH: i8 = 35;
 
 // When a thread finishes, if it exceeds the time, it will send the 
 // termination signal to the other threads.
 
 // The other threads the single every 2048 executions
-pub const SEARCH_TIME_LIMIT: u64 = 15;
+pub const SEARCH_TIME_LIMIT: u64 = 10;
 
 pub const INFINITY: i16 = 32000;
 pub const MATE_VALUE: i16 = 30000;
@@ -36,7 +36,7 @@ pub const MATE_THRESHOLD: i16 = MATE_VALUE - ((MAX_DEPTH * 2) as i16);
 pub const NUM_THREADS: usize = 8;
 
 // Condon-Thompson Bucket Transposition Table
-pub const CACHE_SIZE: usize = 1024;
+pub const CACHE_SIZE: usize = 256;
 
 // Max Game Moves
 pub const MAX_GAME_MOVES: usize = 256;
