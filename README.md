@@ -52,7 +52,7 @@ The NNuE achieves an average of +/- 35 centipawns off stockfish for positions be
 
 $$\text{Inputs (22532)} \rightarrow \text{Accumulator (256)} \rightarrow \text{Multiplexed Perspective (256*2)} \rightarrow \text{Hidden 2 (64)} \rightarrow \text{Hidden 3 (32)} \rightarrow \text{Output (1)}$$
 
-- **Input Layer:** $32 \times 11 \times 64 \plus 4 = 22532$ sparse features mapping active piece-square configurations relative to your own active King's position.
+- **Input Layer:** $32 \times 11 \times 64 + 4 = 22532$ sparse features mapping active piece-square configurations relative to your own active King's position.
 - **Accumulator Layer:** Shapes into $(22532, 256)$ weights quantized to signed 16-bit integers (`i16`). Uses branchless tensor multiplexing to concatenate White/Black points of view into a unified $256$-dimensional vector.
   - *Activation:* Clipped/Bounded Linear ReLU ($\text{ReLU1}$) bounded strictly between `0.0` and `1.0`.
 - **Hidden Layer 2:** Matrix transformation mapping $(256*2, 32)$ quantized to signed 8-bit weights (`i8`) and 32-bit biases (`i32`).
