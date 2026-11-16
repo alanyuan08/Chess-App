@@ -20,16 +20,8 @@ pub struct NnueNetwork {
     pub l3_biases: [i32; 32],
 
     // i8 -> 1 byte. 32 + 4 bytes + padding -> 1 Cache Line
-    pub output_weights: [[i8; 32]; 1],
-    pub output_bias: [i32; 1],
-    
-    // If aarch64 (Mac), use 92 bytes of padding to round up to 128.
-    // If x86 (Intel/AMD), use 28 bytes of padding to round up to 64.
-    #[cfg(target_arch = "aarch64")] 
-    pub _padding: [u8; 92],
-    
-    #[cfg(not(target_arch = "aarch64"))] 
-    pub _padding: [u8; 28],
+    pub output_weights: [i8; 32],
+    pub output_bias: i32,
 }
 
 impl NnueNetwork {
@@ -70,8 +62,8 @@ impl NnueNetwork {
             read_field(&mut network_box.l3_biases as *mut _ as *mut u8, 32, 4)?;
 
             // 4. Output Layer
-            read_field(&mut network_box.output_weights as *mut _ as *mut u8, 32, 1)?;
-            read_field(&mut network_box.output_bias as *mut _ as *mut u8, 1, 4)?;
+            read_field(network_box.output_weights.as_mut_ptr() as *mut u8, 32, 1)?;
+            read_field(&mut network_box.output_bias as *mut i32 as *mut u8, 1, 4)?;
         }
 
         Ok(network_box)
@@ -89,9 +81,6 @@ pub struct NnueInferenceBuffer {
     // 32 + 32 + 64 pading -> 128
     pub l3_inputs: [i8; 32],
     pub l4_inputs: [i8; 32],
-
-    #[cfg(target_arch = "aarch64")] 
-     _padding: [u8; 64],
 }
 
 impl NnueInferenceBuffer {    
@@ -111,9 +100,6 @@ impl Default for NnueInferenceBuffer {
             l2_inputs: [0i8; 512],
             l3_inputs: [0i8; 32],
             l4_inputs: [0i8; 32],
-
-            #[cfg(target_arch = "aarch64")]
-            _padding: [0u8; 64],
         }
     }
 }

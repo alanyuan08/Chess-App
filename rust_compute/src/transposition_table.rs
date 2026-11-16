@@ -183,13 +183,10 @@ impl TranspositionTable {
         let bucket_idx = (key as usize) & self.mask;
         let bucket = &self.buckets[bucket_idx];
 
-        for i in 0..SLOTS_PER_BUCKET {
-            let bits = bucket.slots[i].load(Ordering::Relaxed);
-            if bits == 0 {
-                continue;
-            }
-
-            let entry = TTEntry::unpack(bits);           
+        for atomic_slot in &bucket.slots {
+            let bits = atomic_slot.load(Ordering::Relaxed);
+            let entry = TTEntry::unpack(bits);
+                   
             if entry.key == key {
                 let mut local_score = entry.score;
 

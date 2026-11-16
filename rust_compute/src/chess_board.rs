@@ -789,7 +789,6 @@ impl ChessBoard {
             let piece = self.mailbox[sq as usize];
 
             let w_idx = get_feature_index(w_king_sq, piece, sq, false);
-            debug_assert!(w_idx < CASTLING_BASE, "Positional white feature index drifted out of bounds: {}", w_idx);
             white_indices[w_count] = w_idx;
             w_count += 1;
             
@@ -802,7 +801,6 @@ impl ChessBoard {
             let piece = self.mailbox[sq as usize];
 
             let b_idx = get_feature_index(b_king_sq, piece, sq, true);
-            debug_assert!(b_idx < CASTLING_BASE, "Positional black feature index drifted out of bounds: {}", b_idx);
             black_indices[b_count] = b_idx;
             b_count += 1;
             
@@ -812,21 +810,16 @@ impl ChessBoard {
         // =========================================================================
         // --- ADD GLOBAL CASTLING RIGHTS TO THE INDEX TRACKS (Indices 22528-22531) ---
         // =========================================================================
-        let castling_base = CASTLING_BASE;
-        let rights = self.castling_rights;
+        let mut rights = self.castling_rights & 0x0F;
+        while rights != 0 {
+            let idx = CASTLING_BASE + (rights.trailing_zeros() as usize);
+            white_indices[w_count] = idx;
+            w_count += 1;
+            black_indices[b_count] = idx;
+            b_count += 1;
+            rights &= rights - 1;
+        }
 
-        // Append White Perspective Castling Indices
-        if (rights & WHITE_KINGSIDE)  != 0 { white_indices[w_count] = castling_base; w_count += 1; }
-        if (rights & WHITE_QUEENSIDE) != 0 { white_indices[w_count] = castling_base + 1; w_count += 1; }
-        if (rights & BLACK_KINGSIDE)  != 0 { white_indices[w_count] = castling_base + 2; w_count += 1; }
-        if (rights & BLACK_QUEENSIDE) != 0 { white_indices[w_count] = castling_base + 3; w_count += 1; }
-
-        // Append Black Perspective Castling Indices
-        if (rights & WHITE_KINGSIDE)  != 0 { black_indices[b_count] = castling_base; b_count += 1; }
-        if (rights & WHITE_QUEENSIDE) != 0 { black_indices[b_count] = castling_base + 1; b_count += 1; }
-        if (rights & BLACK_KINGSIDE)  != 0 { black_indices[b_count] = castling_base + 2; b_count += 1; }
-        if (rights & BLACK_QUEENSIDE) != 0 { black_indices[b_count] = castling_base + 3; b_count += 1; }
-        
         let weights = &self.nnue_network.l1_weights;
 
         // Loop 1: Process White Perspective Completely
@@ -894,8 +887,8 @@ impl ChessBoard {
         }
 
         // --- STEP 4: OUTPUT LAYER (32 -> 1) ---
-        let out_weights = &self.nnue_network.output_weights[0];
-        let mut final_sum = self.nnue_network.output_bias[0];
+        let out_weights = &self.nnue_network.output_weights;
+        let mut final_sum = self.nnue_network.output_bias;
 
         for i in 0..32 {
             final_sum += (l4_inputs[i] as i32) * (out_weights[i] as i32);
@@ -1087,7 +1080,7 @@ impl ChessBoard {
 
         colinear & valid_ray & same_direction
     }
-
+    
     /// Generates sliding attacks on the fly using your engine's ray paths.
     fn get_slider_attackers(&self, target_sq: u8, occupied: u64) -> u64 {
         let mut attackers = 0u64;

@@ -73,6 +73,18 @@ impl SearchWorker {
         }
     }
 
+    #[inline(always)]
+    fn get_aspiration_delta(score: i16) -> i16 {
+        let abs_score = score.saturating_abs();
+        if abs_score <= 250 {
+            15
+        } else if abs_score <= 400 {
+            25
+        } else {
+            45
+        }
+    }
+
     // Search Entry Point
     pub fn root_search(&mut self, engine_age: i8) -> (ForwardMove, usize, usize) {
         self.nodes_processed = 0;
@@ -81,14 +93,17 @@ impl SearchWorker {
         let mut best_move_overall: ForwardMove = ForwardMove::NULL_MOVE;
         let mut depth = 1;
 
-        // Calibrated to a conservative 50 cp NNUE error floor:
-        // 38 cp initial window (~0.75x MAE) absorbs normal depth-to-depth jitter without extra re-searches.
-        const INITIAL_WINDOW_DELTA: i16 = 38;
         let mut alpha = -INFINITY;
         let mut beta = INFINITY;
 
         while depth <= MAX_DEPTH {
-            let mut delta = INITIAL_WINDOW_DELTA;
+            // Seed delta from the active window half-width (or 15 cp fallback)
+            let mut delta = if alpha > -INFINITY && beta < INFINITY {
+                (beta - alpha) / 2
+            } else {
+                15
+            };
+
             let mut result = self.negamax(depth, 0, alpha, beta, best_move_overall, true);
 
             // Fail-soft gradual aspiration widening loop
@@ -97,15 +112,15 @@ impl SearchWorker {
                     if result.score <= alpha {
                         // Fail-low: pull beta down to midpoint, widen alpha downward
                         beta = alpha.saturating_add(beta) / 2;
-                        alpha = if delta >= 304 {
+                        alpha = if delta >= 200 {
                             -INFINITY
                         } else {
                             result.score.saturating_sub(delta)
                         };
                     } else if result.score >= beta {
-                        // Fail-high: keep alpha at the proven fail-high bound, widen beta upward
+                        // Fail-high: lock alpha at the exact proven score, widen beta upward
                         alpha = result.score;
-                        beta = if delta >= 304 {
+                        beta = if delta >= 200 {
                             INFINITY
                         } else {
                             result.score.saturating_add(delta)
@@ -137,10 +152,11 @@ impl SearchWorker {
                     break;
                 }
 
-                // Engage 38 cp aspiration window once depth >= 4 stabilizes tactical noise
+                // Engage tight score-calibrated aspiration window once depth >= 4 stabilizes tactical noise
                 if depth >= 3 && result.score.abs() < MATE_THRESHOLD - 100 {
-                    alpha = result.score.saturating_sub(INITIAL_WINDOW_DELTA);
-                    beta = result.score.saturating_add(INITIAL_WINDOW_DELTA);
+                    let next_delta = Self::get_aspiration_delta(result.score);
+                    alpha = result.score.saturating_sub(next_delta);
+                    beta = result.score.saturating_add(next_delta);
                 } else {
                     alpha = -INFINITY;
                     beta = INFINITY;
@@ -273,44 +289,35 @@ impl SearchWorker {
     // A simple, linear-logarithmic approximation using integer division:
     // R increases slowly as depth and move count grow.
     #[inline]
-    pub fn get_reduced_depth(&self, depth: i8, moves_tried: i8) -> i8 {
+    pub fn get_reduced_depth(
+        &self,
+        depth: i8,
+        moves_tried: i8,
+        is_pv: bool,
+        is_killer: bool,
+    ) -> i8 {
         // 1. Safe array bounds clamping
         let d = depth.clamp(0, 63) as usize;
         let m = moves_tried.clamp(0, 63) as usize;
-
-        // Ensure your LMR_TABLE stores values that can cast cleanly into an i16
         let base_reduction = LMR_TABLE[d][m] as i16;
 
-        // 2. Branchless Thread Diversity Calculation
-        let is_helper_thread = (self.thread_id != 0) as i16;
-        
-        let is_odd_thread = ((self.thread_id & 1) != 0) as i16;
-        let is_even_thread = 1 - is_odd_thread;
-        
-        let depth_gt_4 = (depth > 4) as i16;
-        let even_offset = -(1 - depth_gt_4);
+        // 2. Branchless Lazy SMP Thread Diversity
+        let is_helper = (self.thread_id != 0) as i16;
+        let is_odd = ((self.thread_id & 1) != 0) as i16;
+        let is_even = 1 - is_odd;
+        let even_offset = -((depth <= 4) as i16);
 
-        // Combine offsets branchlessly based on the active thread ID properties
-        let thread_offset = is_odd_thread + (even_offset * is_even_thread);
-        
-        // Apply thread diversity adjustment
-        let adjusted_reduction = base_reduction + (thread_offset * is_helper_thread);
-        
-        // Type-safe branchless floor clamp to avoid zero-shattering
-        let reduction = adjusted_reduction * (adjusted_reduction > 0) as i16;
+        let thread_offset = is_odd + (even_offset * is_even);
 
-        // 3. Calculate raw reduced depth
-        let raw_reduced_depth = (depth as i16) - 1 - reduction;
+        // 3. Protect PV nodes and killer moves from over-reduction (-1 ply each)
+        let pv_bonus = is_pv as i16;
+        let killer_bonus = is_killer as i16;
 
-        // 4. Branchless Safety Clamp (Forces result between 0 and depth - 1)
-        let is_less_than_zero = (raw_reduced_depth < 0) as i16;
-        let is_greater_equal_depth = (raw_reduced_depth >= depth as i16) as i16;
-        let is_valid = 1 - is_less_than_zero - is_greater_equal_depth;
+        let reduction = (base_reduction + (thread_offset * is_helper) - pv_bonus - killer_bonus).max(0);
 
-        let reduced_depth = (((depth as i16) - 1) * is_greater_equal_depth) 
-            + (raw_reduced_depth * is_valid);
-
-        reduced_depth as i8
+        // 4. Branchless clamp to [0, depth - 1]
+        let max_reduced = ((depth as i16) - 1).max(0);
+        ((depth as i16) - 1 - reduction).clamp(0, max_reduced) as i8
     }
 
     // Store Killer Move - No Captures (Entirely Branchless)
@@ -335,9 +342,8 @@ impl SearchWorker {
     #[inline]
     fn calculate_nmp_reduction(&self, depth: i8, static_eval: i16, beta: i16) -> i8 {
         let base_reduction = 3 + (depth / 4);
-        
         let eval_bonus = ((static_eval - beta) / 200).clamp(0, 3);
-        
+
         base_reduction + (eval_bonus as i8)
     }
 
@@ -459,14 +465,14 @@ impl SearchWorker {
 
         let static_eval = self.static_eval();
 
-        // 4. Late Futility Pruning
+        // 4. Reverse Futility Pruning (Non-PV nodes, standard linear margin)
         let is_pv = beta - alpha > 1;
         if !is_pv
             && depth <= 3
             && !king_in_check
             && beta.abs() < MATE_THRESHOLD
         {
-            let rfp_margin = (65 * depth as i16) + 10;
+            let rfp_margin = (65 * depth as i16) + 15;
 
             if static_eval - rfp_margin >= beta {
                 let aborted = self.stop_signal.load(Ordering::Relaxed);
@@ -569,10 +575,31 @@ impl SearchWorker {
         ;
 
         // 6. Move Search Loop
+        let see_threshold = if is_pv { -50 * depth as i16 } else { 0 };
+        let can_tactical_prune = !king_in_check && depth <= 4;
+        let tactical_margin = 35 + (50 * depth as i16);
+
+        let can_lmp = !is_pv && !king_in_check && depth <= 3;
+        let lmp_limit = 3 + (depth * depth);
+        let ply_idx = (ply as usize) & 127;
+
         for forward_move in &gen_moves {
-            // --- PRE-MOVE TACTICAL PRUNING GATES (Main Search, depth <= 4) ---
-            if !king_in_check
-                && depth <= 4
+            let is_quiet = matches!(forward_move.move_type, MoveFlag::MOVE);
+            let is_killer = *forward_move == self.killer_move_table[ply_idx][0]
+                || *forward_move == self.killer_move_table[ply_idx][1];
+
+            // --- LATE MOVE PRUNING (LMP): Skip hopeless late quiet moves near the horizon ---
+            if can_lmp
+                && is_quiet
+                && !is_killer
+                && moves_tried > lmp_limit
+                && alpha.abs() < MATE_THRESHOLD - 256
+            {
+                continue;
+            }
+
+            // --- PRE-MOVE TACTICAL CAPTURE PRUNING ---
+            if can_tactical_prune
                 && moves_tried > 0
                 && alpha.abs() < MATE_THRESHOLD - 256
                 && matches!(forward_move.move_type, MoveFlag::CAPTURE | MoveFlag::ENPASSANT)
@@ -580,13 +607,11 @@ impl SearchWorker {
                 let exact_see_score = self.chess_board.static_exchange_evaluation(*forward_move);
 
                 // 1. Strict Tactical Gate: Drop losing exchanges on non-PV nodes (or severe blunders on PV)
-                let see_threshold = if is_pv { -50 * depth as i16 } else { 0 };
                 if exact_see_score < see_threshold {
                     continue;
                 }
 
-                // 2. Tactical Futility Gate calibrated to 34-50 cp NNUE error
-                let tactical_margin = 30 + (50 * depth as i16);
+                // 2. Linear Tactical Futility Gate
                 if static_eval + exact_see_score + tactical_margin < alpha {
                     continue;
                 }
@@ -595,7 +620,7 @@ impl SearchWorker {
             self.process_forward_move(*forward_move);
 
             // Pseudo legal move exposes check, undo move
-            if self.chess_board.is_previous_player_king_in_check() {    
+            if self.chess_board.is_previous_player_king_in_check() {
                 self.process_backward_move();
                 continue;
             }
@@ -616,15 +641,14 @@ impl SearchWorker {
                 }
             } else {
                 // 2. SUBSEQUENT MOVES: Run LMR or Scout verification
-                let mut lmr_eligibility = false;
-                if depth >= 3 && moves_tried > 3 && !king_in_check && matches!(forward_move.move_type, MoveFlag::MOVE)
-                    && !self.chess_board.is_in_check() {
-                    
-                    lmr_eligibility = true;
-                }
+                let lmr_eligibility = depth >= 3
+                    && moves_tried > 3
+                    && !king_in_check
+                    && is_quiet
+                    && !self.chess_board.is_in_check();
 
                 if lmr_eligibility {
-                    let reduced_depth = self.get_reduced_depth(depth, moves_tried);
+                    let reduced_depth = self.get_reduced_depth(depth, moves_tried, is_pv, is_killer);
                     let search_result = self.negamax(reduced_depth, ply + 1, -alpha - 1, -alpha, ForwardMove::NULL_MOVE, true);
                     score = -search_result.score;
 
@@ -818,31 +842,34 @@ impl SearchWorker {
             } 
         }
 
-        // 4. Standing Pat 
-        let king_in_check = self.chess_board.is_in_check(); 
+        // 4. Standing Pat
+        let king_in_check = self.chess_board.is_in_check();
         let mut best_score;
         let mut best_move = ForwardMove::NULL_MOVE;
-        let pruning_baseline; 
+        let pruning_baseline;
 
         if !king_in_check {
-            // Evaluated relative to the side-to-move
             let static_eval = self.static_eval();
             best_score = static_eval;
             pruning_baseline = static_eval;
 
             if best_score >= beta {
                 let aborted = self.stop_signal.load(Ordering::Relaxed);
-                
+
                 if !aborted {
                     self.transposition_table.store(
-                        hash, best_score, 
-                        Q_DEPTH_MARKER, ply, self.age, 
-                        ForwardMove::NULL_MOVE, HashFlag::LOWERBOUND
+                        hash,
+                        best_score,
+                        Q_DEPTH_MARKER,
+                        ply,
+                        self.age,
+                        ForwardMove::NULL_MOVE,
+                        HashFlag::LOWERBOUND,
                     );
                 }
 
                 return SearchResult {
-                    score: if aborted { 0 } else { best_score }, 
+                    score: if aborted { 0 } else { best_score },
                     best_move: ForwardMove::NULL_MOVE,
                     was_aborted: aborted,
                 };
@@ -852,36 +879,39 @@ impl SearchWorker {
                 alpha = best_score;
             }
         } else {
-            // Evasion baseline tracking bounds prevents masking mate strings
             best_score = -MATE_VALUE + ply;
-            pruning_baseline = alpha; 
+            pruning_baseline = alpha;
         }
 
-        // Generate strictly legal tactical moves directly onto the global stack
+        // Generate tactical moves (or all evasions if in check) onto the stack
         let mut gen_moves = ArrayVec::<ForwardMove, 256>::new();
         let mut legal_moves_played = 0;
 
         let only_tactical = !king_in_check;
         self.chess_board.generate_moves(
-            &mut gen_moves, ForwardMove::NULL_MOVE, tt_hint, 
-            ply, &self.killer_move_table, only_tactical
+            &mut gen_moves,
+            ForwardMove::NULL_MOVE,
+            tt_hint,
+            ply,
+            &self.killer_move_table,
+            only_tactical,
         );
 
-        // 5. Quiscence Search
+        // 5. Quiescence Search (Wider Delta Pruning Margin)
         for forward_move in &gen_moves {
             // --- PRE-MOVE TACTICAL PRUNING GATES ---
-            if !king_in_check {
-                // Calculate the exact transaction value from our current perspective (pre-move)
+            if !king_in_check
+                && !matches!(forward_move.move_type, MoveFlag::PROMOTIONQUEEN)
+            {
+                // 1. Strict Tactical Gate: Static exchange evaluation is exact and NNUE-independent
                 let exact_see_score = self.chess_board.static_exchange_evaluation(*forward_move);
-
-                // 1. Strict Tactical Gate: If the exchange immediately loses material, drop it
                 if exact_see_score < 0 {
-                    continue; 
+                    continue;
                 }
 
-                // 2. Delta Pruning Gate using check-safe baseline
-                if pruning_baseline + exact_see_score + 120 < alpha {
-                    continue; 
+                // 2. Wider Delta Pruning Gate
+                if pruning_baseline + exact_see_score + 200 < alpha {
+                    continue;
                 }
             }
 
@@ -906,9 +936,7 @@ impl SearchWorker {
                 };
             }
 
-            // Bring child score back to our perspective
-            let score = -search_result.score;
-            
+            let score = -search_result.score;            
             if score > best_score {
                 best_score = score;
                 best_move = *forward_move;

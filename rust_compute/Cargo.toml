@@ -5,7 +5,9 @@ edition = "2021"
 rand = "0.9"
 
 [profile.release]
-debug = true
+opt-level = 3
+lto = "fat"
+codegen-units = 1
 
 [build]
 # Forces the compiler to auto-vectorize loops into AVX2 / Neon SIMD registers
