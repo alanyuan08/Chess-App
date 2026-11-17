@@ -102,7 +102,7 @@ The network is trained using a three-stage optimization and data-filtering strat
 
 ## 6. Playing Level
 
-The Chess AI has been tested against ELO 3200+ Chess.com bots - These bots are inflated and used primarily as a smoke test. 
+The Chess AI has been tested against ELO 3200+ Chess.com bots - Both the Chess.com and AlanBot engines are capped at 1.5 second evaluation time in a blitz setting as a smoke test. 
 
 - [WIN - ELO 3200 Bot](https://www.chess.com/analysis/game/computer/1617707258/analysis)
 - [WIN - ELO 3200 Bot](https://www.chess.com/analysis/game/computer/1978599994/analysis)
