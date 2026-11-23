@@ -24,7 +24,7 @@ pip install "../[training]"
 # 4. Process the Positions -> Input /data -> Output /processed_shards
 python dataset_exporter.py
 sync
-rm -f ./data/*
+# rm -f ./data/*
 
 pkill -u $(whoami) -f "dataset_exporter.py" || true
 

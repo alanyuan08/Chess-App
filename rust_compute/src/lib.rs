@@ -18,6 +18,7 @@ pub mod parser;
 pub mod nnue_network;
 pub mod board_accumlator;
 pub mod search_command;
+pub mod integration;
 
 use crate::chess_game::{init_attack_tables};
 use crate::chess_game::ChessGame;
@@ -25,6 +26,7 @@ use crate::chess_game::ChessGame;
 #[pymodule]
 fn rust_compute(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(init_attack_tables, m)?)?;
+    m.add_function(wrap_pyfunction!(integration::is_unsafe_batch, m)?)?;
     m.add_class::<ChessGame>()?;
 
     Ok(())

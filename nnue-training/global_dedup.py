@@ -12,7 +12,7 @@ PRODUCTION_DIR = "./data_dedup"
 FINAL_DATA_SIZE = 2_000_000 
 NUM_BUCKETS = 64  
 TEMP_DIR = "./dedup_temp_buckets"
-BUFFER_DIR = "./buffer_temp"  # NEW: Disk-backed buffer to prevent RAM buildup
+BUFFER_DIR = "./buffer_temp"
 
 CANONICAL_COLUMNS = ["active_indices", "passive_indices", "target", "depth", "fen"]
 
@@ -26,7 +26,6 @@ def run_partitioned_deduplication():
         
     if not all_shards:
         print(f"[ERROR] No shards found in {INPUT_DIR} matching pattern *.parquet!")
-        sys.exit(1)
             
     print(f"=== Phase 1: Streaming Partition Bucketing Across {len(all_shards)} Shards ===")
         
@@ -58,6 +57,13 @@ def run_partitioned_deduplication():
             # Clear memory immediately after each shard iteration
             del df_partitioned
                         
+            # Delete the source file
+            try:
+                os.remove(path)
+                print(f"[Deleted] Removed source file: {path}")
+            except OSError as e:
+                print(f"[Error] Could not delete {path}: {e}")
+
         except Exception as e:
             print(f"    [WARNING] Error splitting shard {os.path.basename(path)}: {str(e)}")
 

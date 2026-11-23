@@ -112,6 +112,111 @@ impl ChessBoard {
         self.create_accumulator_from_scratch(accumulators);    
     }
 
+    pub fn set_fen(
+        &mut self,
+        fen: &str,
+        accumulators: &mut AccumulatorHistory,
+    ) -> Result<(), &'static str> {
+        let parts: Vec<&str> = fen.split_whitespace().collect();
+        if parts.len() < 4 {
+            return Err("Invalid FEN: fewer than 4 fields");
+        }
+
+        // 1. Reset ALL bitboards, mailbox squares, castling rights, and en-passant
+        self.pawns = [0; 2];
+        self.knights = [0; 2];
+        self.bishops = [0; 2];
+        self.rooks = [0; 2];
+        self.queens = [0; 2];
+        self.kings = [0; 2];
+        self.all_pieces = [0; 2];
+        self.occupied = 0;
+        self.mailbox = [BoardPiece::NONE; 64];
+        self.castling_rights = 0;
+        self.en_passant = 64;
+        self.ply = 0;
+
+        // 2. Parse piece placement (Rank 8 -> Rank 1, File A -> File H)
+        let mut rank: usize = 7;
+        let mut file: usize = 0;
+
+        for ch in parts[0].chars() {
+            if ch == '/' {
+                if rank == 0 {
+                    return Err("Invalid FEN: too many ranks");
+                }
+                rank -= 1;
+                file = 0;
+            } else if let Some(empty_squares) = ch.to_digit(10) {
+                file += empty_squares as usize;
+            } else {
+                if file >= 8 {
+                    return Err("Invalid FEN: file overflow");
+                }
+                let sq = rank * 8 + file;
+                let bit = 1u64 << sq;
+                let side_idx = if ch.is_uppercase() { 0 } else { 1 };
+
+                let board_piece = match ch {
+                    'P' => { self.pawns[0] |= bit; BoardPiece::WPAWN }
+                    'N' => { self.knights[0] |= bit; BoardPiece::WKNIGHT }
+                    'B' => { self.bishops[0] |= bit; BoardPiece::WBISHOP }
+                    'R' => { self.rooks[0] |= bit; BoardPiece::WROOK }
+                    'Q' => { self.queens[0] |= bit; BoardPiece::WQUEEN }
+                    'K' => { self.kings[0] |= bit; BoardPiece::WKING }
+                    'p' => { self.pawns[1] |= bit; BoardPiece::BPAWN }
+                    'n' => { self.knights[1] |= bit; BoardPiece::BKNIGHT }
+                    'b' => { self.bishops[1] |= bit; BoardPiece::BBISHOP }
+                    'r' => { self.rooks[1] |= bit; BoardPiece::BROOK }
+                    'q' => { self.queens[1] |= bit; BoardPiece::BQUEEN }
+                    'k' => { self.kings[1] |= bit; BoardPiece::BKING }
+                    _ => return Err("Invalid FEN: unknown piece character"),
+                };
+
+                self.all_pieces[side_idx] |= bit;
+                self.occupied |= bit;
+                self.mailbox[sq] = board_piece;
+                file += 1;
+            }
+        }
+
+        // 3. Active player
+        self.active_player = match parts[1] {
+            "w" => Side::WHITE,
+            "b" => Side::BLACK,
+            _ => return Err("Invalid FEN: invalid active player"),
+        };
+
+        // 4. Castling rights (0b1111 = KQkq)
+        if parts[2] != "-" {
+            for c in parts[2].chars() {
+                match c {
+                    'K' => self.castling_rights |= 0b0001,
+                    'Q' => self.castling_rights |= 0b0010,
+                    'k' => self.castling_rights |= 0b0100,
+                    'q' => self.castling_rights |= 0b1000,
+                    _ => {}
+                }
+            }
+        }
+
+        // 5. En-passant target square (defaults to 64 when "-")
+        if parts[3] != "-" && parts[3].len() == 2 {
+            let bytes = parts[3].as_bytes();
+            let ep_file = bytes[0].wrapping_sub(b'a');
+            let ep_rank = bytes[1].wrapping_sub(b'1');
+            if ep_file < 8 && ep_rank < 8 {
+                self.en_passant = ep_rank * 8 + ep_file;
+            }
+        }
+
+        // 6. Recompute Zobrist & NNUE accumulator from scratch
+        self.zobrist_hash = self.compute_init_zobrist();
+        self.create_accumulator_from_scratch(accumulators);
+
+        Ok(())
+    }
+    
     // Null Move Pruning Zugzwang
     #[inline]
     pub fn has_major_pieces(&self) -> bool {
@@ -810,14 +915,36 @@ impl ChessBoard {
         // =========================================================================
         // --- ADD GLOBAL CASTLING RIGHTS TO THE INDEX TRACKS (Indices 22528-22531) ---
         // =========================================================================
-        let mut rights = self.castling_rights & 0x0F;
-        while rights != 0 {
-            let idx = CASTLING_BASE + (rights.trailing_zeros() as usize);
-            white_indices[w_count] = idx;
+        let raw_rights = self.castling_rights & 0x0F;
+
+        // Horizontal king-file mirroring flags (true when king is on files E, F, G, H)
+        let mirror_w = ((w_king_sq & 7) >= 4) as u8;
+        let mirror_b = (((b_king_sq ^ 63) & 7) >= 4) as u8;
+
+        // Branchless bit-swap for White's K/Q bits (0 <-> 1) when mirror_w == 1
+        let w_diff = ((raw_rights ^ (raw_rights >> 1)) & 0b0001) * mirror_w;
+        let mirrored_w_part = raw_rights ^ (w_diff | (w_diff << 1));
+
+        // Branchless bit-swap for Black's k/q bits (2 <-> 3) when mirror_b == 1
+        let b_diff = ((mirrored_w_part ^ (mirrored_w_part >> 1)) & 0b0100) * mirror_b;
+        let mirrored_rights = mirrored_w_part ^ (b_diff | (b_diff << 1));
+
+        // White Perspective Castling Loop (bits 0..3 = [wK, wQ, bK, bQ])
+        let mut w_rights = mirrored_rights;
+        while w_rights != 0 && w_count < 35 {
+            let offset = w_rights.trailing_zeros() as usize;
+            white_indices[w_count] = CASTLING_BASE + offset;
             w_count += 1;
-            black_indices[b_count] = idx;
+            w_rights &= w_rights - 1;
+        }
+
+        // Black Perspective Castling Loop (swap low/high 2-bit pairs -> [bK, bQ, wK, wQ])
+        let mut b_rights = ((mirrored_rights >> 2) | (mirrored_rights << 2)) & 0x0F;
+        while b_rights != 0 && b_count < 35 {
+            let offset = b_rights.trailing_zeros() as usize;
+            black_indices[b_count] = CASTLING_BASE + offset;
             b_count += 1;
-            rights &= rights - 1;
+            b_rights &= b_rights - 1;
         }
 
         let weights = &self.nnue_network.l1_weights;
@@ -848,12 +975,15 @@ impl ChessBoard {
         };
 
         // --- STEP 0: ACCUMULATOR MAPPING ---
-        let l2_inputs = &mut buffer.l2_inputs;
+        let (l2_act, l2_opp) = buffer.l2_inputs.split_at_mut(256);
         for i in 0..256 {
-            l2_inputs[i] = active_acc[i].clamp(0, 127) as i8;
-            l2_inputs[i + 256] = opp_acc[i].clamp(0, 127) as i8;
+            l2_act[i] = active_acc[i].clamp(0, 127) as i8;
+        }
+        for i in 0..256 {
+            l2_opp[i] = opp_acc[i].clamp(0, 127) as i8;
         }
 
+        let l2_inputs = &mut buffer.l2_inputs;
         // --- STEP 2: HIDDEN LAYER 2 (512 -> 32) ---
         let l3_inputs = &mut buffer.l3_inputs;
         let l2_weights = &self.nnue_network.l2_weights;
@@ -905,16 +1035,24 @@ impl ChessBoard {
         prev_castle_rights: u8,
         accumulators: &mut AccumulatorHistory,
     ) -> BoardPiece {
+        let move_piece = self.mailbox[mv.start_sq as usize];
+
+        // 1. King moves & Castling change the king bucket/mirroring for the moving side
+        //    and relocate the castling rook—rebuild accumulator cleanly from scratch!
+        if matches!(move_piece, BoardPiece::WKING | BoardPiece::BKING) {
+            let exec_captured = self.execute_move(mv);
+            self.create_accumulator_from_scratch(accumulators);
+            return exec_captured;
+        }
+
         let curr_ply = self.ply;
         let prev_ply = curr_ply - 1;
 
         let w_king_sq = self.kings[Side::WHITE as usize].trailing_zeros() as u8;
         let b_king_sq = self.kings[Side::BLACK as usize].trailing_zeros() as u8;
-
-        let move_piece = self.mailbox[mv.start_sq as usize];
         let moving_side = piece_player(move_piece);
 
-        // 1. Resolve target piece (handles promotions)
+        // 2. Resolve target piece (handles promotions)
         let added_piece = match mv.move_type {
             MoveFlag::PROMOTIONQUEEN  => if moving_side == Side::WHITE { BoardPiece::WQUEEN }  else { BoardPiece::BQUEEN },
             MoveFlag::PROMOTIONROOK   => if moving_side == Side::WHITE { BoardPiece::WROOK }   else { BoardPiece::BROOK },
@@ -923,65 +1061,77 @@ impl ChessBoard {
             _ => move_piece,
         };
 
-        // 2. Capture pre-move target piece before execute_move mutates the mailbox
+        // 3. Capture pre-move target piece before execute_move mutates the mailbox
         let captured_sq = mv.capture_sq;
         let captured_piece = self.mailbox[captured_sq as usize];
 
-        // 3. Execute move so self.castle_rights() is updated by the board's single source of truth
+        // 4. Execute move so self.castle_rights() is updated by the board's single source of truth
         let exec_captured = self.execute_move(mv);
 
-        // 4. Copy parent accumulator frame forward
+        // 5. Fused Copy + Moving Piece Delta (saves 1 full 1KB memory pass per node)
         let (left, right) = accumulators.moves.split_at_mut(curr_ply);
         let prev_acc = &left[prev_ply];
         let curr_acc = &mut right[0];
 
         let curr_white = &mut curr_acc.white;
         let curr_black = &mut curr_acc.black;
-        curr_white.copy_from_slice(&prev_acc.white);
-        curr_black.copy_from_slice(&prev_acc.black);
+        let prev_white = &prev_acc.white;
+        let prev_black = &prev_acc.black;
 
         let weights = &self.nnue_network.l1_weights;
 
-        // 5. Update moving piece across both perspectives
         let w_rem = &weights[get_feature_index(w_king_sq, move_piece, mv.start_sq, false)];
         let w_add = &weights[get_feature_index(w_king_sq, added_piece, mv.end_sq, false)];
         for i in 0..256 {
-            curr_white[i] = curr_white[i].wrapping_add(w_add[i]).wrapping_sub(w_rem[i]);
+            curr_white[i] = prev_white[i].wrapping_add(w_add[i]).wrapping_sub(w_rem[i]);
         }
 
         let b_rem = &weights[get_feature_index(b_king_sq, move_piece, mv.start_sq, true)];
         let b_add = &weights[get_feature_index(b_king_sq, added_piece, mv.end_sq, true)];
         for i in 0..256 {
-            curr_black[i] = curr_black[i].wrapping_add(b_add[i]).wrapping_sub(b_rem[i]);
+            curr_black[i] = prev_black[i].wrapping_add(b_add[i]).wrapping_sub(b_rem[i]);
         }
 
-        // 6. Subtract captured piece from both perspectives
+        // 6. Subtract captured piece from both perspectives (fused NEON SIMD loop)
         if captured_piece != BoardPiece::NONE {
             let w_cap = &weights[get_feature_index(w_king_sq, captured_piece, captured_sq, false)];
             let b_cap = &weights[get_feature_index(b_king_sq, captured_piece, captured_sq, true)];
 
             for i in 0..256 {
                 curr_white[i] = curr_white[i].wrapping_sub(w_cap[i]);
-            }
-            for i in 0..256 {
                 curr_black[i] = curr_black[i].wrapping_sub(b_cap[i]);
             }
         }
 
-        // 7. Subtract lost castling-right features using exact bitmasks (1, 2, 4, 8)
-        let mut lost_rights = prev_castle_rights & !self.castle_rights();
-        while lost_rights != 0 {
-            let offset = lost_rights.trailing_zeros() as usize;
-            let row = &weights[CASTLING_BASE + offset];
+        // 7. Subtract lost castling-right features (with horizontal mirroring & Us/Them swap)
+        let raw_lost = (prev_castle_rights & !self.castle_rights()) & 0x0F;
+        if raw_lost != 0 {
+            let mirror_w = ((w_king_sq & 7) >= 4) as u8;
+            let mirror_b = (((b_king_sq ^ 63) & 7) >= 4) as u8;
 
-            for i in 0..256 {
-                curr_white[i] = curr_white[i].wrapping_sub(row[i]);
-            }
-            for i in 0..256 {
-                curr_black[i] = curr_black[i].wrapping_sub(row[i]);
+            let w_diff = ((raw_lost ^ (raw_lost >> 1)) & 0b0001) * mirror_w;
+            let m_w = raw_lost ^ (w_diff | (w_diff << 1));
+
+            let b_diff = ((m_w ^ (m_w >> 1)) & 0b0100) * mirror_b;
+            let mirrored_lost = m_w ^ (b_diff | (b_diff << 1));
+
+            let mut w_lost = mirrored_lost;
+            while w_lost != 0 {
+                let row = &weights[CASTLING_BASE + (w_lost.trailing_zeros() as usize)];
+                for i in 0..256 {
+                    curr_white[i] = curr_white[i].wrapping_sub(row[i]);
+                }
+                w_lost &= w_lost - 1;
             }
 
-            lost_rights &= lost_rights - 1;
+            let mut b_lost = ((mirrored_lost >> 2) | (mirrored_lost << 2)) & 0x0F;
+            while b_lost != 0 {
+                let row = &weights[CASTLING_BASE + (b_lost.trailing_zeros() as usize)];
+                for i in 0..256 {
+                    curr_black[i] = curr_black[i].wrapping_sub(row[i]);
+                }
+                b_lost &= b_lost - 1;
+            }
         }
 
         exec_captured

@@ -24,6 +24,7 @@ pub const MAX_DEPTH: i8 = 35;
 
 // The other threads the single every 2048 executions
 pub const SEARCH_TIME_LIMIT: u64 = 10;
+pub const MAX_Q_PLY: i16 = 16;
 
 pub const INFINITY: i16 = 32000;
 pub const MATE_VALUE: i16 = 30000;
@@ -36,7 +37,7 @@ pub const MATE_THRESHOLD: i16 = MATE_VALUE - ((MAX_DEPTH * 2) as i16);
 pub const NUM_THREADS: usize = 8;
 
 // Condon-Thompson Bucket Transposition Table
-pub const CACHE_SIZE: usize = 524;
+pub const CACHE_SIZE: usize = 512;
 
 // Max Game Moves
 pub const MAX_GAME_MOVES: usize = 256;
