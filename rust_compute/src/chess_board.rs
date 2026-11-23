@@ -1037,14 +1037,6 @@ impl ChessBoard {
     ) -> BoardPiece {
         let move_piece = self.mailbox[mv.start_sq as usize];
 
-        // 1. King moves & Castling change the king bucket/mirroring for the moving side
-        //    and relocate the castling rook—rebuild accumulator cleanly from scratch!
-        if matches!(move_piece, BoardPiece::WKING | BoardPiece::BKING) {
-            let exec_captured = self.execute_move(mv);
-            self.create_accumulator_from_scratch(accumulators);
-            return exec_captured;
-        }
-
         let curr_ply = self.ply;
         let prev_ply = curr_ply - 1;
 
@@ -1166,7 +1158,6 @@ impl ChessBoard {
     pub fn compute_pinned_mask_with_custom_state(&self, custom_occupancy: u64, friendly_pieces: u64, stm: usize) -> u64 {
         let opponent_side = 1 - stm;
         let king_sq = self.kings[stm].trailing_zeros() as u8;
-        if king_sq >= 64 { return 0; }
 
         // 1. Gather all sliding pinners using X-ray lookups matching the custom sandbox layout
         let friendly_blockers_ortho = rook_attack_paths(king_sq, custom_occupancy) & friendly_pieces;
@@ -1398,17 +1389,11 @@ impl ChessBoard {
         occupancy &= !(1u64 << from_sq);
         occupancy &= !(1u64 << capture_sq);
 
-        if capture_sq == target_sq {
-            occupancy |= 1u64 << target_sq;
-        }
 
         let mut side_pieces = [self.all_pieces[0], self.all_pieces[1]];
         side_pieces[stm] &= !(1u64 << from_sq);
         side_pieces[1 - stm] &= !(1u64 << capture_sq);
-        
-        if capture_sq == target_sq {
-            occupancy |= 1u64 << target_sq;
-        }
+        let mut occupancy = (side_pieces[0] | side_pieces[1]) | (1u64 << target_sq);
 
         let initial_pinned_white = self.compute_pinned_mask_with_custom_state(self.occupied, self.all_pieces[0], 0);
         let initial_pinned_black = self.compute_pinned_mask_with_custom_state(self.occupied, self.all_pieces[1], 1);

@@ -667,9 +667,22 @@ impl SearchWorker {
             let is_killer = *forward_move == self.killer_move_table[ply_idx][0]
                 || *forward_move == self.killer_move_table[ply_idx][1];
 
-            // Compute SEE before moving (needed for both pruning and surgical depth-1 extension)
-            let exact_see_score = if is_capture {
-                self.chess_board.static_exchange_evaluation(*forward_move)
+            // Skip SEE completely unless either:
+            //  (a) Frontier extension at depth == 1 needs to check `exact_see_score > 0`, OR
+            //  (b) Non-first move with king not in check needs SEE pruning / tactical futility
+            let need_see = is_capture
+                && ((depth == 1 && ply < 16) || (legal_moves_played > 0 && !king_in_check));
+
+            let exact_see_score = if need_see {
+                let victim_val = piece_value(self.chess_board.mailbox[forward_move.capture_sq as usize]);
+                let attacker_val = piece_value(self.chess_board.mailbox[forward_move.start_sq as usize]);
+
+                // MVV-LVA short-circuit: capturing a strictly higher-value piece is ALWAYS SEE > 0
+                if victim_val > attacker_val {
+                    victim_val - attacker_val
+                } else {
+                    self.chess_board.static_exchange_evaluation(*forward_move)
+                }
             } else {
                 0
             };
@@ -1020,24 +1033,9 @@ impl SearchWorker {
             only_tactical,
         );
 
-        // 5. Quiescence Search (Wider Delta Pruning Margin)
+        // 5. Quiescence Search (MVV-LVA Short-Circuit + Delta Pruning)
         for forward_move in &gen_moves {
             // --- PRE-MOVE TACTICAL PRUNING GATES ---
-            if !king_in_check
-                && !matches!(forward_move.move_type, MoveFlag::PROMOTIONQUEEN)
-            {
-                // 1. Strict Tactical Gate: Static exchange evaluation is exact and NNUE-independent
-                let exact_see_score = self.chess_board.static_exchange_evaluation(*forward_move);
-                if exact_see_score < 0 {
-                    continue;
-                }
-
-                // 2. Wider Delta Pruning Gate
-                if pruning_baseline + exact_see_score + 200 < alpha {
-                    continue;
-                }
-            }
-            
             // --- STATE COMMITMENT & LEGALITY FILTER ---
             self.process_forward_move(*forward_move);
             if self.chess_board.is_previous_player_king_in_check() {
