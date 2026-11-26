@@ -8,7 +8,7 @@ pub const CASTLING_BASE: usize = 22528;
 #[derive(Clone, Copy, Debug)]
 // The NNUE L1 / L2 and L3 weights should align to avoid expensive cache splits
 pub struct NnueNetwork {
-    // i16 -> 2 bytes. Updated dimension for the 16-bucket pattern (32 * 64 * 11) + 4 castling flags
+    // i16 -> 2 bytes. Updated dimension for the 32-bucket pattern (32 * 64 * 11) + 4 castling flags
     pub l1_weights: [[i16; 256]; 22532],
     
     // i8 -> 1 byte. 512 / 128 -> 4 Cache Lines * 32

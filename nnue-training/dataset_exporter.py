@@ -1,14 +1,19 @@
 import os
 import sys
 import glob
+import random
 import numpy as np
-import math
+import argparse
 
 import chess
 import multiprocessing
 import pandas as pd
 import pyarrow.parquet as pq
+
 from concurrent.futures import ProcessPoolExecutor, as_completed
+os.environ.setdefault("RAYON_NUM_THREADS", "2")
+
+import rust_compute
 
 # --- INITIALIZATION ENGINE CONSTANTS ---
 DATA_SIZE = 2_000_000
@@ -28,112 +33,15 @@ PIECE_MAP = {
     'p': 6, 'b': 7, 'n': 8, 'r': 9, 'q': 10, 'k': 11
 }
 
+NUM_WORKERS = 5
+
 # --- DIRECTORY PATH AUTO-RESOLUTION ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__)) if '__file__' in locals() else os.getcwd()
 BINARY_OUTPUT_DIR = os.path.join(SCRIPT_DIR, "processed_shards")
 INPUT_DIR = "data"
 
-def static_evaluate(b: chess.Board) -> int:
-    """Side-to-move pure material evaluation optimized using raw bitboards."""
-    score = 0
-    stm = b.turn
-    opp = not stm
-    
-    # Fast bitboard counts with zero dictionary allocations
-    score += len(b.pieces(chess.PAWN, stm)) * 100
-    score -= len(b.pieces(chess.PAWN, opp)) * 100
-    
-    score += len(b.pieces(chess.KNIGHT, stm)) * 300
-    score -= len(b.pieces(chess.KNIGHT, opp)) * 300
-    
-    score += len(b.pieces(chess.BISHOP, stm)) * 300
-    score -= len(b.pieces(chess.BISHOP, opp)) * 300
-    
-    score += len(b.pieces(chess.ROOK, stm)) * 500
-    score -= len(b.pieces(chess.ROOK, opp)) * 500
-    
-    score += len(b.pieces(chess.QUEEN, stm)) * 900
-    score -= len(b.pieces(chess.QUEEN, opp)) * 900
-
-    score += len(b.pieces(chess.KING, stm)) * 20000
-    score -= len(b.pieces(chess.KING, opp)) * 20000
-            
-    return score
-
-def is_unsafe_for_training(board: chess.Board, tolerance: int = 40) -> bool:
-    """
-    Validates training safety by verifying tactical deadness for both STM.
-    """
-    # If q-search discovers a sequence that actively wins material for you
-    static_A = static_evaluate(board)
-    alpha_A = static_A + tolerance
-    q_score_A = q_search(board, alpha_A, float('inf'))
-    
-    if q_score_A > alpha_A:
-        return True
-
-    # The position is perfectly stable for STM
-    return False
-
-def q_search(b: chess.Board, alpha: float, beta: float, depth: int = 0, max_depth: int = 24) -> int:
-    """
-    Fail-Soft Alpha-Beta Quiescence Search with explicit terminal state resolution.
-    """
-    if depth > 0 and b.is_repetition(2):
-        return 0
-
-    if depth >= max_depth:
-        return static_evaluate(b)
-    
-    in_check = b.is_check()
-
-    if not in_check:
-        best_score = static_evaluate(b)
-        if best_score >= beta:
-            return best_score
-        
-        if best_score > alpha:
-            alpha = best_score
-    else:
-        best_score = -float('inf')
-
-    moves_played = 0
-
-    # Generate and filter forcing moves
-    for move in b.generate_pseudo_legal_moves(b.turn):
-        if in_check or b.is_capture(move) or move.promotion:
-            if not b.is_legal(move):
-                continue
-
-            moves_played += 1
-            b.push(move)
-            try:
-                score = -q_search(b, -beta, -alpha, depth + 1, max_depth)
-            except BaseException as e:
-                # Triggers only when a crash occurs somewhere down this sub-tree branch
-                print(f"\n[!] Problem inside q_search at depth {depth} following move {move}: {type(e).__name__} -> {e}")
-                raise
-            finally:
-                b.pop()
-
-            if score > best_score:
-                best_score = score
-            
-            if score > alpha:
-                alpha = score
-                # FAIL-SOFT LOWER BOUND CUTOFF:
-                if alpha >= beta:
-                    return best_score
-
-    # --- TERMINAL RULES LAYER ---
-    if moves_played == 0:
-        if in_check:
-            return -20000 + depth
-        
-        if b.is_stalemate():
-            return 0 
-    
-    return best_score
+# Compute Attack Tables
+rust_compute.init_attack_tables()
 
 # The 32-bucket coordinate mapping layout array with strict horizontal mirroring.
 KING_BUCKET_MAP = [
@@ -344,195 +252,233 @@ def save_parquet_shard(batch_records, output_dir, base_name, shard_idx):
 # =====================================================================
 # WORKER EXECUTION TASK
 # =====================================================================
-def run_parquet_cleaning_pass(parquet_path, output_dir, samples_per_file=DATA_SIZE):
+def run_parquet_cleaning_pass(
+    file_path: str,
+    output_dir: str,
+    samples_per_file: int,
+    cut: bool = False
+) -> int:
     """
-    Processes a single parquet file in an isolated worker process using 
-    memory-bounded row-group streaming to flatline RAM utilization.
+    Processes a single raw Parquet file in 65,536-row batches using vectorized
+    Pandas pre-filters + multi-threaded Rust 30-cp NNUE qsearch validation.
     """
-    base_name = os.path.splitext(os.path.basename(parquet_path))[0]
-    os.makedirs(output_dir, exist_ok=True)
-        
+    rust_compute.init_attack_tables()
+
+    base_name = os.path.splitext(os.path.basename(file_path))
+    parquet_file = pq.ParquetFile(file_path)
+
     batch_records = []
-    file_processed_count = 0
     local_shard_counter = 0
+    file_processed_count = 0
 
-    print(f"[Start] Worker streaming shard: {parquet_path}")
-        
-    try:
-        # Open file handler without pulling any data into RAM yet
-        parquet_file = pq.ParquetFile(parquet_path)
-    except Exception as e:
-        print(f"[Error] Failed to open {parquet_path}: {e}")
-        return 0
-
-    # Stream the file in manageable memory chunks (65,536 rows at a time)
-    # Only loads the requested 4 columns into memory per batch
-    for pyarrow_batch in parquet_file.iter_batches(batch_size=65536, columns=['fen', 'cp', 'depth', 'mate', 'knodes']):
-        
-        # Zero-copy conversion of just this specific chunk to a lightweight DataFrame
+    for pyarrow_batch in parquet_file.iter_batches(
+        batch_size=65536, columns=["fen", "cp", "depth", "mate", "knodes"]
+    ):
         chunk_df = pyarrow_batch.to_pandas()
 
-        for idx, row in chunk_df.iterrows():
-            # --- Robust Data Extraction & Type Safety ---
-            fen = row.get("fen")
-            
-            # Use safe type conversion fallback to avoid pandas float/NaN vs string type issues
-            fen_str = str(fen).strip() if fen is not None and not pd.isna(fen) else ""
+        # 1. Vectorized structural FEN & workload pre-filtering
+        chunk_df = chunk_df[chunk_df["fen"].notna()].copy()
+        chunk_df["fen"] = chunk_df["fen"].astype(str).str.strip()
 
-            # Standard Python/Pandas NaN conversions to safe float/int/None primitives
-            raw_score = None if pd.isna(row.get("cp")) else float(row.get("cp"))
-            mate_val = None if pd.isna(row.get("mate")) else int(row.get("mate"))
+        valid_fen_mask = (
+            ~chunk_df["fen"].str.contains("\x00", regex=False)
+            & (chunk_df["fen"].str.count("/") == 7)
+            & (chunk_df["fen"].str.split().str.len() >= 4)
+        )
+        chunk_df = chunk_df[valid_fen_mask]
+        if chunk_df.empty:
+            continue
 
-            depth_val = 0 if pd.isna(row.get("depth")) else int(row.get("depth"))
-            knodes = 0 if pd.isna(row.get("knodes")) else int(row.get("knodes"))
+        if not cut and "depth" in chunk_df.columns and "knodes" in chunk_df.columns:
+            depth_arr = chunk_df["depth"].fillna(0).astype(int).to_numpy()
+            knodes_arr = chunk_df["knodes"].fillna(0).astype(int).to_numpy()
 
-            # --- Structural FEN Validation (Fast Failure Guards) ---
-            # 1. Base Type check & string cleaning
-            if not isinstance(fen, str) or '\x00' in fen_str:
+            valid_work_mask = np.array(
+                [not is_invalid_training_row(d, k) for d, k in zip(depth_arr, knodes_arr)],
+                dtype=bool,
+            )
+            chunk_df = chunk_df[valid_work_mask]
+            depth_arr = depth_arr[valid_work_mask]
+            knodes_arr = knodes_arr[valid_work_mask]
+            if chunk_df.empty:
+                continue
+        else:
+            n = len(chunk_df)
+            depth_arr = np.full(n, 26, dtype=int)
+            knodes_arr = np.full(n, 1000, dtype=int)
+
+        # 2. Vectorized Mate & Positional Centipawn Scoring
+        has_mate = chunk_df["mate"].notna() & (chunk_df["mate"] != 0)
+        has_cp = ~has_mate & chunk_df["cp"].notna()
+        valid_score_mask = (has_mate | has_cp).to_numpy()
+
+        chunk_df = chunk_df[valid_score_mask]
+        depth_arr = depth_arr[valid_score_mask]
+        if chunk_df.empty:
+            continue
+
+        mate_vals = chunk_df["mate"].to_numpy(dtype=np.float64)
+        cp_vals = chunk_df["cp"].to_numpy(dtype=np.float64)
+
+        is_mate_row = ~np.isnan(mate_vals)
+        mate_sign = np.sign(mate_vals)
+        mate_scores = mate_sign * (30000.0 - ((np.abs(mate_vals) - 1.0) * 20.0))
+        cp_scores = np.round(cp_vals)
+
+        active_pawn_scores = np.where(is_mate_row, mate_scores, cp_scores)
+
+        # 3. Terminal State Gate (Check / Stalemate / Insufficient Material)
+        candidate_fens = []
+        candidate_boards = []
+        candidate_scores = []
+        candidate_depths = []
+
+        for fen_str, score, depth_val in zip(
+            chunk_df["fen"].tolist(), active_pawn_scores.tolist(), depth_arr.tolist()
+        ):
+            board = chess.Board(fen_str)
+
+            # 1. Standard-chess piece count limits (blocks 35-piece stress-test mazes)
+            if (
+                board.occupied.bit_count() > 32
+                or board.occupied_co[chess.WHITE].bit_count() > 16
+                or board.occupied_co[chess.BLACK].bit_count() > 16
+                or board.pawns.bit_count() > 16
+            ):
                 continue
 
-            # 2. Basic layout sanity (8 rank slots separated by 7 slashes)
-            if fen_str.count('/') != 7:
+            # 2. Full python-chess legality validation (kings, backrank pawns, castling, ep, opposite check)
+            if not board.is_valid():
                 continue
 
-            # 3. Component check: A legal FEN string must have at least 4 components 
-            #    (Placement, Active Color, Castling Rights, En Passant Target)
-            fen_parts = fen_str.split()
-            if len(fen_parts) < 4:
+            if (
+                board.is_check()
+                or board.is_stalemate()
+                or board.is_insufficient_material()
+            ):
                 continue
 
-            # Raw_score -> Positive is White Winning/ Negative is Black Winning
-            # Mate_Score -> Positive is White has Winning Checkmate / Negative is Black has Winning Checkmate
-            # =========================================================================
-            # 1. THE MATE ENGINE: TARGETED ENDGAME FILTERING (UNWARPED)
-            # =========================================================================
-            if mate_val is not None:
-                mate_count = float(mate_val)
-                if mate_count == 0:
+            candidate_fens.append(fen_str)
+            candidate_boards.append(board)
+            candidate_scores.append(score)
+            candidate_depths.append(int(depth_val))
+
+        if not candidate_fens:
+            continue
+
+        # 4. Batched Rust 50-cp NNUE Q-Search Safety Gate
+        NNUE_MODEL_PATH = os.path.abspath(
+            os.path.join(SCRIPT_DIR, "..", "nnue-training", "nnue_weights.bin")
+        )
+
+        # Inside run_parquet_cleaning_pass:
+        unsafe_flags = rust_compute.is_unsafe_batch(
+            candidate_fens, NNUE_MODEL_PATH
+        )
+
+        # 5. Perspective Feature Generation & Shard Batching
+        for fen_str, board, active_pawn_score, depth_val, volatility_target in zip(
+            candidate_fens,
+            candidate_boards,
+            candidate_scores,
+            candidate_depths,
+            unsafe_flags,
+        ):
+            is_black_turn = board.turn == chess.BLACK
+            active_player_target = (
+                -active_pawn_score if is_black_turn else active_pawn_score
+            )
+
+            if cut:
+                # Subsample faint-signal positions (< 50 cp) at 20% to save space,
+                # while keeping 100% of the 50+ cp surge
+                if volatility_target < 1.0 and random.random() >= 0.2:
                     continue
 
-                mate_sign = 1.0 if mate_count > 0 else -1.0
-                abs_mate = abs(mate_count)
-
-                # --- Mate Sequence --- #
-                centipawn_score = 30000.0 - ((abs_mate - 1.0) * 20.0)
-                active_pawn_score = mate_sign * centipawn_score
-
-            # =========================================================================
-            # 2.  THE POSITIONAL ENGINE: PURE LINEAR VALUE WITH STRICT HARD CUTOFF
-            # =========================================================================
-            elif raw_score is not None:
-                active_pawn_score = round(float(raw_score))
-
+                active_player_target = volatility_target
             else:
-                continue
+                # Hard filter for static NNUE training: reject anything in the 50+ cp volatile range
+                if volatility_target >= 1.0:
+                    continue
 
-            # =========================================================================
-            # 3.  GLOBAL QUALITY GATE & VALIDATION FIREWALL
-            # Centralized scope forces ALL entries to satisfy high-integrity parameters
-            # =========================================================================
-            board = chess.Board(fen)
-            if board.is_check() or board.is_stalemate() or board.is_insufficient_material():
-                continue
-
-            # Check workload limits and analytical constraints
-            if is_invalid_training_row(depth_val, knodes):
-                continue
-
-            # Filter out highly volatile tactical configurations via Q-Search
-            if is_unsafe_for_training(board):
-                continue
-
-            # =========================================================================
-            # 4. PERSPECTIVE FEATURE GENERATION & SHARD BATCHING Matrix
-            # =========================================================================
-            is_black_turn = (board.turn == chess.BLACK)
-            active_player_target = -active_pawn_score if is_black_turn else active_pawn_score
-
-            active_indices, passive_indices = parse_fen_to_features(fen)
+            active_indices, passive_indices = parse_fen_to_features(fen_str)
             active_orig, passive_orig = pad_indices(active_indices, passive_indices)
 
-            rotated_board = board.mirror().transform(chess.flip_horizontal)
-            rotated_fen = rotated_board.fen()
-
-            active_rot, passive_rot = parse_fen_to_features(rotated_fen)
-            active_rot_pad, passive_rot_pad = pad_indices(active_rot, passive_rot)
-
-            # Check capacity constraints before extending the list
-            if len(batch_records) + 2 > samples_per_file:
-                save_parquet_shard(batch_records, output_dir, base_name, local_shard_counter)
+            if len(batch_records) + 1 > samples_per_file:
+                save_parquet_shard(
+                    batch_records, output_dir, base_name, local_shard_counter
+                )
                 file_processed_count += len(batch_records)
                 batch_records = []
                 local_shard_counter += 1
-                    
-            # Append rotated perspective
-            fen_parts_rot = rotated_fen.split()
-            clean_rotated_fen = " ".join(fen_parts_rot[0:3])
-            batch_records.append({
-                'active_indices': active_rot_pad,
-                'passive_indices': passive_rot_pad,
-                'target': active_player_target,
-                'depth': depth_val,
-                'fen': clean_rotated_fen,
-            })
 
-            # Append original perspective
-            fen_parts_orig = fen.split()
-            clean_orig_fen = " ".join(fen_parts_orig[0:3])
-            batch_records.append({
-                'active_indices': active_orig,
-                'passive_indices': passive_orig,
-                'target': active_player_target,
-                'depth': depth_val,
-                'fen': clean_orig_fen,
-            })
+            clean_orig_fen = " ".join(fen_str.split()[:3])
+            batch_records.append(
+                {
+                    "active_indices": active_orig,
+                    "passive_indices": passive_orig,
+                    "target": active_player_target,
+                    "depth": depth_val,
+                    "fen": clean_orig_fen,
+                }
+            )
 
-    # Flush remaining records from memory
+    # Flush remaining records
     if len(batch_records) > 0:
         save_parquet_shard(batch_records, output_dir, base_name, local_shard_counter)
         file_processed_count += len(batch_records)
 
-    print(f"[Finished] Shard {base_name} complete. Total cleaned: {file_processed_count}")
+    # Delete the source file
+    try:
+        os.remove(file_path)
+        print(f"[Deleted] Removed source file: {file_path}")
+    except OSError as e:
+        print(f"[Error] Could not delete {file_path}: {e}")
+
+    print(
+        f"[Finished] Shard {base_name} complete. Total cleaned: {file_processed_count}"
+    )
     return file_processed_count
 
 # =====================================================================
 # GLOBAL ENVELOPE EXECUTION MAIN FUNCTION
 # =====================================================================
-def main():
-    print("=====================================================================")
-    print("       COMMENCING MULTI-THREADED MULTI-PARQUET EXPORT PASS           ")
-    print("=====================================================================")
-        
-    raw_parquet_pattern = os.path.join(SCRIPT_DIR, INPUT_DIR, "data_*.parquet")
+def main(cut=False):
+    os.makedirs(BINARY_OUTPUT_DIR, exist_ok=True)
+
+    raw_parquet_pattern = os.path.join(SCRIPT_DIR, INPUT_DIR, "*.parquet")
     raw_files = sorted(glob.glob(raw_parquet_pattern))
-        
+
     if not raw_files:
-        print(f"[CRITICAL ERROR] No source Parquet files detected matching *.parquet")
+        print("[CRITICAL ERROR] No source Parquet files detected matching *.parquet")
         print("Please run your shell download script to seed the data_dedup/ directory first!")
         sys.exit(1)
-            
+
     print(f"Detected {len(raw_files)} raw shards ready for feature cleaning.")
-    print(f"Spawning 5 worker processes")
-    
+    print(f"Spawning {NUM_WORKERS} worker processes (cut={cut})")
+
     total_global_processed = 0
 
-    # Process Pool Executor manages CPU-bound processing scales automatically
-    with ProcessPoolExecutor(max_workers=5) as executor:
-        # Submit all tasks to the process pool
+    with ProcessPoolExecutor(max_workers=NUM_WORKERS) as executor:
         futures = {
-            executor.submit(run_parquet_cleaning_pass, file_path, BINARY_OUTPUT_DIR, DATA_SIZE): file_path 
-            # Submitting tasks as generators
+            executor.submit(
+                run_parquet_cleaning_pass, file_path, BINARY_OUTPUT_DIR, DATA_SIZE, cut
+            ): file_path
             for file_path in raw_files
         }
-        
-           # As workers finish execution, grab metrics dynamically
+
         for future in as_completed(futures):
             file_path = futures[future]
             try:
                 count = future.result()
                 total_global_processed += count
             except Exception as exc:
-                print(f"[CRITICAL WORKER EXCEPTION] {file_path} generated an exception: {exc}")
+                print(
+                    f"[CRITICAL WORKER EXCEPTION] {file_path} generated an exception: {exc}"
+                )
+
+    print(f"\n[ALL COMPLETE] Total cleaned positions generated: {total_global_processed:,}")
+
                 
     print("\n=====================================================================")
     print("   ALL RAW PARQUET SHARDS FULLY GUARDRAILED, CLEANED, AND EXPORTED   ")
@@ -543,4 +489,12 @@ if __name__ == "__main__":
     if sys.platform == "darwin":
         multiprocessing.set_start_method("spawn", force=True)
         
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--cut",
+        action="store_true",
+        help="Enable cut mode (defaults to False)",
+    )
+    args = parser.parse_args()
+
+    main(cut=args.cut)

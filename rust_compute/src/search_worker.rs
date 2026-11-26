@@ -73,18 +73,50 @@ impl SearchWorker {
         }
     }
 
+    pub fn compute_volatility_target(&mut self, fen: &str) -> f32 {
+        // 1. Reset per-position traversal & node counters cleanly
+        self.nodes_processed = 0;
+        self.position_stack_len = 0;
+        self.history_index = 0;
+        self.age = self.age.wrapping_add(1);
+
+        // 1. Load FEN & refresh self.board_accumulator
+        let _ =  self.chess_board.set_fen(fen, &mut self.board_accumulator);
+
+        // 2. Static NNUE evaluation
+        let static_a: i16 = self.chess_board.evaluate(
+            &self.board_accumulator,
+            &mut self.thread_buffer,
+        );
+
+        // 3. Window [static_a, static_a + 50]
+        let alpha = static_a;
+        let beta = static_a.saturating_add(50);
+
+        let search_res = self.negamax(
+            2,
+            0,
+            alpha,
+            beta,
+            ForwardMove::NULL_MOVE,
+            false,
+        );
+
+        // 5. Aggressive exponential ramp over [0.0, 50.0] (k = 8.0)
+        const K: f32 = 8.0;
+        let delta = ((search_res.score - static_a) as f32).clamp(0.0, 50.0);
+        (((K * (delta / 50.0)).exp() - 1.0) / (K.exp() - 1.0)).min(1.0)
+
+    }
+
     #[inline(always)]
     fn get_aspiration_delta(score: i16) -> i16 {
         let abs_score = score.saturating_abs();
-        if abs_score <= 250 {
-            15
-        } else if abs_score <= 400 {
-            25
-        } else {
-            45
-        }
+        22 + ((abs_score > 100) as i16) * 12
+           + ((abs_score > 250) as i16) * 18
+           + ((abs_score > 450) as i16) * 28
     }
-
+    
     // Search Entry Point
     pub fn root_search(&mut self, engine_age: i8) -> (ForwardMove, usize, usize) {
         self.nodes_processed = 0;
@@ -106,7 +138,7 @@ impl SearchWorker {
 
             let mut result = self.negamax(depth, 0, alpha, beta, best_move_overall, true);
 
-            // Fail-soft gradual aspiration widening loop
+           // Fail-soft gradual aspiration widening loop
             if !result.was_aborted && !self.stop_signal.load(Ordering::Relaxed) {
                 while result.score <= alpha || result.score >= beta {
                     if result.score <= alpha {
@@ -118,8 +150,12 @@ impl SearchWorker {
                             result.score.saturating_sub(delta)
                         };
                     } else if result.score >= beta {
-                        // Fail-high: lock alpha at the exact proven score, widen beta upward
-                        alpha = result.score;
+                        // Save the proven better move immediately in case time expires during re-search
+                        if result.best_move != ForwardMove::NULL_MOVE {
+                            best_move_overall = result.best_move;
+                        }
+
+                        // Keep alpha intact to avoid fail-soft overshoot causing a false fail-low
                         beta = if delta >= 200 {
                             INFINITY
                         } else {
@@ -465,15 +501,19 @@ impl SearchWorker {
 
         let static_eval = self.static_eval();
 
-        // 4. Reverse Futility Pruning (Non-PV nodes, standard linear margin)
+        // 4. Reverse Futility Pruning (Non-PV nodes, confidence-scaled linear margin)
         let is_pv = beta - alpha > 1;
+        let is_high_confidence = static_eval.abs() <= 100;
+        let hc = is_high_confidence as i16;
+        let max_rfp_depth = 3 + (hc as i8);
+
         if !is_pv
-            && depth <= 3
+            && depth <= max_rfp_depth
             && !king_in_check
             && beta.abs() < MATE_THRESHOLD
         {
-            let rfp_margin = (65 * depth as i16) + 15;
-
+            let rfp_margin = ((65 - hc * 20) * depth as i16) + (40 - hc * 5);
+            
             if static_eval - rfp_margin >= beta {
                 let aborted = self.stop_signal.load(Ordering::Relaxed);
                 let fail_soft_score = static_eval - rfp_margin;
@@ -564,151 +604,211 @@ impl SearchWorker {
         }
 
         let mut legal_moves_played = 0;
-        let mut moves_tried: i8 = 0;
-        let mut best_move = ForwardMove::NULL_MOVE;   
+        let mut best_move = ForwardMove::NULL_MOVE;
         let mut best_score = -MATE_VALUE;
 
         let mut gen_moves = ArrayVec::<ForwardMove, 256>::new();
         self.chess_board.generate_moves(
-            &mut gen_moves, pv_move_hint, tt_hint,
-            ply, &self.killer_move_table, false)
-        ;
+            &mut gen_moves,
+            pv_move_hint,
+            tt_hint,
+            ply,
+            &self.killer_move_table,
+            false,
+        );
 
-        // 6. Move Search Loop
-        let see_threshold = if is_pv { -50 * depth as i16 } else { 0 };
-        let can_tactical_prune = !king_in_check && depth <= 4;
-        let tactical_margin = 35 + (50 * depth as i16);
+        // 6. Move Search Loop (Branchless)
+        let is_high_confidence = static_eval.abs() <= 100;
+        let can_prune_safely = !is_pv & !king_in_check & (alpha.abs() < MATE_THRESHOLD - 256);
 
-        let can_lmp = !is_pv && !king_in_check && depth <= 3;
-        let lmp_limit = 3 + (depth * depth);
+        // Tactical capture futility: 45 when high-confidence, 90 otherwise
+        let can_tactical_prune = can_prune_safely & (depth <= 4);
+        let base_tactical_margin = 105 - (is_high_confidence as i16) * 45;
+        let tactical_margin = base_tactical_margin + (60 * depth as i16);
+
+        // Late Move Pruning (LMP): tighter limit when high-confidence & trailing alpha by > 60 cp
+        let can_lmp = can_prune_safely & (depth <= 3);
+        let depth_sq = depth * depth;
+        let tighten_lmp = (is_high_confidence & (static_eval + 65 < alpha)) as i8;
+        let lmp_limit = (3 + depth_sq) - tighten_lmp * (1 + (depth_sq + 1) / 2);
+
         let ply_idx = (ply as usize) & 127;
 
         for forward_move in &gen_moves {
             let is_quiet = matches!(forward_move.move_type, MoveFlag::MOVE);
+            let is_capture = matches!(forward_move.move_type, MoveFlag::CAPTURE | MoveFlag::ENPASSANT);
+            let is_promotion = matches!(
+                forward_move.move_type,
+                MoveFlag::PROMOTIONQUEEN
+                    | MoveFlag::PROMOTIONROOK
+                    | MoveFlag::PROMOTIONBISHOP
+                    | MoveFlag::PROMOTIONKNIGHT
+            );
             let is_killer = *forward_move == self.killer_move_table[ply_idx][0]
                 || *forward_move == self.killer_move_table[ply_idx][1];
 
-            // --- LATE MOVE PRUNING (LMP): Skip hopeless late quiet moves near the horizon ---
-            if can_lmp
-                && is_quiet
-                && !is_killer
-                && moves_tried > lmp_limit
-                && alpha.abs() < MATE_THRESHOLD - 256
-            {
-                continue;
-            }
+            // Skip SEE completely unless either:
+            //  (a) Frontier extension at depth == 1 needs to check `exact_see_score > 0`, OR
+            //  (b) Non-first move with king not in check needs SEE pruning / tactical futility
+            let need_see = is_capture
+                && ((depth == 1 && ply < 16) || (legal_moves_played > 0 && !king_in_check));
 
-            // --- PRE-MOVE TACTICAL CAPTURE PRUNING ---
-            if can_tactical_prune
-                && moves_tried > 0
-                && alpha.abs() < MATE_THRESHOLD - 256
-                && matches!(forward_move.move_type, MoveFlag::CAPTURE | MoveFlag::ENPASSANT)
-            {
-                let exact_see_score = self.chess_board.static_exchange_evaluation(*forward_move);
+            let exact_see_score = if need_see {
+                let victim_val = piece_value(self.chess_board.mailbox[forward_move.capture_sq as usize]);
+                let attacker_val = piece_value(self.chess_board.mailbox[forward_move.start_sq as usize]);
 
-                // 1. Strict Tactical Gate: Drop losing exchanges on non-PV nodes (or severe blunders on PV)
-                if exact_see_score < see_threshold {
-                    continue;
+                // MVV-LVA short-circuit: capturing a strictly higher-value piece is ALWAYS SEE > 0
+                if victim_val > attacker_val {
+                    victim_val - attacker_val
+                } else {
+                    self.chess_board.static_exchange_evaluation(*forward_move)
                 }
-
-                // 2. Linear Tactical Futility Gate
-                if static_eval + exact_see_score + tactical_margin < alpha {
-                    continue;
-                }
-            }
+            } else {
+                0
+            };
 
             self.process_forward_move(*forward_move);
 
-            // Pseudo legal move exposes check, undo move
+            // Pseudo-legal move exposes own king to check: undo and skip
             if self.chess_board.is_previous_player_king_in_check() {
                 self.process_backward_move();
                 continue;
             }
 
-            legal_moves_played += 1;
-            moves_tried += 1;
+            let gives_check_after_move = self.chess_board.is_in_check();
 
+            // 2. Post-Move Pruning Gates (now that we know for free if the move gives check)
+            if legal_moves_played > 0 && !gives_check_after_move {
+                // Late Move Pruning (LMP)
+                if can_lmp && is_quiet && !is_killer && legal_moves_played > lmp_limit {
+                    self.process_backward_move();
+                    continue;
+                }
+
+                // Linear Tactical Futility Gate
+                if can_tactical_prune
+                    && is_capture
+                    && static_eval + exact_see_score + tactical_margin < alpha
+                {
+                    self.process_backward_move();
+                    continue;
+                }
+            }
+
+            legal_moves_played += 1;
+
+            // 3. Surgical Frontier Extension:
+            // Only extends at depth == 1 on uncompensated captures (SEE > 0) or promotions,
+            // guaranteeing a full-width opponent reply against poisoned-pawn fork traps
+            // while avoiding depth explosion on routine SEE == 0 trades.
+            let extend_frontier = (depth == 1)
+                & ((is_capture & (exact_see_score > 0)) | is_promotion);
+
+            let next_depth = (depth - 1) + (extend_frontier as i8);
+
+            // 4. Principal Variation Search (PVS) & Late Move Reductions (LMR)
             let mut score;
 
-            // 1. FIRST MOVE (PV Move): Search with full window immediately
             if legal_moves_played == 1 {
-                let search_result = self.negamax(depth - 1, ply + 1, -beta, -alpha, ForwardMove::NULL_MOVE, true);
-                score = -search_result.score;
-
+                let search_result = self.negamax(
+                    next_depth,
+                    ply + 1,
+                    -beta,
+                    -alpha,
+                    ForwardMove::NULL_MOVE,
+                    true,
+                );
                 if search_result.was_aborted {
                     self.process_backward_move();
                     return SearchResult { score: 0, best_move: ForwardMove::NULL_MOVE, was_aborted: true };
                 }
+                score = -search_result.score;
             } else {
-                // 2. SUBSEQUENT MOVES: Run LMR or Scout verification
-                let lmr_eligibility = depth >= 3
-                    && moves_tried > 3
+                let lmr_eligibility = !extend_frontier
+                    && depth >= 3
+                    && legal_moves_played > 3
                     && !king_in_check
                     && is_quiet
-                    && !self.chess_board.is_in_check();
+                    && !gives_check_after_move;
 
+                let mut search_depth = next_depth;
                 if lmr_eligibility {
-                    let reduced_depth = self.get_reduced_depth(depth, moves_tried, is_pv, is_killer);
-                    let search_result = self.negamax(reduced_depth, ply + 1, -alpha - 1, -alpha, ForwardMove::NULL_MOVE, true);
-                    score = -search_result.score;
+                    search_depth = self.get_reduced_depth(depth, legal_moves_played, is_pv, is_killer);
 
-                    if search_result.was_aborted {
-                        self.process_backward_move();
-                        return SearchResult { score: 0, best_move: ForwardMove::NULL_MOVE, was_aborted: true };
-                    }
-
-                    if score > alpha && reduced_depth < depth - 1 {
-                        let research_result = self.negamax(depth - 1, ply + 1, -alpha - 1, -alpha, ForwardMove::NULL_MOVE, true);
-                        score = -research_result.score;
-
-                        if research_result.was_aborted {
-                            self.process_backward_move();
-                            return SearchResult { score: 0, best_move: ForwardMove::NULL_MOVE, was_aborted: true };
-                        }
-                    }
-                } else {
-                    // Non-PV Move Node: Scout with a narrow null-window search tracking alpha
-                    let search_result = self.negamax(depth - 1, ply + 1, -alpha - 1, -alpha, ForwardMove::NULL_MOVE, true);
-                    score = -search_result.score;
-
-                    if search_result.was_aborted {
-                        self.process_backward_move();
-                        return SearchResult { score: 0, best_move: ForwardMove::NULL_MOVE, was_aborted: true };
+                    // Reduce 1 extra ply when NNUE is in its +/- 100 CP sweet spot and trailing alpha
+                    if is_high_confidence && !is_pv && static_eval + 50 < alpha && legal_moves_played > 6 {
+                        search_depth = search_depth.saturating_sub(1).max(1);
                     }
                 }
 
-                // If a scout/LMR search reveals a better move, research with the full window
-                if score > alpha && score < beta {
-                    let search_result = self.negamax(depth - 1, ply + 1, -beta, -alpha, ForwardMove::NULL_MOVE, true);
-                    score = -search_result.score;
+                // Null-window probe (at reduced depth if LMR applied, otherwise at `next_depth`)
+                let probe_result = self.negamax(
+                    search_depth,
+                    ply + 1,
+                    -alpha - 1,
+                    -alpha,
+                    ForwardMove::NULL_MOVE,
+                    true,
+                );
+                if probe_result.was_aborted {
+                    self.process_backward_move();
+                    return SearchResult { score: 0, best_move: ForwardMove::NULL_MOVE, was_aborted: true };
+                }
+                score = -probe_result.score;
 
-                    if search_result.was_aborted {
+                // Full-depth null-window re-search if LMR reduced probe beat alpha
+                if score > alpha && search_depth < next_depth {
+                    let research_result = self.negamax(
+                        next_depth,
+                        ply + 1,
+                        -alpha - 1,
+                        -alpha,
+                        ForwardMove::NULL_MOVE,
+                        true,
+                    );
+                    if research_result.was_aborted {
                         self.process_backward_move();
                         return SearchResult { score: 0, best_move: ForwardMove::NULL_MOVE, was_aborted: true };
                     }
+                    score = -research_result.score;
+                }
+
+                // Full-window PV re-search if null-window probe failed high inside (alpha, beta)
+                if score > alpha && score < beta {
+                    let pv_result = self.negamax(
+                        next_depth,
+                        ply + 1,
+                        -beta,
+                        -alpha,
+                        ForwardMove::NULL_MOVE,
+                        true,
+                    );
+                    if pv_result.was_aborted {
+                        self.process_backward_move();
+                        return SearchResult { score: 0, best_move: ForwardMove::NULL_MOVE, was_aborted: true };
+                    }
+                    score = -pv_result.score;
                 }
             }
 
-            // Always undo the move exactly once per iteration at the bottom of the loop lifecycle
             self.process_backward_move();
 
-             if score > best_score {
+            // 5. Alpha-Beta Score & Cutoff Tracking
+            if score > best_score {
                 best_score = score;
                 best_move = *forward_move;
-            }
 
-            if score >= beta {
-                if matches!(
-                    best_move.move_type, 
-                    MoveFlag::MOVE | MoveFlag::PAWNOPENMOVE | MoveFlag::KINGSIDECASTLE | MoveFlag::QUEENSIDECASTLE
-                ) {
-                    self.store_killer_move(best_move, ply); 
+                if score > alpha {
+                    alpha = score;
+                    if alpha >= beta {
+                        // Update killer table on quiet beta-cutoffs
+                        if is_quiet && *forward_move != self.killer_move_table[ply_idx][0] {
+                            self.killer_move_table[ply_idx][1] = self.killer_move_table[ply_idx][0];
+                            self.killer_move_table[ply_idx][0] = *forward_move;
+                        }
+                        break;
+                    }
                 }
-                break; 
-            }
-
-            if score > alpha {
-                alpha = score;
             }
         }
 
@@ -793,6 +893,16 @@ impl SearchWorker {
         if self.is_three_move_repetition(ply) {
             return SearchResult { 
                 score: 0, 
+                best_move: ForwardMove::NULL_MOVE,
+                was_aborted: false,
+            };
+        }
+
+        // 2. Hard Depth/Ply Cap: prevents check-evasion explosions and stack overflows
+        if ply >= MAX_Q_PLY {
+            let stand_pat = self.static_eval();
+            return SearchResult {
+                score: stand_pat,
                 best_move: ForwardMove::NULL_MOVE,
                 was_aborted: false,
             };
@@ -897,24 +1007,31 @@ impl SearchWorker {
             only_tactical,
         );
 
-        // 5. Quiescence Search (Wider Delta Pruning Margin)
+        // 5. Quiescence Search (MVV-LVA Short-Circuit + Delta Pruning)
         for forward_move in &gen_moves {
-            // --- PRE-MOVE TACTICAL PRUNING GATES ---
+            // --- PRE-MOVE TACTICAL PRUNING GATES (Q-Search) ---
             if !king_in_check
                 && !matches!(forward_move.move_type, MoveFlag::PROMOTIONQUEEN)
             {
-                // 1. Strict Tactical Gate: Static exchange evaluation is exact and NNUE-independent
+                let victim_val = piece_value(self.chess_board.mailbox[forward_move.capture_sq as usize]);
+
+                // Lossless pre-check: skips ray-casting SEE when even an undefended capture cannot reach alpha
+                if pruning_baseline + victim_val + 200 < alpha {
+                    continue;
+                }
+
+                // 1. Exact SEE Gate
                 let exact_see_score = self.chess_board.static_exchange_evaluation(*forward_move);
                 if exact_see_score < 0 {
                     continue;
                 }
 
-                // 2. Wider Delta Pruning Gate
+                // 2. Exact Delta Pruning Gate
                 if pruning_baseline + exact_see_score + 200 < alpha {
                     continue;
                 }
             }
-
+            
             // --- STATE COMMITMENT & LEGALITY FILTER ---
             self.process_forward_move(*forward_move);
             if self.chess_board.is_previous_player_king_in_check() {
