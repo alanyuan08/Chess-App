@@ -1383,26 +1383,28 @@ impl ChessBoard {
         let promotion_bonus = promotion_bonus(forward_move);
         capture_gain[defender] = base_captured_value + promotion_bonus;
         current_piece_value += promotion_bonus;
-
+        
         // 1. Initial State Sandbox
-        let mut occupancy = self.occupied;
-        occupancy &= !(1u64 << from_sq);
-        occupancy &= !(1u64 << capture_sq);
-
+        let from_bb = 1u64 << from_sq;
+        let cap_bb = 1u64 << capture_sq;
+        let target_bb = 1u64 << target_sq;
 
         let mut side_pieces = [self.all_pieces[0], self.all_pieces[1]];
-        side_pieces[stm] &= !(1u64 << from_sq);
-        side_pieces[1 - stm] &= !(1u64 << capture_sq);
-        let mut occupancy = (side_pieces[0] | side_pieces[1]) | (1u64 << target_sq);
+        side_pieces[stm] &= !from_bb;
+        side_pieces[1 - stm] &= !cap_bb;
 
-        let initial_pinned_white = self.compute_pinned_mask_with_custom_state(self.occupied, self.all_pieces[0], 0);
-        let initial_pinned_black = self.compute_pinned_mask_with_custom_state(self.occupied, self.all_pieces[1], 1);
-        let pinned_masks = [initial_pinned_white, initial_pinned_black];
+        let mut occupancy = (side_pieces[0] | side_pieces[1]) | target_bb;
+
+        // Compute pinned pieces against the updated occupancy (handles en-passant & discovered pins)
+        let pinned_masks = [
+            self.compute_pinned_mask_with_custom_state(occupancy, side_pieces[0], 0),
+            self.compute_pinned_mask_with_custom_state(occupancy, side_pieces[1], 1),
+        ];
 
         // 2. Initial Attack Pool Construction
-        let mut attackers_pool = self.get_leaper_attacks_to(target_sq) 
-            | self.get_slider_attackers(target_sq, occupancy);
-        attackers_pool &= side_pieces[0] | side_pieces[1];
+        let mut attackers_pool = (self.get_leaper_attacks_to(target_sq)
+            | self.get_slider_attackers(target_sq, occupancy))
+            & (side_pieces[0] | side_pieces[1]);
 
         let mut loop_stm = 1 - stm;
 

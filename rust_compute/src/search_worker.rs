@@ -73,64 +73,50 @@ impl SearchWorker {
         }
     }
 
-    pub fn is_unsafe_for_training(&mut self, fen: &str, tolerance: i16) -> bool {
+    pub fn compute_volatility_target(&mut self, fen: &str) -> f32 {
         // 1. Reset per-position traversal & node counters cleanly
         self.nodes_processed = 0;
         self.position_stack_len = 0;
         self.history_index = 0;
         self.age = self.age.wrapping_add(1);
 
-        // 2. Load FEN & refresh self.board_accumulator
-        if self
-            .chess_board
-            .set_fen(fen, &mut self.board_accumulator)
-            .is_err()
-        {
-            return true;
-        }
+        // 1. Load FEN & refresh self.board_accumulator
+        let _ =  self.chess_board.set_fen(fen, &mut self.board_accumulator);
 
-        // 3. Reject positions where STM is already in check
-        if self.chess_board.is_in_check()
-        {
-            return true;
-        }
-
-        // 4. Static 30-cp NNUE evaluation
+        // 2. Static NNUE evaluation
         let static_a: i16 = self.chess_board.evaluate(
             &self.board_accumulator,
             &mut self.thread_buffer,
         );
-        let alpha_a = static_a.saturating_add(tolerance);
 
-        // 5. Open-window (beta = alpha_a + 2) depth-2 search:
-        // Sets `is_pv = true` so LMP, tactical futility, and strict SEE pruning stay OFF,
-        // ensuring quiet forks and tactical sacrifices are never pruned!
-        let beta_a = alpha_a.saturating_add(2);
+        // 3. Window [static_a, static_a + 50]
+        let alpha = static_a;
+        let beta = static_a.saturating_add(50);
+
         let search_res = self.negamax(
-            4,
+            2,
             0,
-            alpha_a,
-            beta_a,
+            alpha,
+            beta,
             ForwardMove::NULL_MOVE,
             false,
         );
-        search_res.score > alpha_a
+
+        // 5. Aggressive exponential ramp over [0.0, 50.0] (k = 8.0)
+        const K: f32 = 8.0;
+        let delta = ((search_res.score - static_a) as f32).clamp(0.0, 50.0);
+        (((K * (delta / 50.0)).exp() - 1.0) / (K.exp() - 1.0)).min(1.0)
+
     }
 
     #[inline(always)]
     fn get_aspiration_delta(score: i16) -> i16 {
         let abs_score = score.saturating_abs();
-        if abs_score <= 100 {
-            12
-        } else if abs_score <= 250 {
-            24
-        } else if abs_score <= 450 {
-            40
-        } else {
-            65
-        }
+        22 + ((abs_score > 100) as i16) * 12
+           + ((abs_score > 250) as i16) * 18
+           + ((abs_score > 450) as i16) * 28
     }
-
+    
     // Search Entry Point
     pub fn root_search(&mut self, engine_age: i8) -> (ForwardMove, usize, usize) {
         self.nodes_processed = 0;
@@ -518,19 +504,16 @@ impl SearchWorker {
         // 4. Reverse Futility Pruning (Non-PV nodes, confidence-scaled linear margin)
         let is_pv = beta - alpha > 1;
         let is_high_confidence = static_eval.abs() <= 100;
-        let max_rfp_depth = if is_high_confidence { 4 } else { 3 };
+        let hc = is_high_confidence as i16;
+        let max_rfp_depth = 3 + (hc as i8);
 
         if !is_pv
             && depth <= max_rfp_depth
             && !king_in_check
             && beta.abs() < MATE_THRESHOLD
         {
-            let rfp_margin = if is_high_confidence {
-                (45 * depth as i16) + 10
-            } else {
-                (65 * depth as i16) + 15
-            };
-
+            let rfp_margin = ((65 - hc * 20) * depth as i16) + (40 - hc * 5);
+            
             if static_eval - rfp_margin >= beta {
                 let aborted = self.stop_signal.load(Ordering::Relaxed);
                 let fail_soft_score = static_eval - rfp_margin;
@@ -638,18 +621,15 @@ impl SearchWorker {
         let is_high_confidence = static_eval.abs() <= 100;
         let can_prune_safely = !is_pv & !king_in_check & (alpha.abs() < MATE_THRESHOLD - 256);
 
-        // SEE pruning threshold: -50 * depth on PV nodes, 0 on non-PV
-        let see_threshold = (is_pv as i16) * (-50 * depth as i16);
-
         // Tactical capture futility: 45 when high-confidence, 90 otherwise
         let can_tactical_prune = can_prune_safely & (depth <= 4);
-        let base_tactical_margin = 90 - (is_high_confidence as i16) * 45;
+        let base_tactical_margin = 105 - (is_high_confidence as i16) * 45;
         let tactical_margin = base_tactical_margin + (60 * depth as i16);
 
-        // Late Move Pruning (LMP): tighter limit when high-confidence & trailing alpha by > 50 cp
+        // Late Move Pruning (LMP): tighter limit when high-confidence & trailing alpha by > 60 cp
         let can_lmp = can_prune_safely & (depth <= 3);
         let depth_sq = depth * depth;
-        let tighten_lmp = (is_high_confidence & (static_eval + 50 < alpha)) as i8;
+        let tighten_lmp = (is_high_confidence & (static_eval + 65 < alpha)) as i8;
         let lmp_limit = (3 + depth_sq) - tighten_lmp * (1 + (depth_sq + 1) / 2);
 
         let ply_idx = (ply as usize) & 127;
@@ -687,11 +667,6 @@ impl SearchWorker {
                 0
             };
 
-            // 1. Strict SEE Gate: Prune losing captures before even touching the board
-            if legal_moves_played > 0 && !king_in_check && is_capture && exact_see_score < see_threshold {
-                continue;
-            }
-
             self.process_forward_move(*forward_move);
 
             // Pseudo-legal move exposes own king to check: undo and skip
@@ -727,7 +702,6 @@ impl SearchWorker {
             // guaranteeing a full-width opponent reply against poisoned-pawn fork traps
             // while avoiding depth explosion on routine SEE == 0 trades.
             let extend_frontier = (depth == 1)
-                & (ply < 16)
                 & ((is_capture & (exact_see_score > 0)) | is_promotion);
 
             let next_depth = (depth - 1) + (extend_frontier as i8);
@@ -1035,7 +1009,29 @@ impl SearchWorker {
 
         // 5. Quiescence Search (MVV-LVA Short-Circuit + Delta Pruning)
         for forward_move in &gen_moves {
-            // --- PRE-MOVE TACTICAL PRUNING GATES ---
+            // --- PRE-MOVE TACTICAL PRUNING GATES (Q-Search) ---
+            if !king_in_check
+                && !matches!(forward_move.move_type, MoveFlag::PROMOTIONQUEEN)
+            {
+                let victim_val = piece_value(self.chess_board.mailbox[forward_move.capture_sq as usize]);
+
+                // Lossless pre-check: skips ray-casting SEE when even an undefended capture cannot reach alpha
+                if pruning_baseline + victim_val + 200 < alpha {
+                    continue;
+                }
+
+                // 1. Exact SEE Gate
+                let exact_see_score = self.chess_board.static_exchange_evaluation(*forward_move);
+                if exact_see_score < 0 {
+                    continue;
+                }
+
+                // 2. Exact Delta Pruning Gate
+                if pruning_baseline + exact_see_score + 200 < alpha {
+                    continue;
+                }
+            }
+            
             // --- STATE COMMITMENT & LEGALITY FILTER ---
             self.process_forward_move(*forward_move);
             if self.chess_board.is_previous_player_king_in_check() {

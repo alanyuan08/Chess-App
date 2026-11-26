@@ -439,7 +439,7 @@ def train_nnue_on_fens():
     )
 
     train_dir, val_dir = get_local_shard_directories()
-    optimal_train_workers = 6
+    optimal_train_workers = 7
     
     # 1. Instantiate both managers with identical lowercase tracking keys
     train_manager = InfiniteConveyorDatasetManager(
@@ -467,13 +467,21 @@ def train_nnue_on_fens():
         return val_manager.generator_fn()
 
     decay_strength = tf.Variable(0.0, dtype=tf.float32, trainable=False)
-    def smooth_dynamic_filter(x, y):
-        abs_y = tf.abs(tf.squeeze(y))
+    def vectorized_batch_filter(features, targets):
+        # targets shape: (BATCH_SIZE, 1) -> abs_y shape: (BATCH_SIZE,)
+        abs_y = tf.abs(tf.squeeze(targets, axis=-1))
         base_curve = 1.0 / (1.0 + tf.square(abs_y / 360.0))
         keep_prob = 1.0 - decay_strength * (1.0 - base_curve)
-        return tf.random.uniform([]) < keep_prob
+        mask = tf.random.uniform(tf.shape(keep_prob)) < keep_prob
 
-    # 3. Build structural dataset graph definitions EXACTLY ONCE with uniform infinite loops
+        return (
+            {
+                "active_features": tf.boolean_mask(features["active_features"], mask),
+                "passive_features": tf.boolean_mask(features["passive_features"], mask),
+            },
+            tf.boolean_mask(targets, mask),
+        )
+
     def get_fresh_train_dataset():
         return (
             tf.data.Dataset.from_generator(
@@ -483,27 +491,29 @@ def train_nnue_on_fens():
                         "active_features": tf.TensorSpec(shape=(BATCH_SIZE, MAX_ACTIVE_FEATURES), dtype=tf.int16),
                         "passive_features": tf.TensorSpec(shape=(BATCH_SIZE, MAX_ACTIVE_FEATURES), dtype=tf.int16),
                     },
-                    tf.TensorSpec(shape=(BATCH_SIZE, 1), dtype=tf.float32)
-                )
+                    tf.TensorSpec(shape=(BATCH_SIZE, 1), dtype=tf.float32),
+                ),
             )
-            .unbatch()
-            .repeat()
-            .filter(smooth_dynamic_filter)
-            .batch(BATCH_SIZE)
+            .map(vectorized_batch_filter, num_parallel_calls=tf.data.AUTOTUNE)
+            .rebatch(BATCH_SIZE, drop_remainder=True)
             .prefetch(tf.data.AUTOTUNE)
         )
 
+
     def get_fresh_val_dataset():
-        return tf.data.Dataset.from_generator(
-            generator=val_generator_wrapper,
-            output_signature=(
-                {
-                    "active_features": tf.TensorSpec(shape=(BATCH_SIZE, MAX_ACTIVE_FEATURES), dtype=tf.int16),
-                    "passive_features": tf.TensorSpec(shape=(BATCH_SIZE, MAX_ACTIVE_FEATURES), dtype=tf.int16),
-                },
-                tf.TensorSpec(shape=(BATCH_SIZE, 1), dtype=tf.float32)
+        return (
+            tf.data.Dataset.from_generator(
+                generator=val_generator_wrapper,
+                output_signature=(
+                    {
+                        "active_features": tf.TensorSpec(shape=(BATCH_SIZE, MAX_ACTIVE_FEATURES), dtype=tf.int16),
+                        "passive_features": tf.TensorSpec(shape=(BATCH_SIZE, MAX_ACTIVE_FEATURES), dtype=tf.int16),
+                    },
+                    tf.TensorSpec(shape=(BATCH_SIZE, 1), dtype=tf.float32),
+                ),
             )
-        ).repeat().prefetch(tf.data.AUTOTUNE) 
+            .prefetch(tf.data.AUTOTUNE)
+        )
 
     # 4. Instantiate static, backend-agnostic dataset graphs
     train_dataset = get_fresh_train_dataset()

@@ -6,7 +6,7 @@
   
 - **Compute Engine:** Rust Maturin for Adversarial Search - Negamax with Quiescence Search with advanced pruning techniques such as Killer Move Heuristics, Static Exchange Evaluation, Late Move Reduction, Principal Variation Search, and Null-Move Pruning.
 
-  The engine processes 20+ million nodes per second on Apple M4 Pro (8 Performance Threads) and averages 20+ depth on 15 second search. 
+  The engine processes 18+ million nodes per second on Apple M4 Pro (8 Performance Threads) and averages 22+ depth on 10 second search. 
 
 - **Move Generation:** BitBoard for board representation and BitBoard Magic Number to calculate moves for sliding pieces. 
 
@@ -76,7 +76,7 @@ If the current player or the opponent can gain a tactical advantage via a captur
 
 - **Data Augmentation & DeDuplication:** The filtered positions are augmented by rotating each board state 180 degrees to duplicate training positions and to reduce White/ Black Bias
 
-This yields a total of **260,472,584 unique positions**.
+This yields a total of **230,777,250 unique positions**.
 
 - **Target Optimization & Value Mapping:** The model transforms raw evaluation scores ($y_{\text{pawn}}$) into a bounded win probability scale $[0.0, 1.0]$, where 1.0 represents a guaranteed win, 0.5 a draw, and 0.0 a loss. This bounding suppresses extreme outliers and forces the network to focus its learning capacity on highly competitive positions.
 
@@ -84,8 +84,8 @@ This yields a total of **260,472,584 unique positions**.
 
 - **Schedule & Batching Dynamics:** 
   * **Total Duration:** 30 epochs.
-  * **Training Size:** 247,453,231
-  * **Validation Size:** 13,019,353
+  * **Training Size:** 219,248,633
+  * **Validation Size:** 11,528,617
   * **Batch Size:** 8,192 positions per step.
 - **Training Error:**
   * **Average Centipawn Error for positons +/- 2.5 Pawn Units**: 25 Centipawns

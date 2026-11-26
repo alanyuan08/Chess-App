@@ -36,9 +36,8 @@ fn get_eval_nnue(model_path: &str) -> PyResult<&'static NnueNetwork> {
 pub fn is_unsafe_batch(
     py: Python<'_>,
     fens: Vec<String>,
-    tolerance: i16,
     model_path: String,
-) -> PyResult<Vec<bool>> {
+) -> PyResult<Vec<f32>> {
     init_attack_tables();
     let nnue_ref = get_eval_nnue(&model_path)?;
 
@@ -51,9 +50,9 @@ pub fn is_unsafe_batch(
                     SearchWorker::new(tt, nnue_ref, stop, 0)
                 },
 
-                |worker, fen| worker.is_unsafe_for_training(fen, tolerance),
+                |worker, fen| worker.compute_volatility_target(fen),
             )
-            .collect::<Vec<bool>>()
+            .collect::<Vec<f32>>()
     });
 
     Ok(results)

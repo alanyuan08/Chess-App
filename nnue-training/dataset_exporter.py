@@ -1,7 +1,9 @@
 import os
 import sys
 import glob
+import random
 import numpy as np
+import argparse
 
 import chess
 import multiprocessing
@@ -31,7 +33,6 @@ PIECE_MAP = {
     'p': 6, 'b': 7, 'n': 8, 'r': 9, 'q': 10, 'k': 11
 }
 
-QSEARCH_TOLERANCE_CP = 60
 NUM_WORKERS = 5
 
 # --- DIRECTORY PATH AUTO-RESOLUTION ---
@@ -255,7 +256,7 @@ def run_parquet_cleaning_pass(
     file_path: str,
     output_dir: str,
     samples_per_file: int,
-    tolerance: int = QSEARCH_TOLERANCE_CP,
+    cut: bool = False
 ) -> int:
     """
     Processes a single raw Parquet file in 65,536-row batches using vectorized
@@ -288,17 +289,23 @@ def run_parquet_cleaning_pass(
         if chunk_df.empty:
             continue
 
-        depth_arr = chunk_df["depth"].fillna(0).astype(int).to_numpy()
-        knodes_arr = chunk_df["knodes"].fillna(0).astype(int).to_numpy()
+        if not cut and "depth" in chunk_df.columns and "knodes" in chunk_df.columns:
+            depth_arr = chunk_df["depth"].fillna(0).astype(int).to_numpy()
+            knodes_arr = chunk_df["knodes"].fillna(0).astype(int).to_numpy()
 
-        valid_work_mask = np.array(
-            [not is_invalid_training_row(d, k) for d, k in zip(depth_arr, knodes_arr)],
-            dtype=bool,
-        )
-        chunk_df = chunk_df[valid_work_mask]
-        depth_arr = depth_arr[valid_work_mask]
-        if chunk_df.empty:
-            continue
+            valid_work_mask = np.array(
+                [not is_invalid_training_row(d, k) for d, k in zip(depth_arr, knodes_arr)],
+                dtype=bool,
+            )
+            chunk_df = chunk_df[valid_work_mask]
+            depth_arr = depth_arr[valid_work_mask]
+            knodes_arr = knodes_arr[valid_work_mask]
+            if chunk_df.empty:
+                continue
+        else:
+            n = len(chunk_df)
+            depth_arr = np.full(n, 26, dtype=int)
+            knodes_arr = np.full(n, 1000, dtype=int)
 
         # 2. Vectorized Mate & Positional Centipawn Scoring
         has_mate = chunk_df["mate"].notna() & (chunk_df["mate"] != 0)
@@ -359,44 +366,45 @@ def run_parquet_cleaning_pass(
         if not candidate_fens:
             continue
 
-        # 4. Batched Rust 30-cp NNUE Q-Search Safety Gate
+        # 4. Batched Rust 50-cp NNUE Q-Search Safety Gate
         NNUE_MODEL_PATH = os.path.abspath(
             os.path.join(SCRIPT_DIR, "..", "nnue-training", "nnue_weights.bin")
         )
 
         # Inside run_parquet_cleaning_pass:
         unsafe_flags = rust_compute.is_unsafe_batch(
-            candidate_fens, tolerance, NNUE_MODEL_PATH
+            candidate_fens, NNUE_MODEL_PATH
         )
 
         # 5. Perspective Feature Generation & Shard Batching
-        for fen_str, board, active_pawn_score, depth_val, is_unsafe in zip(
+        for fen_str, board, active_pawn_score, depth_val, volatility_target in zip(
             candidate_fens,
             candidate_boards,
             candidate_scores,
             candidate_depths,
             unsafe_flags,
         ):
-            if is_unsafe:
-                continue
-
             is_black_turn = board.turn == chess.BLACK
             active_player_target = (
                 -active_pawn_score if is_black_turn else active_pawn_score
             )
 
-            # Original perspective
+            if cut:
+                # Subsample faint-signal positions (< 50 cp) at 20% to save space,
+                # while keeping 100% of the 50+ cp surge
+                if volatility_target < 1.0 and random.random() >= 0.2:
+                    continue
+
+                active_player_target = volatility_target
+            else:
+                # Hard filter for static NNUE training: reject anything in the 50+ cp volatile range
+                if volatility_target >= 1.0:
+                    continue
+
             active_indices, passive_indices = parse_fen_to_features(fen_str)
             active_orig, passive_orig = pad_indices(active_indices, passive_indices)
 
-            # Mirrored + horizontally flipped perspective
-            rotated_board = board.mirror().transform(chess.flip_horizontal)
-            rotated_fen = rotated_board.fen()
-
-            active_rot, passive_rot = parse_fen_to_features(rotated_fen)
-            active_rot_pad, passive_rot_pad = pad_indices(active_rot, passive_rot)
-
-            if len(batch_records) + 2 > samples_per_file:
+            if len(batch_records) + 1 > samples_per_file:
                 save_parquet_shard(
                     batch_records, output_dir, base_name, local_shard_counter
                 )
@@ -404,19 +412,6 @@ def run_parquet_cleaning_pass(
                 batch_records = []
                 local_shard_counter += 1
 
-            # Append rotated perspective
-            clean_rotated_fen = " ".join(rotated_fen.split()[:3])
-            batch_records.append(
-                {
-                    "active_indices": active_rot_pad,
-                    "passive_indices": passive_rot_pad,
-                    "target": active_player_target,
-                    "depth": depth_val,
-                    "fen": clean_rotated_fen,
-                }
-            )
-
-            # Append original perspective
             clean_orig_fen = " ".join(fen_str.split()[:3])
             batch_records.append(
                 {
@@ -433,6 +428,13 @@ def run_parquet_cleaning_pass(
         save_parquet_shard(batch_records, output_dir, base_name, local_shard_counter)
         file_processed_count += len(batch_records)
 
+    # Delete the source file
+    try:
+        os.remove(file_path)
+        print(f"[Deleted] Removed source file: {file_path}")
+    except OSError as e:
+        print(f"[Error] Could not delete {file_path}: {e}")
+
     print(
         f"[Finished] Shard {base_name} complete. Total cleaned: {file_processed_count}"
     )
@@ -441,10 +443,10 @@ def run_parquet_cleaning_pass(
 # =====================================================================
 # GLOBAL ENVELOPE EXECUTION MAIN FUNCTION
 # =====================================================================
-def main():
+def main(cut=False):
     os.makedirs(BINARY_OUTPUT_DIR, exist_ok=True)
 
-    raw_parquet_pattern = os.path.join(SCRIPT_DIR, INPUT_DIR, "data_*.parquet")
+    raw_parquet_pattern = os.path.join(SCRIPT_DIR, INPUT_DIR, "*.parquet")
     raw_files = sorted(glob.glob(raw_parquet_pattern))
 
     if not raw_files:
@@ -453,14 +455,14 @@ def main():
         sys.exit(1)
 
     print(f"Detected {len(raw_files)} raw shards ready for feature cleaning.")
-    print(f"Spawning {NUM_WORKERS} worker processes")
+    print(f"Spawning {NUM_WORKERS} worker processes (cut={cut})")
 
     total_global_processed = 0
 
     with ProcessPoolExecutor(max_workers=NUM_WORKERS) as executor:
         futures = {
             executor.submit(
-                run_parquet_cleaning_pass, file_path, BINARY_OUTPUT_DIR, DATA_SIZE
+                run_parquet_cleaning_pass, file_path, BINARY_OUTPUT_DIR, DATA_SIZE, cut
             ): file_path
             for file_path in raw_files
         }
@@ -487,4 +489,12 @@ if __name__ == "__main__":
     if sys.platform == "darwin":
         multiprocessing.set_start_method("spawn", force=True)
         
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--cut",
+        action="store_true",
+        help="Enable cut mode (defaults to False)",
+    )
+    args = parser.parse_args()
+
+    main(cut=args.cut)
